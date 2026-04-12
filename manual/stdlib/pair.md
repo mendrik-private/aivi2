@@ -4,6 +4,10 @@ Utilities for working with two-element tuples. Pairs are written `(A, B)` and ar
 
 ```aivi
 use aivi.pair (
+    first
+    second
+    mapFirst
+    mapSecond
     fst
     snd
     swap
@@ -18,36 +22,26 @@ use aivi.pair (
 
 ---
 
-## fst
+## first
 
 Extracts the first element of a pair.
 
 ```aivi
-```
-
-```aivi
-use aivi.pair (fst)
-
 type (Text, Int) -> Text
 func getKey = entry =>
-    fst entry
+    first entry
 ```
 
 ---
 
-## snd
+## second
 
 Extracts the second element of a pair.
 
 ```aivi
-```
-
-```aivi
-use aivi.pair (snd)
-
 type (Text, Int) -> Int
 func getValue = entry =>
-    snd entry
+    second entry
 ```
 
 ---
@@ -55,9 +49,6 @@ func getValue = entry =>
 ## swap
 
 Swaps the two elements of a pair, returning `(B, A)` from `(A, B)`.
-
-```aivi
-```
 
 ```aivi
 use aivi.pair (swap)
@@ -69,40 +60,30 @@ func flipEntry = entry =>
 
 ---
 
-## mapFst
+## mapFirst
 
 Applies a function to the first element, leaving the second unchanged.
 
 ```aivi
-```
-
-```aivi
-use aivi.pair (mapFst)
-
 use aivi.math (square)
 
 type (Int, Text) -> (Int, Text)
 func squareFst = pair =>
-    mapFst square pair
+    mapFirst square pair
 ```
 
 ---
 
-## mapSnd
+## mapSecond
 
 Applies a function to the second element, leaving the first unchanged.
 
 ```aivi
-```
-
-```aivi
-use aivi.pair (mapSnd)
-
 use aivi.math (abs)
 
 type (Text, Int) -> (Text, Int)
 func absValue = entry =>
-    mapSnd abs entry
+    mapSecond abs entry
 ```
 
 ---
@@ -110,9 +91,6 @@ func absValue = entry =>
 ## mapBoth
 
 Applies one function to the first element and another to the second.
-
-```aivi
-```
 
 ```aivi
 use aivi.pair (mapBoth)
@@ -134,9 +112,6 @@ func normalizePair = pair =>
 Constructs a pair from two separate values.
 
 ```aivi
-```
-
-```aivi
 use aivi.pair (fromPair)
 
 type Text -> Int -> (Text, Int)
@@ -149,9 +124,6 @@ func makeEntry = label score =>
 ## toPair
 
 Constructs a pair from two separate values. Useful as a named combinator when pairing results in a pipeline.
-
-```aivi
-```
 
 ```aivi
 use aivi.pair (toPair)
@@ -168,12 +140,16 @@ func labelScore = label score =>
 Creates a pair where both elements are the same value.
 
 ```aivi
-```
-
-```aivi
 use aivi.pair (duplicate)
 
 type Int -> (Int, Int)
 func mirror = n =>
     duplicate n
 ```
+
+---
+
+## Compatibility aliases
+
+`fst`, `snd`, `mapFst`, and `mapSnd` remain available for compatibility, but new code should
+prefer `first`, `second`, `mapFirst`, and `mapSecond`.

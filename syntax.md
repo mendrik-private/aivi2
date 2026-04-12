@@ -613,7 +613,7 @@ Rules:
 | `*|>` | `xs *|> body` | map / fan-out; pure mapping only |
 | `<|*` | `xs *|> f <|* g` | explicit join after `*|>` only |
 | `|` | `x | observer` | tap; ignores observer result |
-| `!|>` | `x !|> validate` | validation stage; function must return `Result` or `Validation` |
+| `!|>` | `x !|> validate` | dependent validation stage; body must return `Result` or `Validation`, preserving any existing carrier/error type |
 | `~|>` | `signal ~|> seed` | previous committed value, seeded form |
 | `+|>` | `signal +|> seed step` | stateful accumulation |
 | `-|>` | `signal -|> diffFn` | diff current vs previous |

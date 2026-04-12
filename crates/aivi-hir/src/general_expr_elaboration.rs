@@ -25,8 +25,8 @@ use crate::{
     },
     validate::{
         GateEqualityEvidence, GateExprEnv, GateIssue, GateProjectionStep, GateRecordField,
-        GateType, GateTypeContext, PolyTypeBindings, extend_pipe_env_with_stage_memos,
-        pipe_stage_expr_env, truthy_falsy_pair_stages,
+        GateType, GateTypeContext, PolyTypeBindings, ValidateStageSubject,
+        extend_pipe_env_with_stage_memos, pipe_stage_expr_env, truthy_falsy_pair_stages,
     },
 };
 
@@ -3243,36 +3243,15 @@ impl<'a> GeneralExprElaborator<'a> {
                         ),
                     }]);
                 }
-                PipeStageKind::Validate { expr } => {
+                PipeStageKind::Validate { .. } => {
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
                         && current.is_signal()
                     {
                         break;
                     }
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let result_subject = self
-                        .typing
-                        .infer_transform_stage(*expr, &stage_env, &current)
-                        .ok_or_else(|| {
-                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                        })?;
-                    let body = self.lower_body_expr(
-                        *expr,
-                        &stage_env,
-                        Some(current.gate_payload()),
-                        None,
-                    )?;
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.gate_payload().clone(),
-                        result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::Transform {
-                            mode: PipeTransformMode::Replace,
-                            expr: body,
-                        },
-                    });
+                    let lowered_stage = self.lower_validate_stage(stage, &pipe_env, &current)?;
+                    let result_subject = lowered_stage.result_subject.clone();
+                    lowered.push(lowered_stage);
                     extend_pipe_env_with_stage_memos(
                         &mut pipe_env,
                         stage,
@@ -3462,6 +3441,153 @@ impl<'a> GeneralExprElaborator<'a> {
                 },
             },
         })
+    }
+
+    fn lower_validate_stage(
+        &mut self,
+        stage: &crate::PipeStage,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Result<GateRuntimePipeStage, Vec<GeneralExprBlocker>> {
+        let PipeStageKind::Validate { expr } = &stage.kind else {
+            unreachable!("validate lowering only handles !|> stages");
+        };
+        let stage_env = pipe_stage_expr_env(env, stage, subject);
+        let result_subject = self
+            .typing
+            .infer_validate_stage_info(*expr, &stage_env, subject)
+            .actual_gate_type()
+            .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: stage.span }])?;
+        let result_payload = result_subject.gate_payload().clone();
+        let body = match subject.validate_stage_subject() {
+            ValidateStageSubject::Plain { input } => {
+                self.lower_body_expr(*expr, &stage_env, Some(&input), Some(&result_payload))?
+            }
+            ValidateStageSubject::Result { error, value } => self
+                .lower_short_circuit_validate_body(
+                    stage.span,
+                    *expr,
+                    &stage_env,
+                    subject.gate_payload(),
+                    &value,
+                    &error,
+                    BuiltinTerm::Ok,
+                    BuiltinTerm::Err,
+                    &result_payload,
+                )?,
+            ValidateStageSubject::Validation { error, value } => self
+                .lower_short_circuit_validate_body(
+                    stage.span,
+                    *expr,
+                    &stage_env,
+                    subject.gate_payload(),
+                    &value,
+                    &error,
+                    BuiltinTerm::Valid,
+                    BuiltinTerm::Invalid,
+                    &result_payload,
+                )?,
+        };
+        Ok(GateRuntimePipeStage {
+            span: stage.span,
+            subject_memo: stage.subject_memo,
+            result_memo: stage.result_memo,
+            input_subject: subject.gate_payload().clone(),
+            result_subject: result_subject.clone(),
+            kind: GateRuntimePipeStageKind::Transform {
+                mode: PipeTransformMode::Replace,
+                expr: body,
+            },
+        })
+    }
+
+    fn lower_short_circuit_validate_body(
+        &mut self,
+        span: SourceSpan,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        carrier_subject: &GateType,
+        success_payload: &GateType,
+        failure_payload: &GateType,
+        success_constructor: BuiltinTerm,
+        failure_constructor: BuiltinTerm,
+        result_ty: &GateType,
+    ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
+        let success_body =
+            self.lower_body_expr(expr_id, env, Some(success_payload), Some(result_ty))?;
+        if !success_body.ty.same_shape(result_ty) {
+            return Err(vec![GeneralExprBlocker::UnknownExprType { span }]);
+        }
+        let failure_body = self.apply_builtin_constructor_to_ambient(
+            span,
+            failure_constructor,
+            failure_payload,
+            result_ty,
+        );
+        let nested = GateRuntimePipeExpr {
+            head: Box::new(GateRuntimeExpr {
+                span,
+                ty: carrier_subject.clone(),
+                kind: GateRuntimeExprKind::AmbientSubject,
+            }),
+            stages: vec![GateRuntimePipeStage {
+                span,
+                subject_memo: None,
+                result_memo: None,
+                input_subject: carrier_subject.clone(),
+                result_subject: result_ty.clone(),
+                kind: GateRuntimePipeStageKind::TruthyFalsy {
+                    truthy: GateRuntimeTruthyFalsyBranch {
+                        span,
+                        constructor: success_constructor,
+                        payload_subject: Some(success_payload.clone()),
+                        result_type: success_body.ty.clone(),
+                        body: success_body,
+                    },
+                    falsy: GateRuntimeTruthyFalsyBranch {
+                        span,
+                        constructor: failure_constructor,
+                        payload_subject: Some(failure_payload.clone()),
+                        result_type: failure_body.ty.clone(),
+                        body: failure_body,
+                    },
+                },
+            }],
+        };
+        Ok(GateRuntimeExpr {
+            span,
+            ty: result_ty.clone(),
+            kind: GateRuntimeExprKind::Pipe(nested),
+        })
+    }
+
+    fn apply_builtin_constructor_to_ambient(
+        &self,
+        span: SourceSpan,
+        constructor: BuiltinTerm,
+        payload_ty: &GateType,
+        result_ty: &GateType,
+    ) -> GateRuntimeExpr {
+        let callee = GateRuntimeExpr {
+            span,
+            ty: GateType::Arrow {
+                parameter: Box::new(payload_ty.clone()),
+                result: Box::new(result_ty.clone()),
+            },
+            kind: GateRuntimeExprKind::Reference(GateRuntimeReference::Builtin(constructor)),
+        };
+        GateRuntimeExpr {
+            span,
+            ty: result_ty.clone(),
+            kind: GateRuntimeExprKind::Apply {
+                callee: Box::new(callee),
+                arguments: vec![GateRuntimeExpr {
+                    span,
+                    ty: payload_ty.clone(),
+                    kind: GateRuntimeExprKind::AmbientSubject,
+                }],
+            },
+        }
     }
 
     fn lower_body_expr(

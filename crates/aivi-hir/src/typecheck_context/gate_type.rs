@@ -50,6 +50,57 @@ pub enum GateType {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ValidateStageSubject {
+    Plain {
+        input: GateType,
+    },
+    Result {
+        error: GateType,
+        value: GateType,
+    },
+    Validation {
+        error: GateType,
+        value: GateType,
+    },
+}
+
+impl ValidateStageSubject {
+    pub(crate) fn input_subject(&self) -> &GateType {
+        match self {
+            Self::Plain { input } => input,
+            Self::Result { value, .. } | Self::Validation { value, .. } => value,
+        }
+    }
+
+    pub(crate) fn expected_result_description(&self) -> String {
+        match self {
+            Self::Plain { .. } => "Result _ _ or Validation _ _".to_owned(),
+            Self::Result { error, .. } => format!("Result {} _", error),
+            Self::Validation { error, .. } => format!("Validation {} _", error),
+        }
+    }
+
+    pub(crate) fn accepts_result(&self, result: &GateType) -> bool {
+        match (self, result) {
+            (Self::Plain { .. }, GateType::Result { .. } | GateType::Validation { .. }) => true,
+            (
+                Self::Result { error, .. },
+                GateType::Result {
+                    error: stage_error, ..
+                },
+            ) => error.same_shape(stage_error),
+            (
+                Self::Validation { error, .. },
+                GateType::Validation {
+                    error: stage_error, ..
+                },
+            ) => error.same_shape(stage_error),
+            _ => false,
+        }
+    }
+}
+
 impl GateType {
     pub(crate) fn is_bool(&self) -> bool {
         matches!(self, Self::Primitive(BuiltinType::Bool))
@@ -70,6 +121,22 @@ impl GateType {
         match self {
             Self::Signal(inner) => inner,
             other => other,
+        }
+    }
+
+    pub(crate) fn validate_stage_subject(&self) -> ValidateStageSubject {
+        match self.gate_payload() {
+            Self::Result { error, value } => ValidateStageSubject::Result {
+                error: error.as_ref().clone(),
+                value: value.as_ref().clone(),
+            },
+            Self::Validation { error, value } => ValidateStageSubject::Validation {
+                error: error.as_ref().clone(),
+                value: value.as_ref().clone(),
+            },
+            other => ValidateStageSubject::Plain {
+                input: other.clone(),
+            },
         }
     }
 
@@ -927,7 +994,7 @@ impl GateType {
         }
     }
 
-    fn expand_transparent_import_alias(&self) -> Option<GateType> {
+    pub(crate) fn expand_transparent_import_alias(&self) -> Option<GateType> {
         let Self::OpaqueImport {
             arguments,
             definition: Some(definition),

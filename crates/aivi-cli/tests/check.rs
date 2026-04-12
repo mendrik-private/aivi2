@@ -827,6 +827,34 @@ fn check_accepts_pipe_stage_memo_fixture() {
 }
 
 #[test]
+fn check_rejects_non_validation_validate_stage_body() {
+    let dir = TempDir::new("check-invalid-validate-stage");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "fun broken:Int = value:Int =>\n",
+            "    value\n",
+            "     !|> . + 1\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected non-validation !|> body to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("!|>") && stderr.contains("Result _ _ or Validation _ _"),
+        "expected !|> validation-stage diagnostic, got stderr: {stderr}"
+    );
+}
+
+#[test]
 fn check_reports_regex_validation_from_hir() {
     let (_dir, path) = isolated_fixture_path("milestone-1/invalid/regex_invalid_quantifier.aivi");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))

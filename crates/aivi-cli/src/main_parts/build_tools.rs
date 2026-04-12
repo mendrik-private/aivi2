@@ -687,8 +687,8 @@ USAGE:
 
 COMMANDS:
     check [path]                    Type-check a module, directory, or all apps
-    compile <path> [-o <object>]    Compile a module to native object code
-    build <path> -o <dir> [opts]    Package a runnable GTK app bundle
+    compile <path> [-o <object>]    Compile a module to native object code only
+    build <path> -o <dir> [opts]    Package a runnable runtime+source GTK bundle
     run [path] [opts]               Launch a live GTK app
     execute <path> [-- args...]     Run a headless Task program
     test <path>                     Run @test declarations in a workspace
@@ -751,6 +751,10 @@ DESCRIPTION:
     Lowers the module through typed core, typed lambda IR, backend IR,
     and Cranelift codegen to produce a native object file. Includes all
     compiler stages from parsing through machine code generation.
+
+    This command stops at object emission. It does not currently link a
+    standalone runnable GTK application. Use `aivi build` for the current
+    runnable bundle path.
 "
         }
         "build" => {
@@ -778,9 +782,12 @@ OPTIONS:
             (e.g. \"app.main\"). When omitted, uses the default view.
 
 DESCRIPTION:
-    Compiles a GTK/libadwaita application and packages it into a
-    self-contained bundle directory. The bundle includes compiled code,
-    runtime assets, and the necessary metadata to launch the app.
+    Validates the same runnable surface as `aivi run` and packages the
+    current runtime binary, bundled stdlib, and reachable workspace files
+    into a runnable bundle directory.
+
+    This is the current runnable deployment path. It is distinct from
+    `aivi compile`, which emits object code only.
 "
         }
         "run" => {

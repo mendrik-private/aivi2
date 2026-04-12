@@ -1483,10 +1483,46 @@ impl<'a> TypeChecker<'a> {
                     Some(ok && no_new_diagnostics)
                 }
                 GateType::OpaqueImport { import, .. } => {
+                    if let Some(GateType::Record(fields)) = expected.expand_transparent_import_alias()
+                    {
+                        let checkpoint = self.diagnostics.len();
+                        let mut constraints = Vec::new();
+                        let ok = self.check_record_expr(
+                            self.module.exprs()[expr_id].span,
+                            &record,
+                            &fields,
+                            env,
+                            value_stack,
+                            &mut constraints,
+                        );
+                        let solved = self.handle_constraints(&constraints);
+                        let no_new_diagnostics = self.diagnostics.len() == checkpoint;
+                        if ok && no_new_diagnostics && !solved.default_record_fields.is_empty() {
+                            self.default_record_elisions.push(DefaultRecordElision {
+                                record_expr: expr_id,
+                                fields: solved.default_record_fields,
+                            });
+                        }
+                        return Some(ok && no_new_diagnostics);
+                    }
                     // Imported record type: look up fields from the import binding metadata
                     // and validate each record field against its expected type.
                     let field_types: Option<HashMap<String, GateType>> = {
-                        let binding = &self.module.imports()[*import];
+                        let Some(binding) = self.module.imports().get(*import) else {
+                            self.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "expected `{expected}` but found a record literal"
+                                ))
+                                .with_code(code("type-mismatch"))
+                                .with_primary_label(
+                                    self.module.exprs()[expr_id].span,
+                                    format!(
+                                        "`{expected}` is opaque here, so this record literal cannot be checked"
+                                    ),
+                                ),
+                            );
+                            return Some(false);
+                        };
                         if let ImportBindingMetadata::TypeConstructor {
                             fields: Some(record_fields),
                             ..
@@ -2678,7 +2714,23 @@ impl<'a> TypeChecker<'a> {
                 }
                 // Handle `<|` patching of imported record types (OpaqueImport with TypeConstructor fields).
                 if let GateType::OpaqueImport { import, .. } = current {
-                    let binding = &self.module.imports()[*import];
+                    if let Some(GateType::Record(fields)) = current.expand_transparent_import_alias() {
+                        if let Some(field) = fields.iter().find(|f| f.name == name.text()) {
+                            return self.check_patch_selector_segments(
+                                segments,
+                                index + 1,
+                                &field.ty,
+                                instruction,
+                                env,
+                                value_stack,
+                            );
+                        }
+                        self.emit_unknown_patch_field(*span, name.text(), *dotted, current);
+                        return false;
+                    }
+                    let Some(binding) = self.module.imports().get(*import) else {
+                        return false;
+                    };
                     if let crate::ImportBindingMetadata::TypeConstructor {
                         fields: Some(record_fields),
                         ..

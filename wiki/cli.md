@@ -13,8 +13,8 @@ The `aivi` binary provides the developer-facing command-line interface.
 | `aivi check <file>` | Type-check a file and report diagnostics |
 | `aivi run <file>` | Run an AIVI application (GTK app with live runtime) |
 | `aivi execute <expr>` | Execute an expression and print the result |
-| `aivi compile <file>` | AOT compile to a native binary |
-| `aivi build` | Build the workspace |
+| `aivi compile <file>` | Compile to native object code; not yet a linked runnable app |
+| `aivi build` | Package the current runtime binary, stdlib, and reachable workspace files into a runnable bundle |
 | `aivi test` | Run AIVI test files |
 | `aivi fmt <file>` | Format a source file (idempotent) |
 | `aivi lsp` | Start the LSP server on stdio |
@@ -76,5 +76,15 @@ Pre-existing known failures:
 - `aivi-core`: `snapshot_core_func_module`, `snapshot_core_value_module`
 - `aivi-backend`: `workspace_imported_builtin_class_members_lower_through_backend_runtime`
 - `aivi-runtime`: `dbus_method_source_replies_with_configured_body` (flaky GLib threading), `linked_runtime_executes_signal_fanout_map_and_join_pipelines` (layout mismatch)
+
+## Execution boundary
+
+- `aivi compile` lowers through Cranelift and can emit an object file, but it stops before runtime
+  startup / final app linking.
+- `aivi build` is the current runnable packaging path. It validates the same runnable surface as
+  `aivi run`, then assembles a bundle from the runtime binary, bundled stdlib, and reachable
+  workspace sources.
+- Backend execution can still attach compiled object artifacts while constructing a lazy-JIT engine,
+  so object emission and runtime execution currently coexist rather than replacing each other.
 
 *See also: [lsp-server.md](lsp-server.md), [architecture.md](architecture.md)*

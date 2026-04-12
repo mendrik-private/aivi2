@@ -55,3 +55,19 @@ These are good candidates for boxing or smaller payload factoring where hot-path
 
 - `aot-runtime-link-boundary`
 - `stdlib-undocumented-low-level-modules`
+
+## Follow-up implementation slice
+
+The current follow-up slice closed the highest-confidence docs/API parity issues:
+
+- documented `aivi.api`
+- documented the compiler-backed low-level modules `aivi.arithmetic`, `aivi.bits`, and
+  `aivi.data.json`
+- updated stdlib navigation/index entries so those modules are discoverable
+- corrected the CLI help/wiki wording so `compile` vs `build` matches the real runtime boundary
+- shifted pair docs and prelude guidance toward `first` / `second` / `mapFirst` / `mapSecond`
+
+## Remaining tracked gap
+
+- `aot-runtime-link-boundary` — native object emission exists, but `aivi compile` still does not
+  produce a fully linked runnable artifact. `aivi build` remains the current deployment path.

@@ -165,8 +165,8 @@ value today = Date 2024 6 15
 Under-application is legal — a partially applied constructor is a function:
 
 ```aivi
-value mkRow = Cell 5
-value cell = mkRow 3
+value rowAtX5 = Cell 5
+value cell = rowAtX5 3
 ```
 
 Pattern matching gives each positional field a name at the use site:

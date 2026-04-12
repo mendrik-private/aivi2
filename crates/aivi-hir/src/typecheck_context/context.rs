@@ -6532,6 +6532,34 @@ impl<'a> GateTypeContext<'a> {
         self.finalize_expr_info(info)
     }
 
+    pub(crate) fn infer_validate_stage_info(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let plan = subject.validate_stage_subject();
+        let mut info = self.infer_pipe_body(expr_id, env, plan.input_subject());
+        let Some(body_ty) = info.actual_gate_type().or(info.ty.clone()) else {
+            return self.finalize_expr_info(info);
+        };
+        if !plan.accepts_result(&body_ty) {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[expr_id].span,
+                stage: "!|>",
+                expected: plan.expected_result_description(),
+                actual: body_ty.to_string(),
+            });
+            info.ty = None;
+            return self.finalize_expr_info(info);
+        }
+        info.ty = Some(match subject {
+            GateType::Signal(_) => GateType::Signal(Box::new(body_ty)),
+            _ => body_ty,
+        });
+        self.finalize_expr_info(info)
+    }
+
     pub(crate) fn infer_gate_stage_info(
         &mut self,
         expr_id: ExprId,
@@ -6850,7 +6878,7 @@ impl<'a> GateTypeContext<'a> {
                 PipeStageKind::Validate { expr } => {
                     stage_index += 1;
                     let stage_env = pipe_stage_expr_env(&pipe_env, stage, &subject);
-                    self.infer_transform_stage_info(*expr, &stage_env, &subject)
+                    self.infer_validate_stage_info(*expr, &stage_env, &subject)
                 }
             };
             let result_subject = stage_info.actual_gate_type().or(stage_info.ty.clone());

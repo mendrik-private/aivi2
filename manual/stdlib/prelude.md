@@ -199,7 +199,7 @@ value pair : (Int, Text) = (
     "hello"
 )
 
-value first : Int = fst pair
-value second : Text = snd pair
+value firstValue : Int = first pair
+value secondValue : Text = second pair
 value swapped : (Text, Int) = swap pair
 ```
