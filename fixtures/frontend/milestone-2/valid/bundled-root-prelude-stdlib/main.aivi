@@ -34,7 +34,9 @@ use aivi.prelude (
     Monad
     Foldable
     getOrElse
-    foldOption
+    isValid
+    validationToResult
+    validationGetOrElse
     mapOr
     isSomeAnd
     withDefault
@@ -60,16 +62,13 @@ type NameSignal = Signal Text
 
 type CountTask = Task Text Int
 
-type CheckedName =
-  Validation Text Text
-
 value maybeName : Option Text = Some "Ada"
 value missingName : Option Text = None
 value chosenName : Text = getOrElse "guest" missingName
 value okCount : Result Text Int = Ok 2
 value errCount : Result Text Int = Err "missing"
 value chosenCount : Int = withDefault 0 okCount
-value checkedName : CheckedName = Valid "Ada"
+value checkedName : Validation Text Text = Valid "Ada"
 
 value nameCount : Int =
     length [
@@ -82,10 +81,6 @@ value firstName : Option Text =
         "Ada",
         "Grace"
     ]
-
-type Int -> Int -> Bool
-func smaller = left right =>
-    left < right
 
 type Int -> (Option Int)
 func keepSmall = x => x < 3
@@ -120,15 +115,19 @@ type Text -> Text
 func punctuate = x =>
     append x "!"
 
-value leastCount : Int = min smaller 4 2
-value greatestCount : Int = max smaller 4 2
+value leastCount : Int = min 4 2
+value greatestCount : Int = max 4 2
 value explicitLess : Ordering = Less
 
 value leastOfCounts : Int =
-    minOf smaller 5 [
+    minOf 5 [
         3,
         4
     ]
+
+value checkedNameOk : Bool = isValid checkedName
+value checkedNameResult : Result Text Text = validationToResult checkedName
+value checkedNameValue : Text = validationGetOrElse "guest" checkedName
 
 value labels : Text =
     join ", " [
@@ -154,7 +153,7 @@ value filteredCounts : List Int =
         2
     ]
 
-value foldedMaybeName : Text = foldOption "guest" punctuate maybeName
+value foldedMaybeName : Text = mapOr "guest" punctuate maybeName
 value mappedMaybeCount : Int = mapOr 0 addOne (Some 2)
 value maybeCountSmall : Bool = isSomeAnd smallerThanThree (Some 2)
 

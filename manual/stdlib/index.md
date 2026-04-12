@@ -30,13 +30,13 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 
 | Module | Description | Key exports |
 | --- | --- | --- |
-| [aivi.prelude](prelude.md) | Convenience re-exports and built-in types | `Option`, `Result`, `Signal`, `Eq`, `Ord`, `Functor` |
+| [aivi.prelude](prelude.md) | Convenience re-exports and built-in types | `Validation`, `isValid`, `validationToResult`, `min`, `Functor` |
 | [aivi.async](async.md) | Async operation lifecycle tracker | `AsyncTracker`, `step`, `isPending`, `isDone`, `isFailed` |
 | [aivi.option](option.md) | Values that may be missing | `getOrElse`, `map`, `flatMap`, `toResult` |
 | [aivi.result](result.md) | Success-or-error values | `withDefault`, `map`, `mapErr`, `flatMap` |
 | [aivi.validation](validation.md) | Accumulating validation for independent inputs | `getOrElse`, `mapErr`, `zipValidation`, `fold` |
 | [aivi.core.either](either.md) | Disjoint union holding one of two alternatives | `Left`, `Right`, `mapLeft`, `mapRight` |
-| [aivi.list](list.md) | Purely functional list operations | `map`, `filter`, `reduce`, `append`, `flatten` |
+| [aivi.list](list.md) | Purely functional list operations | `map`, `filter`, `maximum`, `unique`, `sort` |
 | [aivi.nonEmpty](nonEmpty.md) | Non-empty list guaranteed at the type level | `head`, `last`, `singleton`, `cons`, `fromList` |
 | [aivi.pair](pair.md) | Two-element tuples | `first`, `second`, `mapFirst`, `mapSecond` |
 | [aivi.matrix](matrix.md) | Rectangular 2D collections | `init`, `fromRows`, `width`, `height`, `rows` |
@@ -45,7 +45,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.core.range](range.md) | Inclusive integer range `[start, end]` | `start`, `end`, `toList`, `contains` |
 | [aivi.core.fn](fn.md) | Higher-order function combinators | `compose`, `const`, `flip`, `combine` |
 | [aivi.arithmetic](arithmetic.md) | Compiler-backed integer arithmetic intrinsics | `add`, `sub`, `mul`, `div`, `mod`, `neg` |
-| [aivi.order](order.md) | Comparison utilities parameterised by a comparator | `compare`, `minOf`, `maxOf`, `descending` |
+| [aivi.order](order.md) | `Ord`-driven ordering plus explicit comparator helpers | `min`, `max`, `minBy`, `clampBy` |
 | [aivi.bool](bool.md) | Boolean helpers | `and`, `or`, `not`, `all`, `any` |
 | [aivi.bits](bits.md) | Compiler-backed bitwise integer intrinsics | `and`, `or`, `xor`, `not`, `shiftLeft` |
 | [aivi.defaults](defaults.md) | Default values for common types | `defaultText`, `defaultInt`, `defaultBool` |

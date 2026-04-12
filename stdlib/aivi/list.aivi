@@ -375,25 +375,35 @@ type List Int -> Int
 func product = items => items
   |> reduce productStep 1
 
-type (A -> A -> Bool) -> A -> A -> A
-func chooseGreater = compare best item => compare best item
+type Ord A => A -> A -> A
+func chooseGreater = best item => best < item
+ T|> item
+ F|> best
+
+type Ord A => A -> A -> A
+func chooseLesser = best item => item < best
  T|> item
  F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func chooseLesser = compare best item => compare item best
+func chooseGreaterBy = compare best item => compare best item
+ T|> item
+ F|> best
+
+type (A -> A -> Bool) -> A -> A -> A
+func chooseLesserBy = compare best item => compare item best
  T|> item
  F|> best
 
 type (A -> A -> Bool) -> (List A) -> (Option A)
-func maximum = compare items => head items
+func maximumBy = compare items => head items
  ||> None       -> None
- ||> Some first -> Some (reduce (chooseGreater compare) first (tailOrEmpty items))
+ ||> Some first -> Some (reduce (chooseGreaterBy compare) first (tailOrEmpty items))
 
 type (A -> A -> Bool) -> (List A) -> (Option A)
-func minimum = compare items => head items
+func minimumBy = compare items => head items
  ||> None       -> None
- ||> Some first -> Some (reduce (chooseLesser compare) first (tailOrEmpty items))
+ ||> Some first -> Some (reduce (chooseLesserBy compare) first (tailOrEmpty items))
 
 type (A -> Bool) -> (List A) -> Bool
 func contains = predicate items =>
@@ -462,14 +472,19 @@ type List (A, B) -> (UnzipState A B)
 func unzip = pairs => pairs
   |> reduce unzipStep { lefts: [], rights: [] }
 
+type Eq A => (List A) -> A -> (List A)
+func uniqueStep = acc item => any (. == item) acc
+ T|> acc
+ F|> append acc [item]
+
 type (A -> A -> Bool) -> (List A) -> A -> (List A)
-func uniqueStep = eq acc item => any (eq item) acc
+func uniqueByStep = eq acc item => any (eq item) acc
  T|> acc
  F|> append acc [item]
 
 type (A -> A -> Bool) -> (List A) -> (List A)
-func unique = eq items => items
-  |> reduce (uniqueStep eq) []
+func uniqueBy = eq items => items
+  |> reduce (uniqueByStep eq) []
 
 type InsertState A = {
     inserted: Bool,
@@ -495,24 +510,43 @@ func doSkipInsert = state current =>
         items: append state.items [current]
     }
 
-type (A -> A -> Bool) -> A -> (InsertState A) -> A -> (InsertState A)
-func insertCheckOrder = compare item state current => compare item current
+type Ord A => A -> (InsertState A) -> A -> (InsertState A)
+func insertStep = item state current => state.inserted
+ T|> { inserted: True, items: append state.items [current] }
+ F|> insertCheckOrder item state current
+
+type Ord A => A -> (InsertState A) -> A -> (InsertState A)
+func insertCheckOrder = item state current => item < current
  T|> doInsertBefore state item current
  F|> doSkipInsert state current
 
+type Ord A => A -> (List A) -> (List A)
+func insertSorted = item sorted => sorted
+  |> reduce (insertStep item) { inserted: False, items: [] }
+  |> finalizeSortInsert item
+
+type Ord A => (List A) -> A -> (List A)
+func sortStep = sorted item =>
+    insertSorted item sorted
+
 type (A -> A -> Bool) -> A -> (InsertState A) -> A -> (InsertState A)
-func insertStep = compare item state current => state.inserted
+func insertByStep = compare item state current => state.inserted
  T|> { inserted: True, items: append state.items [current] }
- F|> insertCheckOrder compare item state current
+ F|> insertByCheckOrder compare item state current
+
+type (A -> A -> Bool) -> A -> (InsertState A) -> A -> (InsertState A)
+func insertByCheckOrder = compare item state current => compare item current
+ T|> doInsertBefore state item current
+ F|> doSkipInsert state current
 
 type (A -> A -> Bool) -> A -> (List A) -> (List A)
-func insertSorted = compare item sorted => sorted
-  |> reduce (insertStep compare item) { inserted: False, items: [] }
+func insertSortedBy = compare item sorted => sorted
+  |> reduce (insertByStep compare item) { inserted: False, items: [] }
   |> finalizeSortInsert item
 
 type (A -> A -> Bool) -> (List A) -> A -> (List A)
 func sortByStep = compare sorted item =>
-    insertSorted compare item sorted
+    insertSortedBy compare item sorted
 
 type (A -> A -> Bool) -> (List A) -> (List A)
 func sortBy = compare items => items
@@ -546,6 +580,8 @@ export sum
 export product
 export maximum
 export minimum
+export maximumBy
+export minimumBy
 export contains
 export indexOf
 export intersperse
@@ -553,6 +589,8 @@ export zip
 export zipWith
 export unzip
 export unique
+export uniqueBy
+export sort
 export sortBy
 export any
 export all

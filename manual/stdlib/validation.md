@@ -2,6 +2,8 @@
 
 Utilities for working with `Validation E A` — like `Result`, but with an accumulation-oriented applicative path for independent failures. The current executable accumulation surface is `zipValidation`, which combines two `Validation (NonEmptyList E)` values and collects errors from both sides.
 
+When you want the ambient prelude surface, these same operations are re-exported as `isValid`, `isInvalid`, `validationGetOrElse`, `validationMapErr`, `validationToResult`, `validationFromResult`, `validationToOption`, `validationMap`, `validationAndThen`, `zipValidation`, and `validationFold`.
+
 ```aivi
 use aivi.validation (
     Errors

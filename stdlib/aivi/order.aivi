@@ -1,40 +1,50 @@
 hoist
 
-type (A -> A -> Bool) -> A -> A -> A
-func chooseMin = compare best candidate => compare candidate best
+type Ord A => A -> A -> A
+func chooseMin = best candidate => candidate < best
+ T|> candidate
+ F|> best
+
+type Ord A => A -> A -> A
+func chooseMax = best candidate => best < candidate
  T|> candidate
  F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func chooseMax = compare best candidate => compare best candidate
+func chooseMinBy = compare best candidate => compare candidate best
  T|> candidate
  F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func min = compare left right =>
-    chooseMin compare left right
+func chooseMaxBy = compare best candidate => compare best candidate
+ T|> candidate
+ F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func max = compare left right =>
-    chooseMax compare left right
-
-type (A -> A -> Bool) -> A -> (List A) -> A
-func minOf = compare first rest => rest
-  |> reduce (chooseMin compare) first
-
-type (A -> A -> Bool) -> A -> (List A) -> A
-func maxOf = compare first rest => rest
-  |> reduce (chooseMax compare) first
+func minBy = compare left right =>
+    chooseMinBy compare left right
 
 type (A -> A -> Bool) -> A -> A -> A
-func clampToMax = compare high value => compare high value
- T|> high
- F|> value
+func maxBy = compare left right =>
+    chooseMaxBy compare left right
+
+type (A -> A -> Bool) -> A -> (List A) -> A
+func minOfBy = compare first rest => rest
+  |> reduce (chooseMinBy compare) first
+
+type (A -> A -> Bool) -> A -> (List A) -> A
+func maxOfBy = compare first rest => rest
+  |> reduce (chooseMaxBy compare) first
 
 type (A -> A -> Bool) -> A -> A -> A -> A
-func clamp = compare low high value => compare value low
+func clampBy = compare low high value => compare value low
  T|> low
- F|> clampToMax compare high value
+ F|> clampToMaxBy compare high value
+
+type (A -> A -> Bool) -> A -> A -> A
+func clampToMaxBy = compare high value => compare high value
+ T|> high
+ F|> value
 
 type (A -> A -> Bool) -> A -> A -> Bool
 func reversed = compare left right =>
@@ -49,5 +59,10 @@ export max
 export minOf
 export maxOf
 export clamp
+export minBy
+export maxBy
+export minOfBy
+export maxOfBy
+export clampBy
 export reversed
 export comparing

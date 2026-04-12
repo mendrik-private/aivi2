@@ -6,7 +6,7 @@ use aivi.list (
     zip
 )
 
-use aivi.order (minOf)
+use aivi.order (minOfBy)
 
 type InitialRowState = {
     next: Int,
@@ -67,7 +67,7 @@ func initialRow = tokens => tokens
 
 type Text -> Int -> Int -> Text -> Int -> Int
 func nextCell = sourceToken prevDiagonal leftValue targetToken aboveValue =>
-    minOf earlier (leftValue + 1) [
+    minOfBy earlier (leftValue + 1) [
         aboveValue + 1,
         prevDiagonal + substitutionCost sourceToken targetToken
     ]

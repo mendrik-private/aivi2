@@ -58,8 +58,10 @@ use aivi.list (
     zipWith
     unzip
     intersperse
+    sort
     sortBy
     unique
+    uniqueBy
     any
     all
     count
@@ -71,7 +73,9 @@ use aivi.list (
     sum
     product
     maximum
+    maximumBy
     minimum
+    minimumBy
     Partition
     UnzipState
 )
@@ -143,7 +147,11 @@ use aivi.order (
     max
     minOf
     maxOf
-    clamp as orderClamp
+    minBy
+    maxBy
+    minOfBy
+    maxOfBy
+    clampBy as orderClamp
     reversed
     comparing
 )
@@ -274,8 +282,10 @@ value smallOnes : List Int = takeWhile isSmall numbers
 value bigOnes : List Int = dropWhile isSmall numbers
 value total : Int = sum numbers
 value productVal : Int = product numbers
-value maxNum : Option Int = maximum smaller numbers
-value minNum : Option Int = minimum smaller numbers
+value maxNum : Option Int = maximum numbers
+value minNum : Option Int = minimum numbers
+value maxNumBy : Option Int = maximumBy smaller numbers
+value minNumBy : Option Int = minimumBy smaller numbers
 value hasThree : Bool = contains (. == 3) numbers
 
 value hasThreeViaPipe : Bool = numbers
@@ -294,6 +304,15 @@ value foundSmall : Option Int = find isSmall numbers
 value split : Partition Int = partition isSmall numbers
 
 value sorted : List Int =
+    sort [
+        3,
+        1,
+        4,
+        1,
+        5
+    ]
+
+value sortedBy : List Int =
     sortBy smaller [
         3,
         1,
@@ -303,7 +322,16 @@ value sorted : List Int =
     ]
 
 value onlyUnique : List Int =
-    unique intEq [
+    unique [
+        1,
+        2,
+        1,
+        3,
+        2
+    ]
+
+value onlyUniqueBy : List Int =
+    uniqueBy intEq [
         1,
         2,
         1,
@@ -456,11 +484,13 @@ value maybeNel : Option (NonEmptyList Int) =
 
 value emptyNel : Option (NonEmptyList Int) = nelFromList []
 value appended : NonEmptyList Int = appendNel nelOne nelTwo
-value smallest : Int = min smaller 4 2
-value largest : Int = max smaller 4 2
+value smallest : Int = min 4 2
+value largest : Int = max 4 2
+value smallestBy : Int = minBy smaller 4 2
+value largestBy : Int = maxBy smaller 4 2
 
 value leastOf : Int =
-    minOf smaller 5 [
+    minOf 5 [
         3,
         7,
         1,
@@ -468,7 +498,23 @@ value leastOf : Int =
     ]
 
 value greatestOf : Int =
-    maxOf smaller 5 [
+    maxOf 5 [
+        3,
+        7,
+        1,
+        9
+    ]
+
+value leastOfBy : Int =
+    minOfBy smaller 5 [
+        3,
+        7,
+        1,
+        9
+    ]
+
+value greatestOfBy : Int =
+    maxOfBy smaller 5 [
         3,
         7,
         1,

@@ -13,7 +13,7 @@ use aivi.list (
     filterMap
     filter
     find
-    sortBy
+    sort
 )
 ```
 
@@ -786,7 +786,7 @@ value result : Int =
 
 ### maximum
 
-Returns the largest element wrapped in `Some`, or `None` for an empty list. Requires a comparison function `cmp` where `cmp a b = True` means `a` is less than `b`.
+Returns the largest element wrapped in `Some`, or `None` for an empty list. Uses the ambient `Ord` instance.
 
 ```aivi
 ```
@@ -794,12 +794,8 @@ Returns the largest element wrapped in `Some`, or `None` for an empty list. Requ
 ```aivi
 use aivi.list (maximum)
 
-type Int -> Int -> Bool
-func isLess = a b =>
-    a < b
-
 value highest : Option Int =
-    maximum isLess [
+    maximum [
         3,
         1,
         4,
@@ -811,11 +807,13 @@ value highest : Option Int =
     ]
 ```
 
+For a custom comparator, use `maximumBy`.
+
 ---
 
 ### minimum
 
-Returns the smallest element wrapped in `Some`, or `None` for an empty list. Accepts the same kind of comparison function as `maximum`.
+Returns the smallest element wrapped in `Some`, or `None` for an empty list. Uses the ambient `Ord` instance.
 
 ```aivi
 ```
@@ -823,12 +821,8 @@ Returns the smallest element wrapped in `Some`, or `None` for an empty list. Acc
 ```aivi
 use aivi.list (minimum)
 
-type Int -> Int -> Bool
-func isLess = a b =>
-    a < b
-
 value lowest : Option Int =
-    minimum isLess [
+    minimum [
         3,
         1,
         4,
@@ -839,6 +833,8 @@ value lowest : Option Int =
         6
     ]
 ```
+
+For a custom comparator, use `minimumBy`.
 
 ---
 
@@ -848,7 +844,7 @@ Functions that treat lists as ordered collections with identity constraints.
 
 ### unique
 
-Removes duplicate elements, keeping only the first occurrence of each. Requires an equality function.
+Removes duplicate elements, keeping only the first occurrence of each. Uses the ambient `Eq` instance.
 
 ```aivi
 ```
@@ -856,12 +852,8 @@ Removes duplicate elements, keeping only the first occurrence of each. Requires 
 ```aivi
 use aivi.list (unique)
 
-type Int -> Int -> Bool
-func intEq = a b =>
-    a == b
-
 value deduped : List Int =
-    unique intEq [
+    unique [
         1,
         2,
         1,
@@ -871,24 +863,19 @@ value deduped : List Int =
     ]
 ```
 
+For a custom equality relation, use `uniqueBy`.
+
 ---
 
-### sortBy
+### sort
 
-Sorts a list using an ordering function. The function `cmp a b` should return `True` when `a` should appear before `b` in the result.
-
-```aivi
-```
+Sorts a list using the ambient `Ord` instance.
 
 ```aivi
-use aivi.list (sortBy)
-
-type Int -> Int -> Bool
-func intLt = a b =>
-    a < b
+use aivi.list (sort)
 
 value sorted : List Int =
-    sortBy intLt [
+    sort [
         3,
         1,
         4,
@@ -898,7 +885,7 @@ value sorted : List Int =
     ]
 ```
 
-For descending order, reverse the comparison:
+For a custom comparator, use `sortBy`:
 
 ```aivi
 use aivi.list (sortBy)

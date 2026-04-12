@@ -113,15 +113,11 @@ value numsHead : Option Int = head numbers
 value numsTail : Option (List Int) = tail numbers
 value numsLast : Option Int = last numbers
 
-type Int -> Int -> Bool
-func smaller = left right =>
-    left < right
-
-value smallestNumber : Int = min smaller 4 2
-value largestNumber : Int = max smaller 4 2
+value smallestNumber : Int = min 4 2
+value largestNumber : Int = max 4 2
 
 value smallestFromMany : Int =
-    minOf smaller 6 [
+    minOf 6 [
         4,
         9,
         2

@@ -59,8 +59,8 @@ use aivi.prelude (
     Bool
     getOrElse
     isSome
-    foldOption
     isSomeAnd
+    mapOr
     textNonEmpty
 )
 
@@ -72,7 +72,7 @@ type Text -> Text
 func punctuate = name =>
     append name "!"
 
-value foldedName : Text = foldOption "guest" punctuate name
+value foldedName : Text = mapOr "guest" punctuate name
 value checkedName : Bool = isSomeAnd textNonEmpty name
 ```
 
@@ -82,6 +82,23 @@ value checkedName : Bool = isSomeAnd textNonEmpty name
 value age : Result Text Int = Ok 30
 value ageValue : Int = withDefault 0 age
 value succeeded : Bool = isOk age
+```
+
+## Validation Functions
+
+```aivi
+use aivi.prelude (
+    Text
+    Validation
+    isValid
+    validationToResult
+    validationGetOrElse
+)
+
+value checked : Validation Text Text = Valid "Ada"
+value passed : Bool = isValid checked
+value checkedText : Text = validationGetOrElse "guest" checked
+value checkedResult : Result Text Text = validationToResult checked
 ```
 
 ## List Functions
@@ -142,18 +159,14 @@ value indexedTotal : Int =
 
 ## Order Functions
 
-`Ord.compare` is the primitive ordering member in the prelude. Any type with an `Ord` instance can use the ordinary ordering operators and sections directly.
+`Ord.compare` is the primitive ordering member in the prelude. Any type with an `Ord` instance can use `min`, `max`, `minOf`, and the ordinary ordering operators directly.
 
 ```aivi
-type Int -> Int -> Bool
-func earlier = a b =>
-    a < b
-
-value smallest : Int = min earlier 5 3
-value greatest : Int = max earlier 5 3
+value smallest : Int = min 5 3
+value greatest : Int = max 5 3
 
 value leastOf : Int =
-    minOf earlier 10 [
+    minOf 10 [
         7,
         4,
         9

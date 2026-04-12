@@ -1,31 +1,33 @@
 use aivi.option (
     getOrElse as optionGetOrElse
-    fold as optionFold
     mapOr as optionMapOr
     isSome as optionIsSome
     isSomeAnd as optionIsSomeAnd
     isNone as optionIsNone
-    map as optionMap
-    filter as optionFilter
-    zip as optionZip
-    flatMap as optionFlatMap
-    toList as optionToList
-    toResult as optionToResult
-    fromBool as optionFromBool
 )
 
 use aivi.result (
     withDefault as resultWithDefault
     isOk as resultIsOk
     isErr as resultIsErr
-    map as resultMap
-    mapBoth as resultMapBoth
-    mapErr as resultMapErr
-    fold as resultFold
-    flatMap as resultFlatMap
-    fromOption as resultFromOption
-    toOption as resultToOption
 )
+
+use aivi.validation (
+    Errors
+    isValid as validationIsValid
+    isInvalid as validationIsInvalid
+    getOrElse as validationGetOrElseImpl
+    mapErr as validationMapErrImpl
+    toResult as validationToResultImpl
+    fromResult as validationFromResultImpl
+    toOption as validationToOptionImpl
+    map as validationMapImpl
+    andThen as validationAndThenImpl
+    zipValidation as zipValidationImpl
+    fold as validationFoldImpl
+)
+
+use aivi.nonEmpty (NonEmptyList)
 
 use aivi.list (
     length as listLength
@@ -38,43 +40,21 @@ use aivi.list (
     tailOrEmpty as listTailOrEmpty
     isEmpty as listIsEmpty
     nonEmpty as listNonEmpty
-    map as listMap
     replaceAt as listReplaceAt
-    filter as listFilter
     flatten as listFlatten
-    flatMap as listFlatMap
     reverse as listReverse
     take as listTake
     drop as listDrop
-    takeWhile as listTakeWhile
-    dropWhile as listDropWhile
     contains
-    indexOf as listIndexOf
     sum as listSum
-    product as listProduct
-    maximum as listMaximum
-    minimum as listMinimum
-    intersperse as listIntersperse
-    zip as listZip
-    zipWith as listZipWith
-    unzip as listUnzip
-    unique as listUnique
-    sortBy as listSortBy
     any as listAny
     all as listAll
     count as listCount
     find as listFind
     findMap as listFindMap
-    partition as listPartition
 )
 
 use aivi.order (
-    min as orderMin
-    max as orderMax
-    minOf as orderMinOf
-    maxOf as orderMaxOf
-    clamp as orderClamp
-    reversed as orderReversed
     comparing as orderComparing
 )
 
@@ -131,36 +111,12 @@ func getOrElse = fallback opt =>
     optionGetOrElse fallback opt
 
 type B -> (A -> B) -> (Option A) -> B
-func foldOption = onNone onSome opt =>
-    optionFold onNone onSome opt
-
-type B -> (A -> B) -> (Option A) -> B
 func mapOr = fallback transform opt =>
     optionMapOr fallback transform opt
 
 type (A -> Bool) -> (Option A) -> Bool
 func isSomeAnd = predicate opt =>
     optionIsSomeAnd predicate opt
-
-type (A -> B) -> (Option A) -> (Option B)
-func mapOption = transform opt =>
-    optionMap transform opt
-
-type (A -> Bool) -> (Option A) -> (Option A)
-func filterOption = predicate opt =>
-    optionFilter predicate opt
-
-type (A -> Option B) -> (Option A) -> (Option B)
-func flatMapOption = next opt =>
-    optionFlatMap next opt
-
-type Option A -> (Option B) -> (Option (A, B))
-func zipOptions = left right =>
-    optionZip left right
-
-type A -> Bool -> (Option A)
-func optionFromBool = item b =>
-    optionFromBool item b
 
 type A -> (Result E A) -> A
 func withDefault = fallback opt =>
@@ -174,17 +130,49 @@ type Result E A -> Bool
 func isErr = opt =>
     resultIsErr opt
 
-type (A -> B) -> (Result E A) -> (Result E B)
-func mapResult = transform opt =>
-    resultMap transform opt
+type Validation E A -> Bool
+func isValid = opt =>
+    validationIsValid opt
 
-type (E -> B) -> (A -> B) -> (Result E A) -> B
-func foldResult = onErr onOk opt =>
-    resultFold onErr onOk opt
+type Validation E A -> Bool
+func isInvalid = opt =>
+    validationIsInvalid opt
 
-type (A -> Result E B) -> (Result E A) -> (Result E B)
-func flatMapResult = next opt =>
-    resultFlatMap next opt
+type A -> (Validation E A) -> A
+func validationGetOrElse = fallback opt =>
+    validationGetOrElseImpl fallback opt
+
+type (E1 -> E2) -> (Validation E1 A) -> (Validation E2 A)
+func validationMapErr = transform opt =>
+    validationMapErrImpl transform opt
+
+type Validation E A -> (Result E A)
+func validationToResult = opt =>
+    validationToResultImpl opt
+
+type Result E A -> (Validation E A)
+func validationFromResult = opt =>
+    validationFromResultImpl opt
+
+type Validation E A -> (Option A)
+func validationToOption = opt =>
+    validationToOptionImpl opt
+
+type (A -> B) -> (Validation E A) -> (Validation E B)
+func validationMap = transform opt =>
+    validationMapImpl transform opt
+
+type (A -> Validation E B) -> (Validation E A) -> (Validation E B)
+func validationAndThen = next opt =>
+    validationAndThenImpl next opt
+
+type Validation (NonEmptyList E) A -> (Validation (NonEmptyList E) B) -> (Validation (NonEmptyList E) (A, B))
+func zipValidation = left right =>
+    zipValidationImpl left right
+
+type (E -> B) -> (A -> B) -> (Validation E A) -> B
+func validationFold = onInvalid onValid opt =>
+    validationFoldImpl onInvalid onValid opt
 
 type List A -> Int
 func length = items =>
@@ -269,22 +257,6 @@ func find = predicate items =>
 type (A -> Option B) -> (List A) -> (Option B)
 func findMap = transform items =>
     listFindMap transform items
-
-type (A -> A -> Bool) -> A -> A -> A
-func min = compare left right =>
-    orderMin compare left right
-
-type (A -> A -> Bool) -> A -> A -> A
-func max = compare left right =>
-    orderMax compare left right
-
-type (A -> A -> Bool) -> A -> (List A) -> A
-func minOf = compare first rest =>
-    orderMinOf compare first rest
-
-type (A -> A -> Bool) -> A -> (List A) -> A
-func maxOf = compare first rest =>
-    orderMaxOf compare first rest
 
 type (A -> B) -> (B -> B -> Bool) -> A -> A -> Bool
 func comparing = extract compare left right =>
@@ -402,4 +374,4 @@ type A -> (A, A)
 func duplicate = item =>
     pairDuplicate item
 
-export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, isSome, isNone, getOrElse, foldOption, mapOr, isSomeAnd, mapOption, filterOption, flatMapOption, zipOptions, withDefault, isOk, isErr, mapResult, foldResult, flatMapResult, length, head, at, last, indexed, mapWithIndex, reduceWithIndex, tailOrEmpty, isEmpty, nonEmpty, flatten, reverse, replaceAt, take, drop, sum, contains, any, all, count, find, findMap, min, max, minOf, maxOf, comparing, join, textIsEmpty, textNonEmpty, surround, abs, negate, sign, isEven, isOdd, square, clamp, between, divides, not, xor, implies, boolFromInt, first, fst, second, snd, swap, mapFirst, mapFst, mapSecond, mapSnd, mapPair, duplicate)
+export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, Errors, isSome, isNone, getOrElse, mapOr, isSomeAnd, withDefault, isOk, isErr, isValid, isInvalid, validationGetOrElse, validationMapErr, validationToResult, validationFromResult, validationToOption, validationMap, validationAndThen, zipValidation, validationFold, length, head, at, last, indexed, mapWithIndex, reduceWithIndex, tailOrEmpty, isEmpty, nonEmpty, flatten, reverse, replaceAt, take, drop, sum, contains, any, all, count, find, findMap, min, max, minOf, maxOf, comparing, join, textIsEmpty, textNonEmpty, surround, abs, negate, sign, isEven, isOdd, square, clamp, between, divides, not, xor, implies, boolFromInt, first, fst, second, snd, swap, mapFirst, mapFst, mapSecond, mapSnd, mapPair, duplicate)
