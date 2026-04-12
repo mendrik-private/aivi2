@@ -149,10 +149,12 @@ fn cranelift_codegen_compiles_validation_stage() {
     let backend = lower_text(
         "backend-validation-stage-codegen.aivi",
         r#"
-fun doubled:Int = x:Int =>
+fun step1:Result Text Int = value:Int => Ok (value + 1)
+fun step2:Result Text Int = value:Int => Ok (value * 2)
+fun doubled:Result Text Int = x:Int =>
     x
-     |> . + 1
-     !|> . * 2
+     !|> step1
+     !|> step2
 "#,
     );
     let body = backend.items()[find_item(&backend, "doubled")]
@@ -391,4 +393,3 @@ fun big_ne:Bool = a:BigInt b:BigInt => a != b
 //   retains_signal_fanout_map_and_join_kernels
 
 // ── Pattern match codegen coverage tests ───────────────────────────────────────
-

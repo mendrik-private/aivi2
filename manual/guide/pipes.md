@@ -10,6 +10,20 @@ value result = 5
 
 This is not just syntax sugar. Pipes are the **primary control flow** in AIVI. They replace `if`/`else` (with pattern matching pipes), loops (with collection combinators in pipes), and nested calls (with transform pipes). Understanding pipes is understanding how AIVI programs are structured.
 
+## Operator families
+
+Not every pipe operator is an HKT/class operator. AIVI keeps lawful non-HKT primitives where the
+surface meaning is really elimination or scheduler behavior instead of generic container algebra.
+
+| Family | Operators | Lawful basis |
+| --- | --- | --- |
+| Plain composition | `|>`, `|`, `#memo` | ordinary function composition and observation |
+| Applicative/HKT | `&|>` | `Apply` + `Applicative` |
+| Validation sequencing | `!|>` | dependent `Result` / `Validation` sequencing; primitive surface operator |
+| Predicate / sum elimination | `?|>`, `||>`, `T|>`, `F|>` | gating and closed-data elimination, not generic HKTs |
+| Collection fan-out | `*|>`, `<|*` | current list/signal-list fan-out primitive |
+| Temporal / recurrence | `~|>`, `-|>`, `+|>`, `|> delay`, `|> burst`, `@|>`, `<|@` | FRP scheduler primitives |
+
 ## The basic pipe `|>`
 
 `|>` sends the value on the left into the function on the right:
@@ -441,16 +455,28 @@ When no explicit finalizer appears, the cluster defaults to a tuple.
 
 ## Validation `!|>`
 
-`!|>` runs a validation function that must return `Result` or `Validation`. If the validation
-fails, the error propagates:
+`!|>` runs a dependent validation step. The stage function must return `Result` or `Validation`.
+On a plain subject it creates that carrier. On an existing `Result E A` or `Validation E A`, it
+only runs on the success branch and propagates the existing failure unchanged.
 
 ```aivi
 type Text -> Result Text Text
-func nonEmpty = text =>
+func nonEmpty = text => text == ""
+ T|> Err "required"
+ F|> Ok text
+
+type Text -> Result Text Text
+func notGuest = text => text == "guest"
+ T|> Err "reserved"
+ F|> Ok text
 
 value checked : Result Text Text = "hello"
  !|> nonEmpty
+ !|> notGuest
 ```
+
+`Validation` accumulation does **not** live in `!|>`. Use applicative `&|>` or `zipValidation`
+for independent error accumulation.
 
 ## Accumulation `+|>`
 

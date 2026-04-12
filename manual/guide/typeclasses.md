@@ -63,9 +63,9 @@ If a carrier is not listed here for a class, that class is **not** runtime-backe
 | `Task E` | — | — | yes | — | — | — | — | — |
 
 - The `Monad` column means builtin executable lowering for `chain` and `join`.
-- `Task E` currently has builtin executable `Applicative` support only. Broader checker-level `Functor`, `Apply`, `Chain`, and `Monad` matching is still not runtime-backed.
+- `Task E` has builtin executable `Functor`, `Apply`, `Applicative`, `Chain`, and `Monad` support.
 - `Signal` is intentionally **not** a `Monad`: executable signals keep a static dependency graph.
-- `Validation E` is intentionally **not** a `Monad`: its supported accumulation semantics are applicative rather than dependent short-circuiting.
+- `Validation E` is intentionally **not** a `Monad`: independent accumulation stays applicative (`&|>` / `zipValidation`), while dependent `!|>` checks are a dedicated pipe primitive rather than class-backed `bind`.
 - There is no builtin executable `Foldable` or `Traversable` support for `Signal` or `Task` in the current slice.
 
 ## Comparison classes

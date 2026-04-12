@@ -1449,13 +1449,18 @@ formInput
   |> submitEmail
 ```
 
-`!|>` is for attaching validation stages to a pipe spine. Multiple `!|>` stages on the same carrier type accumulate errors when the carrier is `Validation`; they short-circuit on the first failure when the carrier is `Result`.
+`!|>` is for attaching dependent validation stages to a pipe spine. A plain subject enters
+`Result` / `Validation` on first use. When upstream is already `Result E A` or `Validation E A`,
+the next `!|>` stage runs only on the success branch and passes through the existing failure
+unchanged.
 
 Rules:
 
 - the validation function must have shape `A -> Result E B` or `A -> Validation E B`
+- once a pipe is already in `Result E _` or `Validation E _`, later `!|>` stages must stay on the same carrier and error type
 - result type carries the validated output type `B`
 - signal semantics: validation is applied pointwise per upstream emission
+- `Validation` error accumulation belongs to applicative composition (`&|>` / `zipValidation`), not sequential `!|>`
 
 ### 11.9 `~|>` previous state
 

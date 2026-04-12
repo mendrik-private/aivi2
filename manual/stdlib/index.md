@@ -201,7 +201,7 @@ language/runtime slice.
 | `Filterable F` | Keeping some values while dropping others | `List`, `Option` |
 | `Apply F` | Applying wrapped functions to wrapped values | `Option`, `Result`, `List`, `Validation`, `Signal` |
 | `Applicative F` | Lifting plain values into a context with `pure` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` |
-| `Monad F` | Chaining context-producing steps | `List`, `Option`, `Result` |
+| `Monad F` | Chaining context-producing steps | `List`, `Option`, `Result`, `Task` |
 | `Bifunctor F` | Mapping both sides of a two-parameter type | `Result`, `Validation` |
 | `Traversable F` | Walking a structure while building effects | `List`, `Option`, `Result`, `Validation` |
 
