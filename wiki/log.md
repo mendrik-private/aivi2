@@ -279,3 +279,10 @@ Clarified that `aivi.date` still models `Date`, `TimeOfDay`, `DateTime`, and `Zo
 constructor-backed product types, while `DateDelta` is the domain. Added
 [data-shapes.md](data-shapes.md) to capture the current split between records, constructor-backed
 types, and domains.
+
+## [2026-04-12] query | Date equality versus ordering
+
+Confirmed that imported `Date` values already support structural `==`, while infix `<` still fails
+because ordering lowers through `Ord.compare` and the current checker only treats builtin or
+same-module `Ord` instances as dependable. Updated [equality-semantics.md](equality-semantics.md)
+with the current `Date` / `Duration` comparison split.

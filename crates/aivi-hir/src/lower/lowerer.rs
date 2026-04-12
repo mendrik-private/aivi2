@@ -8028,7 +8028,44 @@ impl<'a> Lowerer<'a> {
                 for context in &item.context {
                     self.resolve_type(*context, namespaces, &mut env);
                 }
-                for member in &item.members {
+                let class_annotations = if let ResolutionState::Resolved(TypeResolution::Item(
+                    class_item_id,
+                )) = item.class.resolution.as_ref()
+                {
+                    if let Item::Class(class_item) = &self.module.items()[*class_item_id] {
+                        let class_members = class_item
+                            .members
+                            .iter()
+                            .map(|member| (member.name.text().to_owned(), member.annotation))
+                            .collect::<Vec<_>>();
+                        let substitutions = class_item
+                            .parameters
+                            .iter()
+                            .zip(item.arguments.iter())
+                            .map(|(parameter, argument)| (*parameter, *argument))
+                            .collect::<HashMap<_, _>>();
+                        Some(
+                            class_members
+                                .iter()
+                                .filter_map(|(name, annotation)| {
+                                    let annotation = self
+                                        .instantiate_signature_type(*annotation, &substitutions)?;
+                                    Some((name.clone(), annotation))
+                                })
+                                .collect::<HashMap<_, _>>(),
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                for member in &mut item.members {
+                    if member.annotation.is_none() {
+                        if let Some(class_annotations) = &class_annotations {
+                            member.annotation = class_annotations.get(member.name.text()).copied();
+                        }
+                    }
                     if let Some(annotation) = member.annotation {
                         self.resolve_type(annotation, namespaces, &mut env);
                     }

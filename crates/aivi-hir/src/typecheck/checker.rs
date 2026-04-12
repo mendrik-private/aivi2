@@ -3801,6 +3801,35 @@ impl<'a> TypeChecker<'a> {
         None
     }
 
+    fn has_imported_instance_binding(
+        &self,
+        class_item_id: ItemId,
+        subject: &TypeBinding,
+    ) -> bool {
+        let Some(class_name) = self.class_name(class_item_id) else {
+            return false;
+        };
+        let Item::Class(class_item) = &self.module.items()[class_item_id] else {
+            return false;
+        };
+        let subject_label = self.type_binding_label(subject);
+        class_item.members.iter().all(|member| {
+            self.module.imports().iter().any(|(_, import)| {
+                matches!(
+                    &import.metadata,
+                    ImportBindingMetadata::InstanceMember {
+                        class_name: imported_class,
+                        member_name,
+                        subject: imported_subject,
+                        ..
+                    } if imported_class.as_ref() == class_name
+                        && member_name.as_ref() == member.name.text()
+                        && imported_subject.as_ref() == subject_label.as_str()
+                )
+            })
+        })
+    }
+
     fn solve_class_constraint_bindings(
         &mut self,
         evidence_span: SourceSpan,
@@ -3848,8 +3877,11 @@ impl<'a> TypeChecker<'a> {
         {
             return Ok(());
         }
+        if self.has_imported_instance_binding(binding.class_item, &binding.subject) {
+            return Ok(());
+        }
         Err(format!(
-            "no compiler-provided or same-module `{class_name}` instance matches `{}`",
+            "no compiler-provided, imported, or same-module `{class_name}` instance matches `{}`",
             self.type_binding_label(&binding.subject)
         ))
     }
@@ -3861,7 +3893,7 @@ impl<'a> TypeChecker<'a> {
         }
         let Some(class_item_id) = self.class_item_id_by_name(class_name) else {
             return Err(format!(
-                "no compiler-provided or same-module `{class_name}` instance matches `{ty}`"
+                "no compiler-provided, imported, or same-module `{class_name}` instance matches `{ty}`"
             ));
         };
         if self
@@ -3877,7 +3909,7 @@ impl<'a> TypeChecker<'a> {
             .map(|_| ())
             .ok_or_else(|| {
                 format!(
-                    "no same-module `{class_name}` instance matches `{ty}` after resolved-HIR unification"
+                    "no imported or same-module `{class_name}` instance matches `{ty}` after resolved-HIR unification"
                 )
             })
     }

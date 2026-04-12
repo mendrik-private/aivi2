@@ -140,19 +140,34 @@ type ZonedDateTime -> Text
 func zonedToIso = zdt => zdt
  ||> ZonedDateTime dt zone -> "{dateTimeToIso dt}{zone}"
 
-type Date -> Date -> Bool
-func dateEq = a b =>
-    (getYear a == getYear b) and (getMonth a == getMonth b) and (getDay a == getDay b)
+type Date -> Date -> Ordering
+func compareDateSameYear = left right =>
+    compare (getMonth left) (getMonth right)
+     ||> Equal   -> compare (getDay left) (getDay right)
+     ||> Less    -> Less
+     ||> Greater -> Greater
 
-type Date -> Date -> Bool
-func dateLtSameYear = a b => getMonth a < getMonth b
- T|> True
- F|> (getMonth a == getMonth b) and (getDay a < getDay b)
+type Date -> Date -> Ordering
+func compareDate = left right =>
+    compare (getYear left) (getYear right)
+     ||> Equal   -> compareDateSameYear left right
+     ||> Less    -> Less
+     ||> Greater -> Greater
 
-type Date -> Date -> Bool
-func dateLt = a b => getYear a < getYear b
- T|> True
- F|> (getYear a == getYear b) and (dateLtSameYear a b)
+instance Eq Date = {
+    (==) = left right => compareDate left right
+     ||> Equal   -> True
+     ||> Less    -> False
+     ||> Greater -> False
+    (!=) = left right => compareDate left right
+     ||> Equal   -> False
+     ||> Less    -> True
+     ||> Greater -> True
+}
+
+instance Ord Date = {
+    compare = left right => compareDate left right
+}
 
 type DayOfWeek -> Text
 func dayOfWeekName = dow => dow
@@ -243,4 +258,13 @@ value date_dayOfWeekName : Task Text Bool = pure (dayOfWeekName Monday == "Monda
 @test
 value date_dayOfWeekIndex : Task Text Bool = pure (dayOfWeekIndex Friday == 5)
 
-export (Year, Month, Day, Hour, Minute, Second, Date, TimeOfDay, DateTime, ZonedDateTime, DayOfWeek, DateDelta, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday, getYear, getMonth, getDay, getHour, getMinute, getSecond, getDate, getTime, getDateTime, getZone, isLeapYear, daysInFeb, daysInMonth, pad2, pad4, dateToIso, timeToIso, dateTimeToIso, zonedToIso, dateEq, dateLt, dayOfWeekName, dayOfWeekShort, dayOfWeekIndex, toDateTime, toZoned, midnight, epoch)
+@test
+value date_eq_operator : Task Text Bool = pure ((Date 2024 6 15) == (Date 2024 6 15))
+
+@test
+value date_lt_operator : Task Text Bool = pure ((Date 2024 6 15) < (Date 2024 6 16))
+
+@test
+value date_gte_operator : Task Text Bool = pure ((Date 2024 6 15) >= (Date 2024 6 15))
+
+export (Year, Month, Day, Hour, Minute, Second, Date, TimeOfDay, DateTime, ZonedDateTime, DayOfWeek, DateDelta, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday, getYear, getMonth, getDay, getHour, getMinute, getSecond, getDate, getTime, getDateTime, getZone, isLeapYear, daysInFeb, daysInMonth, pad2, pad4, dateToIso, timeToIso, dateTimeToIso, zonedToIso, dayOfWeekName, dayOfWeekShort, dayOfWeekIndex, toDateTime, toZoned, midnight, epoch)

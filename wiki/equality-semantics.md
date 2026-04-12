@@ -58,6 +58,27 @@ func matchesKey = key candidate =>
 
 Without that constraint, the checker reports that the open type parameter has no compiler-derived `Eq` instance. This is separate from concrete-type structural equality.
 
+## Ordering is a different story
+
+`Eq` support for a concrete closed type does **not** by itself imply that ordinary `<`, `>`, `<=`,
+or `>=` will work for that type.
+
+Those operators lower through `Ord.compare`, not through structural `Eq` and not through domain body
+members named `(<)` or `(>)`. The ambient prelude defines the ordering operators in terms of
+`compare`, and the checker requires the shared operand type to satisfy `Ord`.
+
+Practical consequences today:
+
+- Imported `Date` values support `==` because `Date` is a concrete closed constructor-backed type and
+  compiler-derived `Eq` accepts that shape.
+- Imported `Date` values now also support infix ordering because `aivi.date` ships explicit `Eq` /
+  `Ord` instances and first-order imported instance evidence is accepted during typechecking.
+- Turning `Date` into a domain would still not be the key requirement for infix ordering. Ordinary
+  `<` goes through `Ord.compare` either way.
+- The existing `Duration` / `DateDelta` domain docs still overstate domain-operator support a bit:
+  authored domain members such as `type (<) : Duration -> Duration -> Bool` are not sufficient for
+  ordinary infix `<` under the current checker/lowering path without a matching `Ord` instance.
+
 ## Current exclusions
 
 `Eq` is not compiler-derived in v1 for:
@@ -70,3 +91,13 @@ Without that constraint, the checker reports that the open type parameter has no
 - `Set`
 
 Imported opaque types are accepted optimistically at use sites; their defining module is expected to validate equality there.
+
+## Sources
+
+- `crates/aivi-hir/src/typecheck/checker.rs`
+- `crates/aivi-hir/src/lower/ambient.rs`
+- `crates/aivi-hir/src/general_expr_elaboration.rs`
+- `crates/aivi-cli/tests/check.rs`
+- `stdlib/aivi/date.aivi`
+- `stdlib/aivi/duration.aivi`
+- `manual/aivi-snippet-todo.json`

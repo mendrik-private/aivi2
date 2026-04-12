@@ -3,7 +3,7 @@
 Calendar dates, times, and day-of-week types.
 
 `aivi.date` provides structured date and time types with named positional fields,
-day-of-week enumeration, date comparison helpers, ISO 8601 formatting, and a
+day-of-week enumeration, `Eq` / `Ord` support for `Date`, ISO 8601 formatting, and a
 `DateDelta` domain for day-level arithmetic.
 
 ## Import
@@ -46,8 +46,6 @@ use aivi.date (
     timeToIso
     dateTimeToIso
     zonedToIso
-    dateEq
-    dateLt
     dayOfWeekName
     dayOfWeekShort
     dayOfWeekIndex
@@ -170,10 +168,14 @@ domain DateDelta over Int
 
 ## Comparison
 
-| Function | Type | Description |
-| --- | --- | --- |
-| `dateEq` | `Date → Date → Bool` | Structural equality |
-| `dateLt` | `Date → Date → Bool` | Chronological less-than |
+`Date` provides `Eq` and `Ord`, so ordinary comparison operators work directly:
+
+```aivi
+use aivi.date (epoch)
+
+value sameEpoch : Bool = epoch == epoch
+value ordered : Bool = epoch <= epoch
+```
 
 ## Constructors
 
@@ -223,8 +225,9 @@ value utcMeeting = toZoned meeting "+00:00"
 
 ## Notes
 
+- `Date` uses `Eq` / `Ord` instances for comparison rather than bespoke comparison helpers.
 - All types are purely structural — no runtime intrinsics are needed for construction, accessors,
-  or formatting.
+  formatting, or lexicographic `Date` comparison.
 - `DateDelta` is a domain over `Int`. Its operator implementations are provided by the runtime,
   following the same pattern as `aivi.duration.Duration`.
 - Month and day values are not range-checked at the type level. `Date 2024 13 32` is syntactically

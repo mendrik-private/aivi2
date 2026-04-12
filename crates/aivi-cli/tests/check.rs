@@ -1391,6 +1391,33 @@ fn check_accepts_cross_module_domain_literal_suffix_imports() {
 }
 
 #[test]
+fn check_accepts_imported_date_ord_comparison() {
+    let workspace = TempDir::new("check-imported-date-ord");
+    workspace.write("aivi.toml", "");
+    let main = workspace.write(
+        "main.aivi",
+        "use aivi.date (epoch)\n\nvalue ordered:Bool = epoch < epoch\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected imported Date ordering to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn check_accepts_bundled_root_and_prelude_stdlib_imports() {
     let workspace = TempDir::new("check-root-prelude-stdlib");
     workspace.write("aivi.toml", "");

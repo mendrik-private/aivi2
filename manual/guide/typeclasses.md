@@ -101,13 +101,14 @@ func inOrder = start finish =>
     start <= finish
 ```
 
-You do not need to author separate domain members for `<`, `>`, `<=`, or `>=`; those operators come from `Ord`.
+You do not need to author separate domain members for `<`, `>`, `<=`, or `>=`; those operators come from `Ord`. Exported ordinary instances also travel across module boundaries, so imported values of that type pick up the same operators.
 
 ## User-authored higher-kinded classes and instances
 
 ### Supported end to end today
 
 - Same-module class declarations, including `with` superclasses and `require` constraints
+- Same-module and imported use of ordinary first-order instances such as `Eq Date` or `Ord Calendar`
 - Unary `instance` blocks for higher-kinded heads such as `instance Applicative Option`
 - Partially applied heads such as `instance Functor (Result Text)`
 - Same-module and imported use of unary higher-kinded members such as `map` and `reduce`, which lower to hidden callable items when the checker can choose concrete evidence

@@ -567,6 +567,14 @@ fn collect_instance_declarations(module: &Module) -> Vec<ExportedInstanceDeclara
         let Some(Item::Instance(instance)) = module.items().get(item_id) else {
             continue;
         };
+        let ResolutionState::Resolved(TypeResolution::Item(class_item_id)) =
+            instance.class.resolution.as_ref()
+        else {
+            continue;
+        };
+        let Item::Class(class_item) = &module.items()[*class_item_id] else {
+            continue;
+        };
         let class_name: Box<str> = instance.class.path.segments().last().text().into();
         let Some(subject_type_id) = instance.arguments.iter().next().copied() else {
             continue;
@@ -574,6 +582,17 @@ fn collect_instance_declarations(module: &Module) -> Vec<ExportedInstanceDeclara
         let Some(subject) = type_label_for_export(module, subject_type_id) else {
             continue;
         };
+        let class_type_param_map: HashMap<TypeParameterId, usize> = class_item
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(index, &parameter)| (parameter, index))
+            .collect();
+        let instance_argument_types = instance
+            .arguments
+            .iter()
+            .map(|&argument| import_value_type(module, argument))
+            .collect::<Option<Vec<_>>>();
         let members = instance
             .members
             .iter()
@@ -581,6 +600,23 @@ fn collect_instance_declarations(module: &Module) -> Vec<ExportedInstanceDeclara
                 let ty = member
                     .annotation
                     .and_then(|annotation| import_value_type(module, annotation))
+                    .or_else(|| {
+                        class_item
+                            .members
+                            .iter()
+                            .find(|class_member| class_member.name.text() == member.name.text())
+                            .and_then(|class_member| {
+                                let generic_ty = poly_import_value_type(
+                                    module,
+                                    class_member.annotation,
+                                    &class_type_param_map,
+                                )?;
+                                substitute_import_type_variables(
+                                    &generic_ty,
+                                    instance_argument_types.as_deref()?,
+                                )
+                            })
+                    })
                     .or_else(|| exported_instance_member_type(module, member))?;
                 Some(ExportedInstanceMember {
                     name: member.name.text().into(),
@@ -621,6 +657,77 @@ fn exported_instance_member_type(
         };
     }
     Some(ty)
+}
+
+fn substitute_import_type_variables(
+    ty: &ImportValueType,
+    substitutions: &[ImportValueType],
+) -> Option<ImportValueType> {
+    match ty {
+        ImportValueType::Primitive(_) => Some(ty.clone()),
+        ImportValueType::Tuple(elements) => Some(ImportValueType::Tuple(
+            elements
+                .iter()
+                .map(|element| substitute_import_type_variables(element, substitutions))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        ImportValueType::Record(fields) => Some(ImportValueType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    Some(ImportRecordField {
+                        name: field.name.clone(),
+                        ty: substitute_import_type_variables(&field.ty, substitutions)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        ImportValueType::Arrow { parameter, result } => Some(ImportValueType::Arrow {
+            parameter: Box::new(substitute_import_type_variables(parameter, substitutions)?),
+            result: Box::new(substitute_import_type_variables(result, substitutions)?),
+        }),
+        ImportValueType::List(element) => Some(ImportValueType::List(Box::new(
+            substitute_import_type_variables(element, substitutions)?,
+        ))),
+        ImportValueType::Map { key, value } => Some(ImportValueType::Map {
+            key: Box::new(substitute_import_type_variables(key, substitutions)?),
+            value: Box::new(substitute_import_type_variables(value, substitutions)?),
+        }),
+        ImportValueType::Set(element) => Some(ImportValueType::Set(Box::new(
+            substitute_import_type_variables(element, substitutions)?,
+        ))),
+        ImportValueType::Option(element) => Some(ImportValueType::Option(Box::new(
+            substitute_import_type_variables(element, substitutions)?,
+        ))),
+        ImportValueType::Result { error, value } => Some(ImportValueType::Result {
+            error: Box::new(substitute_import_type_variables(error, substitutions)?),
+            value: Box::new(substitute_import_type_variables(value, substitutions)?),
+        }),
+        ImportValueType::Validation { error, value } => Some(ImportValueType::Validation {
+            error: Box::new(substitute_import_type_variables(error, substitutions)?),
+            value: Box::new(substitute_import_type_variables(value, substitutions)?),
+        }),
+        ImportValueType::Signal(element) => Some(ImportValueType::Signal(Box::new(
+            substitute_import_type_variables(element, substitutions)?,
+        ))),
+        ImportValueType::Task { error, value } => Some(ImportValueType::Task {
+            error: Box::new(substitute_import_type_variables(error, substitutions)?),
+            value: Box::new(substitute_import_type_variables(value, substitutions)?),
+        }),
+        ImportValueType::TypeVariable { index, .. } => substitutions.get(*index).cloned(),
+        ImportValueType::Named {
+            type_name,
+            arguments,
+            definition,
+        } => Some(ImportValueType::Named {
+            type_name: type_name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_import_type_variables(argument, substitutions))
+                .collect::<Option<Vec<_>>>()?,
+            definition: definition.clone(),
+        }),
+    }
 }
 
 /// Extract a string label for a type, used for cross-module instance subject matching.

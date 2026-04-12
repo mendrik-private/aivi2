@@ -181,7 +181,7 @@ Rules:
 - `requires` is **not** syntax; use `require`.
 - Overlapping instances are not allowed.
 - Orphan instances are fully disallowed.
-- Imported user-instance lookup is deferred; same-module user instances are the safe assumption.
+- Imported user-instance lookup is supported for exported first-order instance members; higher-kinded indexed-style evidence remains deferred.
 
 ### 2.5 `domain`
 
