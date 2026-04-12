@@ -262,3 +262,8 @@ Implemented three phases on branch `copilot/bits-stdlib`, merged to main:
   not Color). `blend` remains body-less pending float arithmetic.
 - Key invariant: domain member bodies must return the **carrier type**, not the nominal domain
   type — carrier-view checking is applied by `rewrite_domain_carrier_view` in the type checker.
+
+## [2026-04-12] ingest | async fire-once docs
+
+Removed stale roadmap claims about a future `@effect` decorator / `doOnce` combinator from `manual/stdlib/async.md` and `manual/guide/signals.md`.  
+Updated [signal-model.md](signal-model.md) to describe only the current `activeWhen`-gated fire-once idiom.

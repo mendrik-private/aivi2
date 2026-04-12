@@ -168,4 +168,4 @@ Used with `+|>` accumulation: the seed is `{ pending: True, done: None, error: N
 - `sig.done : Signal (Option A)` — last successful value (stale-while-revalidate: preserved on subsequent errors)
 - `sig.error : Signal (Option E)` — current error, or None
 
-**Fire-once idiom**: accumulate a `Bool` that flips to `True` on first `done` and never resets. Use it as `activeWhen` on a follow-up source. A dedicated `@effect` / `doOnce` pipe is planned.
+**Fire-once idiom**: accumulate a `Bool` that flips to `True` on first `done` and never resets. Use it as `activeWhen` on a follow-up source. This is the current surface pattern; there is no dedicated `@effect` / `doOnce` syntax documented in the compiler or manual.

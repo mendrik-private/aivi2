@@ -248,8 +248,3 @@ signal firstLoadDone : Signal Bool = users.done
 `firstLoadDone` is a `Signal Bool` that is `False` until the first successful result arrives,
 then becomes `True` permanently. Use it with `activeWhen` on a follow-up source to gate a
 side-effect to fire only once.
-
-::: tip Future
-A dedicated `@effect` decorator and a `doOnce` pipe combinator are on the AIVI roadmap to make
-this pattern a first-class one-liner.
-:::

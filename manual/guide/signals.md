@@ -403,11 +403,6 @@ signal firstLoadDone : Signal Bool = users.done
 `firstLoadDone` is `False` until `users.done` is first `Some`, then `True` forever. Gate any
 follow-up source with `activeWhen: firstLoadDone` to fire it exactly once.
 
-::: tip
-A dedicated `@effect` decorator and a `doOnce` pipe combinator are planned to make this a
-first-class one-liner.
-:::
-
 See [`aivi.async`](/stdlib/async) for the full `AsyncTracker` reference.
 
 ---
