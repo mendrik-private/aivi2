@@ -1385,6 +1385,7 @@ pub struct HirReactiveUpdateBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirCompiledRuntimeExpr {
     pub backend: Arc<BackendProgram>,
+    pub native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     pub entry_item: BackendItemId,
     pub required_signals: Box<[HirCompiledRuntimeExprSignal]>,
 }
@@ -2367,6 +2368,7 @@ fn compile_runtime_expr_fragment(
     )?;
     Ok(HirCompiledRuntimeExpr {
         backend: Arc::new(backend),
+        native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
         entry_item,
         required_signals,
     })

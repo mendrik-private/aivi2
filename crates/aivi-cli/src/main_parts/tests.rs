@@ -874,6 +874,10 @@ fn run_hydration_profile_tracks_fragment_and_kernel_activity() {
         artifact.required_signal_globals,
         reloaded.required_signal_globals
     );
+    assert!(
+        !reloaded.backend_native_kernels.is_empty(),
+        "serialized run artifact should reload precompiled native kernel sidecars"
+    );
     assert!(matches!(reloaded_plan.root, HydratedRunNode::Widget { .. }));
     assert!(
         profile

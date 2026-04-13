@@ -969,13 +969,15 @@ where
         runtime_assembly,
         runtime_link,
         backend,
+        backend_native_kernels,
         event_handlers,
         stub_signal_defaults,
     } = artifact;
     let runtime_link_started = Instant::now();
-    let linked = aivi_runtime::link_backend_runtime_with_seed(
+    let linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels(
         runtime_assembly,
         backend.clone(),
+        backend_native_kernels.clone(),
         &runtime_link,
     )
     .map_err(|errors| {

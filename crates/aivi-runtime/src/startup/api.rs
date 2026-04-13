@@ -55,6 +55,20 @@ pub fn link_backend_runtime_with_seed(
     backend: Arc<BackendProgram>,
     seed: &BackendRuntimeLinkSeed,
 ) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
+    link_backend_runtime_with_seed_and_native_kernels(
+        assembly,
+        backend,
+        std::sync::Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
+        seed,
+    )
+}
+
+pub fn link_backend_runtime_with_seed_and_native_kernels(
+    assembly: HirRuntimeAssembly,
+    backend: Arc<BackendProgram>,
+    native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
+    seed: &BackendRuntimeLinkSeed,
+) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
     let runtime = assembly
         .instantiate_runtime_with_value_store::<RuntimeValue, _>(MovingRuntimeValueStore::default())
         .map_err(|error| {
@@ -62,12 +76,13 @@ pub fn link_backend_runtime_with_seed(
                 error,
             }])
         })?;
-    let mut builder = LinkBuilder::new(&assembly, &backend, seed);
+    let mut builder = LinkBuilder::new(&assembly, &backend, native_kernels.as_ref(), seed);
     let linked = builder.build()?;
     let mut linked_runtime = BackendLinkedRuntime {
         assembly,
         runtime,
         backend,
+        native_kernels,
         signal_items_by_handle: linked.signal_items_by_handle,
         runtime_signal_by_item: linked.runtime_signal_by_item,
         derived_signals: linked.derived_signals,
@@ -90,13 +105,15 @@ pub fn link_backend_runtime_with_seed(
 /// A fully linked runtime pairing a compiled backend program with the
 /// scheduler/assembly required to tick signals.
 ///
-/// Owns an `Arc<BackendProgram>` so the runtime is `'static` and can be
-/// stored in `Arc`, sent across threads, or used at async `await` points
-/// without a lifetime coupling to the stack that produced the program (M5).
+/// Owns an `Arc<BackendProgram>` plus bundled native-kernel sidecars so the
+/// runtime is `'static` and can be stored in `Arc`, sent across threads, or
+/// used at async `await` points without a lifetime coupling to the stack that
+/// produced the program (M5).
 pub struct BackendLinkedRuntime {
     assembly: HirRuntimeAssembly,
     runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram, MovingRuntimeValueStore>,
     backend: Arc<BackendProgram>,
+    native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,

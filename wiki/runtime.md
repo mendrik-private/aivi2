@@ -33,6 +33,11 @@ BackendLinkedRuntime  ←  link_backend_runtime()  ←  BackendProgram
 It consumes a pre-derived `BackendRuntimeLinkSeed`, so bundle startup no longer needs typed core
 or full source/HIR reconstruction just to rebuild backend↔runtime origins.
 
+`link_backend_runtime_with_seed_and_native_kernels()` is the native-payload companion used by
+artifact launch. It threads precompiled native kernel sidecars into linked-runtime evaluators, so
+bundle startup can reuse build-time machine code for supported kernels while still keeping
+`BackendProgram` metadata for runtime linking and fallback execution.
+
 Key types:
 - `LinkedSourceBinding` — a source instance wired to an `InputHandle`
 - `LinkedDerivedSignal` — a derived signal with an evaluator

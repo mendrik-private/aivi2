@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 
 use aivi_backend::{
     BackendExecutableProgram, BackendExecutionEngine, BackendExecutionEngineKind,
-    BackendKernelArtifactCache, ItemKind, KernelEvaluator, NativeKernelPlan, RuntimeBigInt,
-    RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue,
-    compile_program, lower_module as lower_backend_module, validate_program,
+    BackendKernelArtifactCache, ItemKind, KernelEvaluator, NativeKernelArtifactSet,
+    NativeKernelPlan, RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
+    RuntimeRecordField, RuntimeValue, compile_native_kernel_artifact, compile_program,
+    compute_kernel_fingerprint, decode_native_kernel_artifact_binary,
+    encode_native_kernel_artifact_binary, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::SourceDatabase;
 use aivi_core::{lower_module as lower_core_module, validate_module as validate_core_module};
@@ -160,6 +162,44 @@ signal next = increment base
     assert_eq!(
         plan.execute(None, &[RuntimeValue::Int(7)], &BTreeMap::new())
             .expect("native plan should execute the signal body"),
+        RuntimeValue::Int(8)
+    );
+}
+
+#[test]
+fn executable_program_runs_with_serialized_native_kernel_sidecars() {
+    let backend = lower_text(
+        "backend-native-sidecar-engine.aivi",
+        r#"
+fun increment:Int = value:Int=>    value + 1
+
+signal base = 7
+signal next = increment base
+"#,
+    );
+    let next = find_item(&backend, "next");
+    let body_kernel = match &backend.items()[next].kind {
+        ItemKind::Signal(signal) => signal
+            .body_kernel
+            .expect("derived signals should lower a dedicated body kernel"),
+        other => panic!("expected signal item, found {other:?}"),
+    };
+    let artifact = compile_native_kernel_artifact(&backend, body_kernel)
+        .expect("native sidecar compilation should succeed")
+        .expect("supported signal body should emit a native sidecar");
+    let bytes = encode_native_kernel_artifact_binary(&artifact);
+    let decoded =
+        decode_native_kernel_artifact_binary(&bytes).expect("encoded native sidecar should decode");
+    let mut native_kernels = NativeKernelArtifactSet::default();
+    native_kernels.insert(compute_kernel_fingerprint(&backend, body_kernel), decoded);
+    let executable =
+        BackendExecutableProgram::interpreted(&backend).with_native_kernels(&native_kernels);
+    let mut engine = executable.create_engine();
+
+    assert_eq!(
+        engine
+            .evaluate_signal_body_kernel(body_kernel, &[RuntimeValue::Int(7)], &BTreeMap::new())
+            .expect("native sidecar-backed engine should evaluate signal bodies"),
         RuntimeValue::Int(8)
     );
 }

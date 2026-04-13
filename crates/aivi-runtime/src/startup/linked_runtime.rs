@@ -11,6 +11,11 @@ impl BackendLinkedRuntime {
         self.backend.clone()
     }
 
+    fn executable_program(&self) -> aivi_backend::BackendExecutableProgram<'_> {
+        aivi_backend::BackendExecutableProgram::interpreted(self.backend.as_ref())
+            .with_native_kernels(self.native_kernels.as_ref())
+    }
+
     pub fn runtime(
         &self,
     ) -> &TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram, MovingRuntimeValueStore> {
@@ -197,6 +202,7 @@ impl BackendLinkedRuntime {
         let mut native_kernel_plans = BTreeMap::new();
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
+            native_kernels: self.native_kernels.as_ref(),
             signal_items_by_handle: &self.signal_items_by_handle,
             derived_signals: &self.derived_signals,
             native_kernel_plans: &mut native_kernel_plans,
@@ -219,6 +225,7 @@ impl BackendLinkedRuntime {
             let runtime_committed = materialize_detached_globals(&committed);
             let mut trigger_evaluator = LinkedDerivedEvaluator {
                 backend: self.backend.as_ref(),
+                native_kernels: self.native_kernels.as_ref(),
                 signal_items_by_handle: &self.signal_items_by_handle,
                 derived_signals: &self.derived_signals,
                 native_kernel_plans: &mut native_kernel_plans,
@@ -391,8 +398,7 @@ impl BackendLinkedRuntime {
             .get(&instance)
             .ok_or(BackendRuntimeError::UnknownSourceInstance { instance })?;
         let snapshots = self.committed_signal_snapshots()?;
-        let mut engine =
-            BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
+        let mut engine = self.executable_program().create_engine();
         let mut arguments = Vec::with_capacity(binding.arguments.len());
         for (index, argument) in binding.arguments.iter().enumerate() {
             let globals = self.required_signal_globals(
@@ -633,8 +639,7 @@ impl BackendLinkedRuntime {
                     snapshots,
                 )?;
                 let runtime_globals = materialize_detached_globals(&globals);
-                let mut engine =
-                    BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
+                let mut engine = self.executable_program().create_engine();
                 engine.evaluate_item(*backend_item, &runtime_globals).ok()?
             }
         };

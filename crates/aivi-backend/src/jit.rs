@@ -18,10 +18,10 @@ use crate::{
     AbiPassMode, BackendExecutionEngine, BackendExecutionEngineKind, BackendExecutionOptions,
     EvalFrame, EvaluationCallProfile, EvaluationError, ItemId, KernelEvaluationProfile,
     KernelEvaluator, KernelExprId, KernelFingerprint, KernelId, LayoutId, LayoutKind,
-    PrimitiveType, Program, RuntimeBigInt, RuntimeCallable, RuntimeDecimal, RuntimeFloat,
-    RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue, TASK_COMPOSITION_KERNEL_ID,
-    TaskFunctionApplier,
-    cache::compile_kernel_jit_cached,
+    NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program, RuntimeBigInt,
+    RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
+    RuntimeRecordField, RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
+    cache::{compile_kernel_jit_cached, instantiate_native_kernel_artifact},
     codegen::CompiledJitKernel,
     compute_kernel_fingerprint,
     program::ItemKind,
@@ -30,6 +30,7 @@ use crate::{
 
 pub(crate) struct LazyJitExecutionEngine<'a> {
     program: &'a Program,
+    native_artifacts: Option<&'a NativeKernelArtifactSet>,
     fallback: KernelEvaluator<'a>,
     last_kernel_call: Option<LastKernelCall>,
     item_cache: BTreeMap<ItemId, RuntimeValue>,
@@ -42,15 +43,32 @@ pub(crate) struct LazyJitExecutionEngine<'a> {
 
 impl<'a> LazyJitExecutionEngine<'a> {
     pub(crate) fn new(program: &'a Program, options: BackendExecutionOptions) -> Self {
-        Self::with_profile(program, options, false)
+        Self::with_profile(program, None, options, false)
     }
 
     pub(crate) fn new_profiled(program: &'a Program, options: BackendExecutionOptions) -> Self {
-        Self::with_profile(program, options, true)
+        Self::with_profile(program, None, options, true)
+    }
+
+    pub(crate) fn new_with_native_artifacts(
+        program: &'a Program,
+        native_artifacts: &'a NativeKernelArtifactSet,
+        options: BackendExecutionOptions,
+    ) -> Self {
+        Self::with_profile(program, Some(native_artifacts), options, false)
+    }
+
+    pub(crate) fn new_profiled_with_native_artifacts(
+        program: &'a Program,
+        native_artifacts: &'a NativeKernelArtifactSet,
+        options: BackendExecutionOptions,
+    ) -> Self {
+        Self::with_profile(program, Some(native_artifacts), options, true)
     }
 
     fn with_profile(
         program: &'a Program,
+        native_artifacts: Option<&'a NativeKernelArtifactSet>,
         options: BackendExecutionOptions,
         profiled: bool,
     ) -> Self {
@@ -61,6 +79,7 @@ impl<'a> LazyJitExecutionEngine<'a> {
         };
         let mut engine = Self {
             program,
+            native_artifacts,
             fallback,
             last_kernel_call: None,
             item_cache: BTreeMap::new(),
@@ -109,7 +128,9 @@ impl<'a> LazyJitExecutionEngine<'a> {
         let fingerprint = compute_kernel_fingerprint(self.program, kernel_id);
         self.kernel_plans
             .entry(fingerprint)
-            .or_insert_with(|| CachedKernelPlan::build(self.program, kernel_id));
+            .or_insert_with(|| {
+                CachedKernelPlan::build(self.program, self.native_artifacts, kernel_id)
+            });
         fingerprint
     }
 
@@ -728,8 +749,14 @@ enum CachedKernelPlan {
 }
 
 impl CachedKernelPlan {
-    fn build(program: &Program, kernel_id: KernelId) -> Self {
-        let Some(compiled) = NativeKernelPlan::compile(program, kernel_id) else {
+    fn build(
+        program: &Program,
+        native_artifacts: Option<&NativeKernelArtifactSet>,
+        kernel_id: KernelId,
+    ) -> Self {
+        let Some(compiled) =
+            NativeKernelPlan::compile_with_native_artifacts(program, native_artifacts, kernel_id)
+        else {
             return Self::Fallback;
         };
         Self::Compiled(compiled)
@@ -757,6 +784,38 @@ pub struct NativeKernelPlan {
 
 impl NativeKernelPlan {
     pub fn compile(program: &Program, kernel_id: KernelId) -> Option<Self> {
+        let artifact = compile_kernel_jit_cached(program, kernel_id).ok()?;
+        Self::from_compiled_jit(program, kernel_id, artifact)
+    }
+
+    pub fn compile_with_native_artifacts(
+        program: &Program,
+        native_artifacts: Option<&NativeKernelArtifactSet>,
+        kernel_id: KernelId,
+    ) -> Option<Self> {
+        let fingerprint = compute_kernel_fingerprint(program, kernel_id);
+        if let Some(artifact) = native_artifacts.and_then(|artifacts| artifacts.get(fingerprint))
+            && let Some(plan) = Self::from_native_artifact(program, kernel_id, artifact)
+        {
+            return Some(plan);
+        }
+        Self::compile(program, kernel_id)
+    }
+
+    pub fn from_native_artifact(
+        program: &Program,
+        kernel_id: KernelId,
+        artifact: &NativeKernelArtifact,
+    ) -> Option<Self> {
+        let artifact = instantiate_native_kernel_artifact(program, kernel_id, artifact).ok()?;
+        Self::from_compiled_jit(program, kernel_id, artifact)
+    }
+
+    fn from_compiled_jit(
+        program: &Program,
+        kernel_id: KernelId,
+        artifact: CompiledJitKernel,
+    ) -> Option<Self> {
         let kernel = &program.kernels()[kernel_id];
         let input_plan = match kernel.input_subject {
             Some(layout) => Some(MarshalPlan::for_layout(program, layout)?),
@@ -768,7 +827,6 @@ impl NativeKernelPlan {
             .map(|layout| MarshalPlan::for_layout(program, *layout))
             .collect::<Option<Vec<_>>>()?;
         let result_plan = MarshalPlan::for_layout(program, kernel.result_layout)?;
-        let artifact = compile_kernel_jit_cached(program, kernel_id).ok()?;
         let signal_slot_plans = artifact
             .signal_slots
             .iter()

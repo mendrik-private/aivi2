@@ -42,7 +42,7 @@ Internal modules:
 - Worker threads communicate with the scheduler exclusively via message passing; no shared mutable state crosses the thread boundary.
 - `execute` and `run` share a common session abstraction (`run_session`) to avoid duplicating GTK + scheduler setup.
 - Subcommand dispatch is argument-position based (first argument), not flag-based, to keep the CLI surface minimal.
-- `compile` stops at object emission; `build` performs the runnable source-free bundle path by writing the runtime binary, serialized run artifact, backend payload sidecars, and launcher.
+- `compile` stops at object emission; `build` performs the runnable source-free bundle path by writing the runtime binary, serialized run artifact, serialized backend metadata payloads, precompiled native-kernel sidecars, and launcher.
 - Exit codes follow Unix conventions: 0 for success, non-zero for any error.
 
 ## Diagnostic codes

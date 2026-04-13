@@ -114,6 +114,16 @@ Kept `manual/guide/surface-feature-matrix.md` deleted to match `main` and cleane
 it from current wiki/task notes.
 
 - updated [surface-syntax.md](surface-syntax.md), `task_plan.md`, and `findings.md`
+
+## [2026-04-12] ingest | native artifact bundle launch
+
+Closed compiled bundle launch gap by teaching `aivi build` / `aivi run` artifacts to emit and
+consume precompiled native kernel sidecars alongside serialized backend metadata payloads.
+
+- updated [cli.md](cli.md) for native-sidecar bundle launch semantics
+- updated [runtime.md](runtime.md) for `link_backend_runtime_with_seed_and_native_kernels()`
+- refreshed [codebase-audit-2026-04-12.md](codebase-audit-2026-04-12.md) to mark the compiled
+  bundle launch gap closed
 - historical mentions inside this append-only log remain as history, not live documentation
 
 ## [2026-04-07] ingest | From signal fan-out sugar

@@ -153,6 +153,7 @@ fn manual_task_linked_runtime(lowered: &LoweredStack, owner_name: &str) -> Backe
         assembly,
         runtime,
         backend: Arc::new(lowered.backend.clone()),
+        native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
         signal_items_by_handle: BTreeMap::new(),
         runtime_signal_by_item: BTreeMap::new(),
         derived_signals: BTreeMap::new(),

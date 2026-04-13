@@ -14,7 +14,7 @@ The `aivi` binary provides the developer-facing command-line interface.
 | `aivi run <file>` | Run an AIVI application from source or a serialized run artifact |
 | `aivi execute <expr>` | Execute an expression and print the result |
 | `aivi compile <file>` | Compile to native object code; not yet a linked runnable app |
-| `aivi build` | Package the runtime binary plus a serialized run artifact into a runnable source-free bundle |
+| `aivi build` | Package runtime binary, serialized run artifact, and precompiled native sidecars into a runnable source-free bundle |
 | `aivi test` | Run AIVI test files |
 | `aivi fmt <file>` | Format a source file (idempotent) |
 | `aivi lsp` | Start the LSP server on stdio |
@@ -83,12 +83,13 @@ Pre-existing known failures:
   native app linking.
 - `aivi build` is the current runnable packaging path. It validates the same runnable surface as
   `aivi run`, then assembles a source-free bundle from the runtime binary, `run-artifact.json`,
-  backend payload sidecars, and a launcher script.
+  serialized backend metadata payloads, precompiled native-kernel sidecars, and a launcher script.
 - `aivi run` accepts either a source/workspace entry or a serialized run artifact. Artifact runs
   keep the selected GTK view fixed at bundle time, so `--view` may be omitted or must match.
 - Backend execution can still attach compiled object artifacts while constructing a lazy-JIT engine,
   so object emission and runtime execution currently coexist rather than replacing each other.
-- Remaining AOT gap: the runnable bundle still serializes backend `Program` payloads rather than
-  launching directly from precompiled `CompiledProgram` / native sidecars emitted by `aivi compile`.
+- Runnable bundles now preload native kernel sidecars into the lazy-JIT execution path, so launch
+  no longer recompiles supported kernels from backend JSON. The bundle still keeps serialized
+  `Program` metadata because runtime linking, source configs, and fallback execution need it.
 
 *See also: [lsp-server.md](lsp-server.md), [architecture.md](architecture.md)*

@@ -32,9 +32,11 @@ mod validate;
 
 pub use aivi_core::{Arena, ArenaId, ArenaOverflow};
 pub use cache::{
-    BackendKernelArtifactCache, compile_kernel_cached, compile_program_cached,
-    compute_kernel_cache_key, decode_compiled_program_binary, decode_program_json,
-    encode_compiled_program_binary, encode_program_json,
+    BackendKernelArtifactCache, NativeKernelArtifact, NativeKernelArtifactSet,
+    compile_kernel_cached, compile_native_kernel_artifact, compile_program_cached,
+    compute_kernel_cache_key, decode_compiled_program_binary, decode_native_kernel_artifact_binary,
+    decode_program_json, encode_compiled_program_binary, encode_native_kernel_artifact_binary,
+    encode_program_json,
 };
 pub use codegen::{
     CodegenError, CodegenErrors, CompiledKernel, CompiledKernelArtifact, CompiledProgram,

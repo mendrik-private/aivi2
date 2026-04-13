@@ -16,11 +16,11 @@ Validated directly from source and current test runs:
 ## Verified JIT / AOT boundary
 
 - `aivi compile` lowers through backend codegen and can write a Cranelift object file, but it still stops at object emission rather than producing the final runnable app.
-- `aivi build` is now the runnable packaging path: it emits a source-free bundle with the runtime executable, `run-artifact.json`, backend payload sidecars, and a launcher (`crates/aivi-cli/src/main_parts/build_tools.rs`, `crates/aivi-cli/src/main_parts/run_artifact.rs`, `crates/aivi-cli/tests/build.rs`).
+- `aivi build` is now the runnable packaging path: it emits a source-free bundle with the runtime executable, `run-artifact.json`, serialized backend metadata payloads, precompiled native-kernel sidecars, and a launcher (`crates/aivi-cli/src/main_parts/build_tools.rs`, `crates/aivi-cli/src/main_parts/run_artifact.rs`, `crates/aivi-cli/tests/build.rs`).
 - `aivi run` can launch either from source/workspace input or directly from the serialized run artifact emitted by `build`.
 - Backend execution programs can retain compiled object artifacts while still creating lazy-JIT execution engines (`crates/aivi-backend/src/engine.rs:151-263`, `crates/aivi-backend/tests/execution_engine.rs:109-131`).
 
-**Conclusion:** JIT execution is implemented and tested. AOT object emission is implemented and tested. The old source-carrying runtime-link gap is closed by the source-free run-artifact bundle. The remaining AOT product gap is direct launch from precompiled native payloads / `aivi compile` output.
+**Conclusion:** JIT execution is implemented and tested. AOT object emission is implemented and tested. The old source-carrying runtime-link gap and the later compiled-payload launch gap are both closed for runnable bundles: `aivi build` now emits source-free artifacts plus precompiled native sidecars that `aivi run` consumes without launch-time re-JIT for supported kernels. `aivi compile` still remains object-emission only by CLI contract.
 
 ## Highest-confidence crate findings
 
@@ -56,7 +56,7 @@ These are good candidates for boxing or smaller payload factoring where hot-path
 
 - `aot-runtime-link-boundary` — closed by the source-free run-artifact bundle path
 - `stdlib-undocumented-low-level-modules` — closed by new manual/index coverage
-- `compiled-aot-artifact-launch`
+- `compiled-aot-artifact-launch` — closed by native-sidecar bundle launch
 
 ## Follow-up implementation slice
 
@@ -70,8 +70,11 @@ The current follow-up slice closed the highest-confidence docs/API parity issues
 - replaced the old source-carrying build bundle with a source-free serialized run-artifact bundle
 - shifted pair docs and prelude guidance toward `first` / `second` / `mapFirst` / `mapSecond`
 
-## Remaining tracked gap
+## AOT bundle status
 
-- `compiled-aot-artifact-launch` — runnable bundles still serialize backend `Program` payloads.
-  The next AOT closure step is to emit and consume precompiled `CompiledProgram` / native sidecars
-  so deployment can reuse `aivi compile` output directly instead of re-JITing from backend JSON.
+- Runnable bundles still keep backend `Program` metadata, but that is now a deliberate runtime-link
+  boundary rather than an execution gap: launch uses precompiled native sidecars for supported
+  kernels and falls back to existing interpreter/JIT behavior only where the first Cranelift slice
+  still cannot lower a kernel.
+- `aivi compile` remains object-emission only. Turning that object output into a final linked app is
+  separate product work, not the old runtime-link correctness gap.

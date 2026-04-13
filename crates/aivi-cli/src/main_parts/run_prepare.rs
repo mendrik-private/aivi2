@@ -214,6 +214,7 @@ where
             runtime_assembly,
             runtime_link,
             backend: lowered.backend,
+            backend_native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
             event_handlers,
             stub_signal_defaults,
         },

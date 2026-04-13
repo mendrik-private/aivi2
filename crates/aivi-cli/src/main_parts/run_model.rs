@@ -64,6 +64,7 @@ struct RunArtifact {
     runtime_assembly: HirRuntimeAssembly,
     runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
     backend: Arc<BackendProgram>,
+    backend_native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
     /// Default values to publish into stub Input signal handles for cross-module
     /// workspace imports before the first hydration cycle. Keyed by the input handle
@@ -114,12 +115,21 @@ struct RunValidationBlocker {
 #[derive(Clone, Debug)]
 struct RunFragmentExecutionUnit {
     backend: Arc<BackendProgram>,
+    native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     cache_key: u64,
 }
 
 impl RunFragmentExecutionUnit {
-    fn new(backend: Arc<BackendProgram>, cache_key: u64) -> Self {
-        Self { backend, cache_key }
+    fn new(
+        backend: Arc<BackendProgram>,
+        native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
+        cache_key: u64,
+    ) -> Self {
+        Self {
+            backend,
+            native_kernels,
+            cache_key,
+        }
     }
 
     fn backend(&self) -> &BackendProgram {
@@ -132,6 +142,7 @@ impl RunFragmentExecutionUnit {
 
     fn create_engine(&self, profiled: bool) -> BackendExecutionEngineHandle<'_> {
         let executable = BackendExecutableProgram::interpreted(self.backend.as_ref())
+            .with_native_kernels(self.native_kernels.as_ref())
             .with_execution_options(aivi_backend::BackendExecutionOptions {
                 prefer_interpreter: cfg!(test),
                 ..Default::default()

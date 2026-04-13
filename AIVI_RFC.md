@@ -3052,12 +3052,13 @@ aivi build src/app.aivi -o dist/users --view mainWindow
 
 - a copied `aivi` runtime executable
 - a serialized `run-artifact.json` manifest for the selected view
-- a `payloads/` directory with the backend execution payload sidecars referenced by the manifest
+- a `payloads/` directory with serialized backend metadata payloads plus precompiled native-kernel
+  sidecars referenced by the manifest
 - a `run` launcher script pinned to the selected view
 
 Run the packaged application via `./run` inside the emitted bundle directory.
 
-The bundle is self-contained at the AIVI layer and does not depend on workspace sources or a copied stdlib tree at launch. It still depends on the target system GTK stack. It is a runnable directory bundle, not yet a single native executable or direct `aivi compile` output.
+The bundle is self-contained at the AIVI layer and does not depend on workspace sources or a copied stdlib tree at launch. It still depends on the target system GTK stack. Bundle launch reuses the precompiled native sidecars for supported kernels while retaining backend metadata payloads for runtime linking and fallback execution. It is a runnable directory bundle, not yet a single native executable or direct `aivi compile` output.
 
 Exits 0 on success, 1 on validation/build errors.
 

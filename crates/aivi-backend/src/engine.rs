@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::{
     CompiledKernelArtifact, CompiledProgram, EvalFrame, EvaluationError, ItemId,
-    KernelEvaluationProfile, KernelEvaluator, KernelFingerprint, KernelId, Program, RuntimeValue,
+    KernelEvaluationProfile, KernelEvaluator, KernelFingerprint, KernelId, NativeKernelArtifactSet,
+    Program, RuntimeValue,
     cache::{compile_kernel_cached, compile_program_cached},
     codegen::{CodegenErrors, compile_kernel, compile_program, compute_kernel_fingerprint},
     jit::LazyJitExecutionEngine,
@@ -156,6 +157,7 @@ impl BackendExecutionEngine for KernelEvaluator<'_> {
 pub struct BackendExecutableProgram<'a> {
     program: &'a Program,
     compiled_object: Option<CompiledProgram>,
+    native_kernels: Option<&'a NativeKernelArtifactSet>,
     execution_options: BackendExecutionOptions,
 }
 
@@ -165,6 +167,7 @@ impl<'a> BackendExecutableProgram<'a> {
         Self {
             program,
             compiled_object: None,
+            native_kernels: None,
             execution_options: BackendExecutionOptions::default(),
         }
     }
@@ -174,6 +177,7 @@ impl<'a> BackendExecutableProgram<'a> {
         Self {
             program,
             compiled_object: Some(compiled_object),
+            native_kernels: None,
             execution_options: BackendExecutionOptions::default(),
         }
     }
@@ -202,6 +206,11 @@ impl<'a> BackendExecutableProgram<'a> {
 
     pub fn with_execution_options(mut self, execution_options: BackendExecutionOptions) -> Self {
         self.execution_options = execution_options;
+        self
+    }
+
+    pub fn with_native_kernels(mut self, native_kernels: &'a NativeKernelArtifactSet) -> Self {
+        self.native_kernels = Some(native_kernels);
         self
     }
 
@@ -242,6 +251,12 @@ impl<'a> BackendExecutableProgram<'a> {
     pub fn create_engine(&self) -> BackendExecutionEngineHandle<'a> {
         if self.execution_options.prefer_interpreter {
             Box::new(KernelEvaluator::new(self.program))
+        } else if let Some(native_kernels) = self.native_kernels {
+            Box::new(LazyJitExecutionEngine::new_with_native_artifacts(
+                self.program,
+                native_kernels,
+                self.execution_options,
+            ))
         } else {
             Box::new(LazyJitExecutionEngine::new(
                 self.program,
@@ -253,6 +268,12 @@ impl<'a> BackendExecutableProgram<'a> {
     pub fn create_profiled_engine(&self) -> BackendExecutionEngineHandle<'a> {
         if self.execution_options.prefer_interpreter {
             Box::new(KernelEvaluator::new_profiled(self.program))
+        } else if let Some(native_kernels) = self.native_kernels {
+            Box::new(LazyJitExecutionEngine::new_profiled_with_native_artifacts(
+                self.program,
+                native_kernels,
+                self.execution_options,
+            ))
         } else {
             Box::new(LazyJitExecutionEngine::new_profiled(
                 self.program,

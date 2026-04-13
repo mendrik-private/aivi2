@@ -1,5 +1,5 @@
 const RUN_ARTIFACT_FORMAT: &str = "aivi.run-artifact";
-const RUN_ARTIFACT_VERSION: u32 = 1;
+const RUN_ARTIFACT_VERSION: u32 = 2;
 const RUN_ARTIFACT_FILE_NAME: &str = "run-artifact.json";
 const RUN_ARTIFACT_PAYLOAD_DIR: &str = "payloads";
 
@@ -78,6 +78,13 @@ struct StubSignalDefaultWire {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct BackendPayloadWire {
     program_path: Box<str>,
+    native_kernels: Box<[NativeKernelPayloadWire]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct NativeKernelPayloadWire {
+    kernel: aivi_backend::KernelId,
+    artifact_path: Box<str>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -193,33 +200,72 @@ struct GtkGroupNodeWire {
 
 #[derive(Default)]
 struct ArtifactPayloadRegistry {
-    entries: BTreeMap<Box<str>, Arc<BackendProgram>>,
+    entries: BTreeMap<Box<str>, RegisteredBackendPayload>,
+}
+
+struct RegisteredBackendPayload {
+    program: Arc<BackendProgram>,
+    native_kernels: Box<[RegisteredNativeKernelPayload]>,
+}
+
+struct RegisteredNativeKernelPayload {
+    kernel: aivi_backend::KernelId,
+    artifact_path: Box<str>,
+    artifact: aivi_backend::NativeKernelArtifact,
+}
+
+#[derive(Clone)]
+struct LoadedBackendPayload {
+    program: Arc<BackendProgram>,
+    native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
 }
 
 impl ArtifactPayloadRegistry {
-    fn register_program(&mut self, program: Arc<BackendProgram>) -> BackendPayloadWire {
+    fn register_program(&mut self, program: Arc<BackendProgram>) -> Result<BackendPayloadWire, String> {
         let key = compute_program_fingerprint(program.as_ref());
         self.register_keyed_program(key, program)
     }
 
-    fn register_keyed_program(&mut self, key: u64, program: Arc<BackendProgram>) -> BackendPayloadWire {
+    fn register_keyed_program(
+        &mut self,
+        key: u64,
+        program: Arc<BackendProgram>,
+    ) -> Result<BackendPayloadWire, String> {
         let program_path =
             format!("{RUN_ARTIFACT_PAYLOAD_DIR}/backend-{key:016x}.json").into_boxed_str();
-        self.entries
-            .entry(program_path.clone())
-            .or_insert(program);
-        BackendPayloadWire { program_path }
+        let entry = match self.entries.entry(program_path.clone()) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                let native_kernels = compile_native_kernel_payloads(key, program.as_ref())?;
+                entry.insert(RegisteredBackendPayload {
+                    program,
+                    native_kernels,
+                })
+            }
+        };
+        Ok(BackendPayloadWire {
+            program_path,
+            native_kernels: entry
+                .native_kernels
+                .iter()
+                .map(|native| NativeKernelPayloadWire {
+                    kernel: native.kernel,
+                    artifact_path: native.artifact_path.clone(),
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        })
     }
 
     fn write_all(&self, root: &Path) -> Result<(), String> {
-        for (relative_path, program) in &self.entries {
+        for (relative_path, payload) in &self.entries {
             let path = root.join(relative_path.as_ref());
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|error| {
                     format!("failed to create {}: {error}", parent.display())
                 })?;
             }
-            let bytes = aivi_backend::encode_program_json(program.as_ref()).map_err(|error| {
+            let bytes = aivi_backend::encode_program_json(payload.program.as_ref()).map_err(|error| {
                 format!(
                     "failed to encode backend payload {}: {error}",
                     relative_path.as_ref()
@@ -227,6 +273,18 @@ impl ArtifactPayloadRegistry {
             })?;
             fs::write(&path, bytes)
                 .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+            for native in payload.native_kernels.iter() {
+                let artifact_path = root.join(native.artifact_path.as_ref());
+                if let Some(parent) = artifact_path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| {
+                        format!("failed to create {}: {error}", parent.display())
+                    })?;
+                }
+                let bytes = aivi_backend::encode_native_kernel_artifact_binary(&native.artifact);
+                fs::write(&artifact_path, bytes).map_err(|error| {
+                    format!("failed to write {}: {error}", artifact_path.display())
+                })?;
+            }
         }
         Ok(())
     }
@@ -234,11 +292,15 @@ impl ArtifactPayloadRegistry {
 
 #[derive(Default)]
 struct ArtifactPayloadLoader {
-    entries: BTreeMap<Box<str>, Arc<BackendProgram>>,
+    entries: BTreeMap<Box<str>, LoadedBackendPayload>,
 }
 
 impl ArtifactPayloadLoader {
-    fn load(&mut self, root: &Path, payload: &BackendPayloadWire) -> Result<Arc<BackendProgram>, String> {
+    fn load(
+        &mut self,
+        root: &Path,
+        payload: &BackendPayloadWire,
+    ) -> Result<LoadedBackendPayload, String> {
         if let Some(program) = self.entries.get(&payload.program_path).cloned() {
             return Ok(program);
         }
@@ -250,10 +312,66 @@ impl ArtifactPayloadLoader {
                 format!("failed to decode backend payload {}: {error}", path.display())
             })?,
         );
+        let mut native_kernels = aivi_backend::NativeKernelArtifactSet::default();
+        for native in payload.native_kernels.iter() {
+            let path = root.join(native.artifact_path.as_ref());
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let artifact = aivi_backend::decode_native_kernel_artifact_binary(&bytes).ok_or_else(
+                || format!("failed to decode native backend payload {}", path.display()),
+            )?;
+            if artifact.requested_kernel() != native.kernel {
+                return Err(format!(
+                    "native backend payload {} targets kernel {} but manifest expects {}",
+                    path.display(),
+                    artifact.requested_kernel().as_raw(),
+                    native.kernel.as_raw()
+                ));
+            }
+            native_kernels.insert(
+                aivi_backend::compute_kernel_fingerprint(program.as_ref(), native.kernel),
+                artifact,
+            );
+        }
+        let loaded = LoadedBackendPayload {
+            program: program.clone(),
+            native_kernels: Arc::new(native_kernels),
+        };
         self.entries
-            .insert(payload.program_path.clone(), program.clone());
-        Ok(program)
+            .insert(payload.program_path.clone(), loaded.clone());
+        Ok(loaded)
     }
+}
+
+fn compile_native_kernel_payloads(
+    key: u64,
+    program: &BackendProgram,
+) -> Result<Box<[RegisteredNativeKernelPayload]>, String> {
+    let mut native_kernels = Vec::new();
+    for (kernel, _) in program.kernels().iter() {
+        let Some(artifact) = aivi_backend::compile_native_kernel_artifact(program, kernel).map_err(
+            |error| {
+                format!(
+                    "failed to compile native backend payload for kernel {} in backend {key:016x}: {error}",
+                    kernel.as_raw()
+                )
+            },
+        )? else {
+            continue;
+        };
+        let fingerprint = aivi_backend::compute_kernel_fingerprint(program, kernel);
+        native_kernels.push(RegisteredNativeKernelPayload {
+            kernel,
+            artifact_path: format!(
+                "{RUN_ARTIFACT_PAYLOAD_DIR}/native-{key:016x}-{:08x}-{:016x}.bin",
+                kernel.as_raw(),
+                fingerprint.as_raw()
+            )
+            .into_boxed_str(),
+            artifact,
+        });
+    }
+    Ok(native_kernels.into_boxed_slice())
 }
 
 fn write_serialized_run_artifact_bundle(
@@ -261,7 +379,7 @@ fn write_serialized_run_artifact_bundle(
     artifact: &RunArtifact,
 ) -> Result<PathBuf, String> {
     let mut payloads = ArtifactPayloadRegistry::default();
-    let serialized = serialize_run_artifact(artifact, &mut payloads);
+    let serialized = serialize_run_artifact(artifact, &mut payloads)?;
     payloads.write_all(root)?;
     let artifact_path = root.join(RUN_ARTIFACT_FILE_NAME);
     let bytes = serde_json::to_vec_pretty(&serialized)
@@ -320,8 +438,8 @@ fn load_serialized_run_artifact(
 fn serialize_run_artifact(
     artifact: &RunArtifact,
     payloads: &mut ArtifactPayloadRegistry,
-) -> SerializedRunArtifact {
-    SerializedRunArtifact {
+) -> Result<SerializedRunArtifact, String> {
+    Ok(SerializedRunArtifact {
         format: RUN_ARTIFACT_FORMAT.into(),
         version: RUN_ARTIFACT_VERSION,
         view_name: artifact.view_name.clone(),
@@ -339,11 +457,13 @@ fn serialize_run_artifact(
         hydration_inputs: artifact
             .hydration_inputs
             .iter()
-            .map(|(&input, compiled)| RunInputEntryWire {
-                input,
-                compiled: compiled_run_input_to_wire(compiled, payloads),
+            .map(|(&input, compiled)| -> Result<RunInputEntryWire, String> {
+                Ok(RunInputEntryWire {
+                    input,
+                    compiled: compiled_run_input_to_wire(compiled, payloads)?,
+                })
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, _>>()?
             .into_boxed_slice(),
         required_signal_globals: artifact
             .required_signal_globals
@@ -354,9 +474,9 @@ fn serialize_run_artifact(
             })
             .collect::<Vec<_>>()
             .into_boxed_slice(),
-        runtime_assembly: hir_runtime_assembly_to_wire(artifact.runtime_assembly.clone(), payloads),
+        runtime_assembly: hir_runtime_assembly_to_wire(artifact.runtime_assembly.clone(), payloads)?,
         runtime_link: artifact.runtime_link.clone(),
-        backend: payloads.register_program(artifact.backend.clone()),
+        backend: payloads.register_program(artifact.backend.clone())?,
         event_handlers: artifact
             .event_handlers
             .iter()
@@ -375,7 +495,7 @@ fn serialize_run_artifact(
             })
             .collect::<Vec<_>>()
             .into_boxed_slice(),
-    }
+    })
 }
 
 fn deserialize_run_artifact(
@@ -383,6 +503,7 @@ fn deserialize_run_artifact(
     serialized: SerializedRunArtifact,
 ) -> Result<RunArtifact, String> {
     let mut payloads = ArtifactPayloadLoader::default();
+    let backend = payloads.load(root, &serialized.backend)?;
     Ok(RunArtifact {
         view_name: serialized.view_name,
         patterns: RunPatternTable {
@@ -411,7 +532,8 @@ fn deserialize_run_artifact(
             .collect(),
         runtime_assembly: hir_runtime_assembly_from_wire(root, serialized.runtime_assembly, &mut payloads)?,
         runtime_link: serialized.runtime_link,
-        backend: payloads.load(root, &serialized.backend)?,
+        backend: backend.program,
+        backend_native_kernels: backend.native_kernels,
         event_handlers: serialized
             .event_handlers
             .into_vec()
@@ -430,28 +552,28 @@ fn deserialize_run_artifact(
 fn compiled_run_input_to_wire(
     input: &CompiledRunInput,
     payloads: &mut ArtifactPayloadRegistry,
-) -> CompiledRunInputWire {
+) -> Result<CompiledRunInputWire, String> {
     match input {
         CompiledRunInput::Expr(fragment) => {
-            CompiledRunInputWire::Expr(compiled_run_fragment_to_wire(fragment, payloads))
+            Ok(CompiledRunInputWire::Expr(compiled_run_fragment_to_wire(
+                fragment, payloads,
+            )?))
         }
-        CompiledRunInput::Text(text) => CompiledRunInputWire::Text(CompiledRunTextWire {
+        CompiledRunInput::Text(text) => Ok(CompiledRunInputWire::Text(CompiledRunTextWire {
             segments: text
                 .segments
                 .iter()
                 .map(|segment| match segment {
-                    CompiledRunTextSegment::Text(text) => {
-                        CompiledRunTextSegmentWire::Text(text.clone())
-                    }
-                    CompiledRunTextSegment::Interpolation(fragment) => {
-                        CompiledRunTextSegmentWire::Interpolation(
-                            compiled_run_fragment_to_wire(fragment, payloads),
-                        )
-                    }
+                    CompiledRunTextSegment::Text(text) => Ok(CompiledRunTextSegmentWire::Text(text.clone())),
+                    CompiledRunTextSegment::Interpolation(fragment) => Ok(
+                        CompiledRunTextSegmentWire::Interpolation(compiled_run_fragment_to_wire(
+                            fragment, payloads,
+                        )?),
+                    ),
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, String>>()?
                 .into_boxed_slice(),
-        }),
+        })),
     }
 }
 
@@ -485,18 +607,18 @@ fn compiled_run_input_from_wire(
 fn compiled_run_fragment_to_wire(
     fragment: &CompiledRunFragment,
     payloads: &mut ArtifactPayloadRegistry,
-) -> CompiledRunFragmentWire {
+) -> Result<CompiledRunFragmentWire, String> {
     let execution = payloads.register_keyed_program(
         fragment.execution.cache_key(),
         fragment.execution.backend.clone(),
-    );
-    CompiledRunFragmentWire {
+    )?;
+    Ok(CompiledRunFragmentWire {
         expr: fragment.expr,
         parameters: fragment.parameters.clone(),
         execution,
         item: fragment.item,
         required_signal_globals: fragment.required_signal_globals.clone(),
-    }
+    })
 }
 
 fn compiled_run_fragment_from_wire(
@@ -504,12 +626,16 @@ fn compiled_run_fragment_from_wire(
     wire: CompiledRunFragmentWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<CompiledRunFragment, String> {
-    let backend = payloads.load(root, &wire.execution)?;
-    let cache_key = compute_program_fingerprint(backend.as_ref());
+    let payload = payloads.load(root, &wire.execution)?;
+    let cache_key = compute_program_fingerprint(payload.program.as_ref());
     Ok(CompiledRunFragment {
         expr: wire.expr,
         parameters: wire.parameters,
-        execution: Arc::new(RunFragmentExecutionUnit::new(backend, cache_key)),
+        execution: Arc::new(RunFragmentExecutionUnit::new(
+            payload.program,
+            payload.native_kernels,
+            cache_key,
+        )),
         item: wire.item,
         required_signal_globals: wire.required_signal_globals,
     })
@@ -518,25 +644,25 @@ fn compiled_run_fragment_from_wire(
 fn hir_runtime_assembly_to_wire(
     assembly: HirRuntimeAssembly,
     payloads: &mut ArtifactPayloadRegistry,
-) -> HirRuntimeAssemblyWire {
+) -> Result<HirRuntimeAssemblyWire, String> {
     let parts = assembly.into_parts();
-    HirRuntimeAssemblyWire {
+    Ok(HirRuntimeAssemblyWire {
         graph: parts.graph,
         reactive_program: parts.reactive_program,
         owners: parts.owners,
         signals: parts
             .signals
-            .into_vec()
-            .into_iter()
-            .map(|signal| hir_signal_binding_to_wire(signal, payloads))
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
+                .into_vec()
+                .into_iter()
+                .map(|signal| hir_signal_binding_to_wire(signal, payloads))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
         sources: parts.sources,
         tasks: parts.tasks,
         gates: parts.gates,
         recurrences: parts.recurrences,
         db_changed_bindings: parts.db_changed_bindings,
-    }
+    })
 }
 
 fn hir_runtime_assembly_from_wire(
@@ -566,7 +692,7 @@ fn hir_runtime_assembly_from_wire(
 fn hir_signal_binding_to_wire(
     binding: aivi_runtime::HirSignalBinding,
     payloads: &mut ArtifactPayloadRegistry,
-) -> HirSignalBindingWire {
+) -> Result<HirSignalBindingWire, String> {
     let kind = match binding.kind {
         aivi_runtime::HirSignalBindingKind::Input { signal } => {
             HirSignalBindingKindWire::Input { signal }
@@ -595,18 +721,18 @@ fn hir_signal_binding_to_wire(
                 .into_vec()
                 .into_iter()
                 .map(|clause| hir_reactive_update_binding_to_wire(clause, payloads))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .into_boxed_slice(),
         },
     };
-    HirSignalBindingWire {
+    Ok(HirSignalBindingWire {
         item: binding.item,
         span: binding.span,
         name: binding.name,
         owner: binding.owner,
         kind,
         source_input: binding.source_input,
-    }
+    })
 }
 
 fn hir_signal_binding_from_wire(
@@ -659,8 +785,8 @@ fn hir_signal_binding_from_wire(
 fn hir_reactive_update_binding_to_wire(
     binding: aivi_runtime::HirReactiveUpdateBinding,
     payloads: &mut ArtifactPayloadRegistry,
-) -> HirReactiveUpdateBindingWire {
-    HirReactiveUpdateBindingWire {
+) -> Result<HirReactiveUpdateBindingWire, String> {
+    Ok(HirReactiveUpdateBindingWire {
         span: binding.span,
         keyword_span: binding.keyword_span,
         target_span: binding.target_span,
@@ -671,9 +797,9 @@ fn hir_reactive_update_binding_to_wire(
         trigger_signal: binding.trigger_signal,
         guard_dependencies: binding.guard_dependencies,
         body_dependencies: binding.body_dependencies,
-        compiled_guard: hir_compiled_runtime_expr_to_wire(binding.compiled_guard, payloads),
-        compiled_body: hir_compiled_runtime_expr_to_wire(binding.compiled_body, payloads),
-    }
+        compiled_guard: hir_compiled_runtime_expr_to_wire(binding.compiled_guard, payloads)?,
+        compiled_body: hir_compiled_runtime_expr_to_wire(binding.compiled_body, payloads)?,
+    })
 }
 
 fn hir_reactive_update_binding_from_wire(
@@ -700,12 +826,12 @@ fn hir_reactive_update_binding_from_wire(
 fn hir_compiled_runtime_expr_to_wire(
     expr: aivi_runtime::hir_adapter::HirCompiledRuntimeExpr,
     payloads: &mut ArtifactPayloadRegistry,
-) -> HirCompiledRuntimeExprWire {
-    HirCompiledRuntimeExprWire {
-        backend: payloads.register_program(expr.backend),
+) -> Result<HirCompiledRuntimeExprWire, String> {
+    Ok(HirCompiledRuntimeExprWire {
+        backend: payloads.register_program(expr.backend)?,
         entry_item: expr.entry_item,
         required_signals: expr.required_signals,
-    }
+    })
 }
 
 fn hir_compiled_runtime_expr_from_wire(
@@ -713,8 +839,10 @@ fn hir_compiled_runtime_expr_from_wire(
     wire: HirCompiledRuntimeExprWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<aivi_runtime::hir_adapter::HirCompiledRuntimeExpr, String> {
+    let payload = payloads.load(root, &wire.backend)?;
     Ok(aivi_runtime::hir_adapter::HirCompiledRuntimeExpr {
-        backend: payloads.load(root, &wire.backend)?,
+        backend: payload.program,
+        native_kernels: payload.native_kernels,
         entry_item: wire.entry_item,
         required_signals: wire.required_signals,
     })

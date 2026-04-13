@@ -48,6 +48,73 @@ pub fn decode_compiled_program_binary(bytes: &[u8]) -> Option<CompiledProgram> {
     deserialize_program(bytes)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeKernelArtifact(CachedJitKernelArtifact);
+
+impl NativeKernelArtifact {
+    pub fn requested_kernel(&self) -> KernelId {
+        self.0.requested_kernel
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeKernelArtifactSet {
+    artifacts: BTreeMap<KernelFingerprint, NativeKernelArtifact>,
+}
+
+impl NativeKernelArtifactSet {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.artifacts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.artifacts.is_empty()
+    }
+
+    pub fn get(&self, fingerprint: KernelFingerprint) -> Option<&NativeKernelArtifact> {
+        self.artifacts.get(&fingerprint)
+    }
+
+    pub fn insert(
+        &mut self,
+        fingerprint: KernelFingerprint,
+        artifact: NativeKernelArtifact,
+    ) -> Option<NativeKernelArtifact> {
+        self.artifacts.insert(fingerprint, artifact)
+    }
+}
+
+pub fn compile_native_kernel_artifact(
+    program: &Program,
+    kernel_id: KernelId,
+) -> Result<Option<NativeKernelArtifact>, CodegenErrors> {
+    let artifact = match compile_kernel_jit_with_cache_artifact(program, kernel_id) {
+        Ok((_, artifact)) => artifact,
+        Err(_) => None,
+    };
+    Ok(artifact.map(NativeKernelArtifact))
+}
+
+pub fn encode_native_kernel_artifact_binary(artifact: &NativeKernelArtifact) -> Vec<u8> {
+    serialize_cached_jit_artifact(&artifact.0)
+}
+
+pub fn decode_native_kernel_artifact_binary(bytes: &[u8]) -> Option<NativeKernelArtifact> {
+    deserialize_cached_jit_artifact(bytes).map(NativeKernelArtifact)
+}
+
+pub(crate) fn instantiate_native_kernel_artifact(
+    program: &Program,
+    kernel_id: KernelId,
+    artifact: &NativeKernelArtifact,
+) -> Result<crate::codegen::CompiledJitKernel, CodegenErrors> {
+    instantiate_cached_jit_kernel(program, kernel_id, &artifact.0)
+}
+
 /// Magic bytes: ASCII "AIVI" + format version byte.
 const PROGRAM_CACHE_MAGIC: &[u8; 5] = b"AIVI\x02";
 /// Magic bytes: ASCII "AIVK" + format version byte.

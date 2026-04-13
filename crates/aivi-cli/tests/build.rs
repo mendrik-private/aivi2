@@ -125,6 +125,26 @@ value screenView =
             .is_some(),
         "bundle should write at least one backend payload file"
     );
+    let payload_entries = fs::read_dir(bundle_path.join("payloads"))
+        .expect("bundle should materialize backend payloads")
+        .map(|entry| {
+            entry
+                .expect("payload dir entries should read")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        payload_entries.iter().any(|entry| entry.ends_with(".json")),
+        "bundle should keep serialized backend payloads, got: {payload_entries:?}"
+    );
+    assert!(
+        payload_entries
+            .iter()
+            .any(|entry| entry.starts_with("native-") && entry.ends_with(".bin")),
+        "bundle should emit native kernel sidecars, got: {payload_entries:?}"
+    );
     assert!(
         !bundle_path.join("app/main.aivi").exists(),
         "source-free bundles should not need workspace source files"

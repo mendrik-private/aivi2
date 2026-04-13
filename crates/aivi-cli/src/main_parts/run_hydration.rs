@@ -384,6 +384,7 @@ impl<'a> RunFragmentCompiler<'a> {
             .or_insert_with(|| {
                 Arc::new(RunFragmentExecutionUnit::new(
                     unit.backend.clone(),
+                    Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
                     unit.execution_cache_key,
                 ))
             })

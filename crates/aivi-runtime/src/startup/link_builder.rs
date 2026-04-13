@@ -13,6 +13,7 @@ struct LinkArtifacts {
 struct LinkBuilder<'a> {
     assembly: &'a HirRuntimeAssembly,
     backend: &'a BackendProgram,
+    backend_native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
     errors: Vec<BackendRuntimeLinkError>,
     hir_to_backend: BTreeMap<hir::ItemId, BackendItemId>,
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
@@ -30,6 +31,7 @@ impl<'a> LinkBuilder<'a> {
     fn new(
         assembly: &'a HirRuntimeAssembly,
         backend: &'a BackendProgram,
+        backend_native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
         seed: &BackendRuntimeLinkSeed,
     ) -> Self {
         let mut hir_to_backend = BTreeMap::new();
@@ -46,6 +48,7 @@ impl<'a> LinkBuilder<'a> {
         Self {
             assembly,
             backend,
+            backend_native_kernels,
             errors,
             hir_to_backend,
             signal_items_by_handle: BTreeMap::new(),
@@ -283,7 +286,12 @@ impl<'a> LinkBuilder<'a> {
                 .collect_pipeline_signal_handles(binding.item, pipeline_ids.as_ref())
                 .into_boxed_slice();
             let seed_eval_lane =
-                self.kernel_eval_lane(self.backend, info.body_kernel, info.dependency_layouts.as_slice());
+                self.kernel_eval_lane(
+                    self.backend,
+                    self.backend_native_kernels,
+                    info.body_kernel,
+                    info.dependency_layouts.as_slice(),
+                );
             self.reactive_signals.insert(
                 reactive,
                 LinkedReactiveSignal {
@@ -523,7 +531,12 @@ impl<'a> LinkBuilder<'a> {
 
             let dependency_layouts = info.dependency_layouts.clone().into_boxed_slice();
             let eval_lane =
-                self.kernel_eval_lane(self.backend, body_kernel, dependency_layouts.as_ref());
+                self.kernel_eval_lane(
+                    self.backend,
+                    self.backend_native_kernels,
+                    body_kernel,
+                    dependency_layouts.as_ref(),
+                );
 
             self.derived_signals.insert(
                 derived,
@@ -703,6 +716,7 @@ impl<'a> LinkBuilder<'a> {
     fn kernel_eval_lane(
         &self,
         backend: &BackendProgram,
+        native_kernels: &aivi_backend::NativeKernelArtifactSet,
         kernel: Option<KernelId>,
         dependency_layouts: &[aivi_backend::LayoutId],
     ) -> LinkedEvalLane {
@@ -712,7 +726,11 @@ impl<'a> LinkBuilder<'a> {
         if !native_kernel_plans_enabled() {
             return LinkedEvalLane::Fallback;
         }
-        let Some(native_plan) = aivi_backend::NativeKernelPlan::compile(backend, kernel) else {
+        let Some(native_plan) = aivi_backend::NativeKernelPlan::compile_with_native_artifacts(
+            backend,
+            Some(native_kernels),
+            kernel,
+        ) else {
             return LinkedEvalLane::Fallback;
         };
         LinkedEvalLane::Native(LinkedNativeKernelEval {
@@ -731,7 +749,12 @@ impl<'a> LinkBuilder<'a> {
         else {
             return LinkedEvalLane::Fallback;
         };
-        self.kernel_eval_lane(fragment.backend.as_ref(), Some(kernel), &[])
+        self.kernel_eval_lane(
+            fragment.backend.as_ref(),
+            fragment.native_kernels.as_ref(),
+            Some(kernel),
+            &[],
+        )
     }
 
     fn collect_pipeline_signal_handles(
