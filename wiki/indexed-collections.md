@@ -33,7 +33,7 @@ Important nuance: `replaceAt` still accepts the original tuple-shaped `(Int, Int
 
 The ambient prelude now re-exports:
 
-- `foldOption`, `mapOr`, `isSomeAnd`
+- `mapOr`, `isSomeAnd`
 - `indexed`, `mapWithIndex`, `reduceWithIndex`
 - `count`, `findMap`
 

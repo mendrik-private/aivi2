@@ -2,6 +2,8 @@
 
 Focused audit notes for the uniform-elegance cleanup backlog.
 
+Status: backlog closed on 2026-04-13. This page now records the post-closeout state instead of the pre-fix drift that originally triggered the backlog.
+
 ## Executable class support documentation
 
 - Canonical human-facing source: `manual/guide/typeclasses.md#canonical-builtin-executable-support`
@@ -61,41 +63,38 @@ This is a pragmatic design, but it is less Wadler-clean than a single abstractio
 
 This is an interesting compromise, but it weakens the “one algebraic story everywhere” feel.
 
-### The stdlib is algebraic internally, but concrete at the public surface
+### The stdlib surface is now much closer to the algebraic story
 
 - `Result` and `Validation` tell a principled story: `Result` provides sequential `flatMap`, while `Validation` keeps independent accumulation through `zipValidation` over `NonEmptyList` errors. (`stdlib/aivi/result.aivi:48-55`; `stdlib/aivi/validation.aivi:6-24`; `stdlib/aivi/validation.aivi:71-79`)
 - `List` is implemented in a strongly fold-derived style: `length`, `head`, `map`, `filter`, `flatten`, `flatMap`, `any`, `all`, `find`, and related combinators are visibly built from `reduce`. (`stdlib/aivi/list.aivi:140-187`; `stdlib/aivi/list.aivi:216-282`)
-- But the prelude foregrounds concrete helpers such as `mapOption`, `mapResult`, `flatMapOption`, `flatMapResult`, `foldOption`, and `foldResult`, even while exporting class names like `Functor`, `Applicative`, and `Monad`. (`stdlib/aivi/prelude.aivi:117-183`; `stdlib/aivi/prelude.aivi:385`)
-- The prelude also exports the `Validation` type without re-exporting its main combinators, which makes the public abstraction story feel incomplete. (`stdlib/aivi/prelude.aivi:1-115`; `stdlib/aivi/prelude.aivi:385`; `stdlib/aivi/validation.aivi:81-92`)
+- The prelude cleanup now makes the ambient story more class-polymorphic first: bare `join` is the generic `Monad.join`, text joining stays explicit on `aivi.text.join`, and legacy pair aliases no longer define the ambient surface. (`stdlib/aivi/prelude.aivi`; `stdlib/aivi/text.aivi`; `stdlib/aivi/pair.aivi`; `manual/stdlib/prelude.md`)
+- `Validation` is now first-class in the prelude surface, with ambient `validationGetOrElse`, `validationMapErr`, `validationToResult`, `validationFromResult`, `validationToOption`, `validationMap`, `validationAndThen`, `zipValidation`, and `validationFold`. (`stdlib/aivi/prelude.aivi`; `manual/stdlib/prelude.md`; `manual/guide/typeclasses.md`)
 
-The result is a library that often *implements* algebraically but does not always *present itself* algebraically.
+The result is still pragmatic rather than maximally abstract, but the main ambient surface now teaches the algebraic model far more directly.
 
-### Some stdlib APIs sacrifice semantic clarity
+### The high-friction stdlib API mismatches were resolved
 
-- `List.maximum`, `minimum`, `unique`, and `sortBy` all require explicit comparators instead of using `Ord`/`Eq`-driven genericity when instances exist. (`stdlib/aivi/list.aivi:388-396`; `stdlib/aivi/list.aivi:465-519`)
-- `List.contains` is just `any` under a new name, taking a predicate instead of testing membership. That is flexible, but the name suggests a more specific meaning than the implementation provides. (`stdlib/aivi/list.aivi:398-400`)
-- `Matrix.filled` silently turns negative dimensions into `MkMatrix 0 0 []`, unlike `init`/`fromRows`, which use `Result` for invalid shapes. (`stdlib/aivi/matrix.aivi:120-128`; `stdlib/aivi/matrix.aivi:248-251`)
+- `List.maximum`, `minimum`, `unique`, and `sort` now use ambient `Ord` / `Eq`, while the explicit comparator-taking variants are named `maximumBy`, `minimumBy`, `uniqueBy`, and `sortBy`. (`stdlib/aivi/list.aivi`; `manual/stdlib/list.md`)
+- `List.contains` now means `Eq`-driven membership; predicate search stays on `any`. (`stdlib/aivi/list.aivi`; `manual/stdlib/list.md`; `wiki/equality-semantics.md`)
+- `Matrix.filled` now follows the checked constructor policy and returns `Result MatrixError (Matrix A)` for invalid dimensions, matching `init` and `fromRows`. (`stdlib/aivi/matrix.aivi`; `manual/stdlib/matrix.md`; `wiki/demo-audit.md`)
 
-## Current documentation drift
+## Documentation status after cleanup
 
-### The RFC underclaims the executable class story
+### RFC, manual, and wiki now tell the same primary story
 
-- The RFC header still lists `Monad`/`Chain` lowering and `&|>` typed-core lowering as known open gaps. (`AIVI_RFC.md:1-5`)
-- The current implementation no longer matches that description, and the typeclass guide is internally split: its support table still shows `Task` as applicative-only, but the explanatory note immediately below says `Task` has builtin executable `Functor`, `Apply`, `Applicative`, `Chain`, and `Monad` support, which matches the runtime evaluator. (`manual/guide/typeclasses.md:56-69`; `crates/aivi-backend/src/runtime/evaluator.rs:1846-1860`; `crates/aivi-backend/src/runtime/evaluator.rs:2048-2074`; `crates/aivi-backend/src/runtime/evaluator.rs:2180-2204`; `crates/aivi-backend/src/runtime/evaluator.rs:2288-2303`)
+- The RFC header now reflects the current executable slice instead of claiming `Monad` / `Chain` and `&|>` typed-core lowering are still missing. (`AIVI_RFC.md`)
+- The typeclass guide now uses the correct `Applicative G => ...` signature form, the builtin support table correctly marks `Task` as monadic, and the execution boundary between builtin carriers and authored instances is explicit. (`manual/guide/typeclasses.md`; `crates/aivi-core/src/class_support.rs`)
+- The classes guide and law docs now teach `!=` as ordinary surface inequality reusing `Eq`, not as a second canonical instance member. (`manual/guide/classes.md`; `manual/guide/class-laws.md`)
+- The wiki now records the prelude surface policy, canonical executable-support ownership, law coverage, list membership semantics, and checked matrix constructor policy. (`wiki/prelude-surface-policy.md`; `wiki/type-system.md`; `wiki/stdlib.md`; `wiki/equality-semantics.md`)
 
-### Some guide examples and signatures still disagree with the current semantic story
+## Backlog outcomes
 
-- The typeclass guide writes `Traversable.traverse` as `Applicative G -> ...`, while the language syntax and RFC use the constraint form `Applicative G => ...`. (`manual/guide/typeclasses.md:47`; `syntax.md:77-109`; `AIVI_RFC.md:734-737`)
-- The classes guide still shows `instance Eq Calendar` defining `(!=)`, while the RFC says `!=` is sugar over `not (==)` and has no separate dictionary slot. (`manual/guide/classes.md:159-162`; `AIVI_RFC.md:845-847`)
-
-## Recommendations
-
-1. **Promote one executable source of truth for class support.** The typeclass guide is now closer to reality than the RFC header; the RFC should stop claiming `Monad`/`Chain` and `&|>` are missing if that is no longer true. (`AIVI_RFC.md:1-5`; `manual/guide/typeclasses.md:56-69`)
-2. **Document the builtin-vs-authored instance split as an architectural boundary.** Right now it is discoverable only by reading the guide, tests, and backend. Make the “builtin carriers plus unary hidden-callable path” model explicit in one canonical place. (`manual/guide/typeclasses.md:106-123`; `crates/aivi-backend/tests/foundations_parts/runtime_eval.rs:804-840`)
-3. **Decide whether the stdlib wants a class-polymorphic public face or a concrete-first one.** Either is defensible, but the current hybrid prelude weakens the elegance of the class hierarchy. (`stdlib/aivi/prelude.aivi:117-183`; `stdlib/aivi/prelude.aivi:385`)
-4. **Extend the law/documentation story to match the advertised hierarchy.** `Functor`, `Applicative`, and `Monad` get the clearest law treatment; the other prominently named classes deserve equally explicit guidance. (`manual/guide/typeclasses.md:40-49`; `crates/aivi-hir/src/lower/ambient.rs:15-123`)
-5. **Tighten a few misleading APIs.** `List.contains` and `Matrix.filled` are the clearest places where the current surface sacrifices precision for convenience. (`stdlib/aivi/list.aivi:398-400`; `stdlib/aivi/matrix.aivi:248-251`)
+1. **Canonical executable class support source landed.** Human docs now point at the registry-backed table generated from `crates/aivi-core/src/class_support.rs`.
+2. **Builtin-vs-authored execution boundary landed.** The manual and wiki now state the split explicitly instead of leaving it implicit in tests and backend code.
+3. **Prelude surface was rebalanced.** `Validation` is coherent in prelude, bare `join` is generic, text join is explicit, and legacy pair aliases no longer dominate the ambient story.
+4. **Misleading list and matrix APIs were corrected.** `contains` is membership, comparator-taking variants carry `...By` names, and `Matrix.filled` is checked instead of lossy.
+5. **Law/docs/RFC/wiki drift was closed.** The class laws page, RFC header, typeclass guide, classes guide, and supporting wiki pages now describe the same executable slice.
 
 ## Bottom line
 
-If the question is whether AIVI *thinks* like Wadler, the answer is mostly yes. If the question is whether the current implementation and stdlib expose that thinking with the same uniform elegance, the answer is not yet: the design philosophy is ahead of the surface curation and documentation consistency.
+If the question is whether AIVI *thinks* like Wadler, the answer is yes. After the cleanup backlog, the implementation, stdlib surface, RFC, manual, and wiki are much closer to one coherent algebraic story. The main remaining caveat is architectural explicitness: builtin carriers and authored unary higher-kinded instances still use different executable paths, but that boundary is now deliberate, documented, and test-backed rather than accidental drift.

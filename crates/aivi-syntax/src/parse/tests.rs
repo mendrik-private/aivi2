@@ -1298,7 +1298,7 @@ fn parser_tracks_constraint_prefixes_on_class_members() {
 fn parser_rejects_class_head_constraint_prefixes() {
     let (_, parsed) = load(
         r#"class (Functor F, Foldable F) -> Traversable F = {
-    traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
+    traverse : Applicative G => (A -> G B) -> F A -> G (F B)
 }
 "#,
     );

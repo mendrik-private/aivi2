@@ -122,6 +122,6 @@ Recent ergonomics additions:
 - `aivi.matrix`: `coord`, `coords`, `entries`, `positionsWhere`, `count`, `modifyAt`, `replaceMany`
 - `aivi.pair`: preferred `first`, `second`, `mapFirst`, `mapSecond` aliases over older `fst`, `snd`, `mapFst`, `mapSnd`
 - low-level compiler-backed modules now documented in the manual: `aivi.api`, `aivi.arithmetic`, `aivi.bits`, `aivi.data.json`
-- `aivi.prelude`: ambient `foldOption`, `mapOr`, `isSomeAnd`, `indexed`, `mapWithIndex`, `reduceWithIndex`, `count`, `findMap`, `first`, `second`, `mapFirst`, `mapSecond`
+- `aivi.prelude`: ambient `validationGetOrElse`, `validationMapErr`, `zipValidation`, `validationFold`, `mapOr`, `isSomeAnd`, `indexed`, `mapWithIndex`, `reduceWithIndex`, `count`, `findMap`, `first`, `second`, `mapFirst`, `mapSecond`
 
 *See also: [indexed-collections.md](indexed-collections.md), [type-system.md](type-system.md), [signal-model.md](signal-model.md)*

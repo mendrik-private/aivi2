@@ -255,6 +255,11 @@ and small `RayState` / animation updates now use `<|` patches instead of manual 
 Closed the last Wadler backlog item by updating `demos/reversi.aivi` to use checked matrix initialization and
 an explicit setup-error state, then refreshed stale snapshots, CLI fixtures, and formatter-guarded AIVI files.
 
+## [2026-04-13] ingest | post-merge drift cleanup
+
+Ran a post-merge codebase pass and corrected the remaining stale historical/wiki notes.  
+Updated `wiki/wadler-audit.md`, `wiki/stdlib.md`, `wiki/indexed-collections.md`, and `wiki/index.md` so the wiki now matches the landed prelude, list, matrix, RFC, and class-law state.
+
 Implemented `param!` and `param { path! }` header sugar so `func` and companion bodies can begin
 with subject-rooted `|>` or `<|` continuations without an explicit `=>`.
 
