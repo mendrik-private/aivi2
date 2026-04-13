@@ -118,6 +118,11 @@ Added a focused GTK regression test in `crates/aivi-cli/src/run_session.rs` that
 Documented the follow-up runtime and GTK bridge changes behind the Reversi latency fix.
 
 - `crates/aivi-runtime/src/glib_adapter.rs`: direct UI publications can now drain only the current scheduler queue instead of also draining timer wakeups
+
+## [2026-04-12] query | Wadler-style audit
+
+Audited AIVI's language shape, stdlib, and executable typeclass support through a Philip Wadler lens.  
+Added [wadler-audit.md](wadler-audit.md); key findings were strong algebraic intent, a less uniform builtin-vs-authored execution story, and RFC drift behind the current executable class support.
 - `crates/aivi-gtk/src/schema.rs` + `crates/aivi-gtk/src/host.rs`: buttons now support `focusable={Bool}` so board cells can suppress focus flashes
 
 ## [2026-04-08] ingest | ADT companion function syntax
