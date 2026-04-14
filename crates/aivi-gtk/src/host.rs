@@ -434,6 +434,7 @@ where
             GtkConcreteWidgetKind::MultilineEntry => {
                 gtk::TextView::new().upcast::<gtk::Widget>()
             }
+            GtkConcreteWidgetKind::Picture => gtk::Picture::new().upcast::<gtk::Widget>(),
         };
         ensure_aivi_widget_styles();
         Ok((schema, widget))
@@ -889,6 +890,16 @@ where
                         expected_type: "gtk::TextView",
                     })?
                     .set_monospace(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::PictureCanShrink) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Picture>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Picture",
+                    })?
+                    .set_can_shrink(value);
             }
             _ => {
                 return Err(self.invalid_property_value(
@@ -1539,6 +1550,56 @@ where
                         expected_type: "gtk::TextView",
                     })?
                     .set_wrap_mode(wrap_mode);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::PictureFilename) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Picture>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Picture",
+                    })?
+                    .set_filename(if value.is_empty() {
+                        None::<&str>
+                    } else {
+                        Some(value)
+                    });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::PictureResource) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Picture>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Picture",
+                    })?
+                    .set_resource(if value.is_empty() { None } else { Some(value) });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::PictureContentFit) => {
+                let fit = match value {
+                    "fill" => gtk::ContentFit::Fill,
+                    "cover" => gtk::ContentFit::Cover,
+                    "scale-down" => gtk::ContentFit::ScaleDown,
+                    _ => gtk::ContentFit::Contain,
+                };
+                widget
+                    .clone()
+                    .downcast::<gtk::Picture>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Picture",
+                    })?
+                    .set_content_fit(fit);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::PictureAltText) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Picture>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Picture",
+                    })?
+                    .set_alternative_text(if value.is_empty() { None } else { Some(value) });
             }
             _ => {
                 return Err(self.invalid_property_value(

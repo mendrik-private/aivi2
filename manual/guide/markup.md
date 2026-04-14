@@ -593,3 +593,19 @@ A multi-line text editor backed by `gtk::TextView`.
 
 **Properties:** `text`, `editable` (Bool), `monospace` (Bool), `topMargin` (Int), `bottomMargin` (Int), `leftMargin` (Int), `rightMargin` (Int)  
 **Events:** `onChange` (Text)
+
+#### `Picture`
+
+Displays an image from a file path or a GResource path, with configurable content-fit
+behaviour. Use `Picture` instead of `Image` when you need layout-aware scaling.
+
+```aivi
+// <unparseable item>
+```
+
+**Properties:**
+- `filename` (Text) — absolute file path to load; empty string clears the image
+- `resource` (Text) — GResource path (e.g. `/com/example/app/logo.png`); empty clears
+- `contentFit` (Text) — one of `contain` (default), `fill`, `cover`, `scale-down`
+- `altText` (Text) — accessibility description
+- `canShrink` (Bool) — allow the picture to shrink below its natural size (default `True`)

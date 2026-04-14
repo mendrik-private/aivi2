@@ -84,6 +84,8 @@ pub enum GtkConcreteWidgetKind {
     Overlay,
     // Group G: Input
     MultilineEntry,
+    // Group H: Picture
+    Picture,
 }
 
 impl GtkConcreteWidgetKind {
@@ -133,6 +135,7 @@ impl GtkConcreteWidgetKind {
             Self::PasswordEntryRow => "PasswordEntryRow",
             Self::Overlay => "Overlay",
             Self::MultilineEntry => "MultilineEntry",
+            Self::Picture => "Picture",
         }
     }
 }
@@ -222,6 +225,8 @@ pub enum GtkBoolPropertySetter {
     // Group G: MultilineEntry
     MultilineEntryEditable,
     MultilineEntryMonospace,
+    // Group H: Picture
+    PictureCanShrink,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -289,6 +294,11 @@ pub enum GtkTextPropertySetter {
     // Group G: MultilineEntry
     MultilineEntryText,
     MultilineEntryWrapMode,
+    // Group H: Picture
+    PictureFilename,
+    PictureResource,
+    PictureContentFit,
+    PictureAltText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1922,6 +1932,70 @@ const IMAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[],
 };
 
+// ── Picture-specific properties ───────────────────────────────────────────────
+
+const PICTURE_FILENAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "filename",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::PictureFilename),
+};
+
+const PICTURE_RESOURCE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "resource",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::PictureResource),
+};
+
+const PICTURE_CONTENT_FIT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "contentFit",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::PictureContentFit),
+};
+
+const PICTURE_ALT_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "altText",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::PictureAltText),
+};
+
+const PICTURE_CAN_SHRINK_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "canShrink",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::PictureCanShrink),
+};
+
+const PICTURE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Picture",
+    kind: GtkConcreteWidgetKind::Picture,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        PICTURE_FILENAME_PROPERTY,
+        PICTURE_RESOURCE_PROPERTY,
+        PICTURE_CONTENT_FIT_PROPERTY,
+        PICTURE_ALT_TEXT_PROPERTY,
+        PICTURE_CAN_SHRINK_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
 const SPINNER_SPINNING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "spinning",
     value_shape: GtkPropertyValueShape::Bool,
@@ -3314,6 +3388,7 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     PASSWORD_ENTRY_ROW_SCHEMA,
     OVERLAY_SCHEMA,
     MULTILINE_ENTRY_SCHEMA,
+    PICTURE_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -3439,6 +3514,7 @@ mod tests {
                 "PasswordEntryRow",
                 "Overlay",
                 "MultilineEntry",
+                "Picture",
             ]
         );
     }

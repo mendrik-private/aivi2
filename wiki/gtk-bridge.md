@@ -46,7 +46,7 @@ Key lookup functions:
 - `lookup_widget_event(schema, name)` — look up a `GtkEventDescriptor`
 - `supported_widget_schemas()` — full list of supported widgets
 
-**Widget kinds** (`GtkConcreteWidgetKind`): 44 supported GTK4 and Adwaita widgets as of this writing. Includes: Window, HeaderBar, Paned, Box, ScrolledWindow, Frame, Viewport, Label, Button, Entry, Switch, CheckButton, ToggleButton, SpinButton, Scale, Image, Spinner, ProgressBar, Revealer, Separator, StatusPage, Clamp, Banner, ToolbarView, ActionRow, ExpanderRow, SwitchRow, SpinRow, EntryRow, ListBox, ListBoxRow, DropDown, SearchEntry, Expander, NavigationView, NavigationPage, ToastOverlay, PreferencesGroup, PreferencesPage, PreferencesWindow, ComboRow, PasswordEntryRow, Overlay, MultilineEntry.
+**Widget kinds** (`GtkConcreteWidgetKind`): 45 supported GTK4 and Adwaita widgets as of this writing. Includes: Window, HeaderBar, Paned, Box, ScrolledWindow, Frame, Viewport, Label, Button, Entry, Switch, CheckButton, ToggleButton, SpinButton, Scale, Image, Spinner, ProgressBar, Revealer, Separator, StatusPage, Clamp, Banner, ToolbarView, ActionRow, ExpanderRow, SwitchRow, SpinRow, EntryRow, ListBox, ListBoxRow, DropDown, SearchEntry, Expander, NavigationView, NavigationPage, ToastOverlay, PreferencesGroup, PreferencesPage, PreferencesWindow, ComboRow, PasswordEntryRow, Overlay, MultilineEntry, Picture.
 
 **Property setters** (`GtkPropertySetter`):
 - `GtkTextPropertySetter` — sets a string property
