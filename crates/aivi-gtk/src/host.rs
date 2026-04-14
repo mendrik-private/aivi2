@@ -214,6 +214,9 @@ where
     /// Needed so the classes can be cleanly replaced on each property update
     /// without accumulating stale class names.
     managed_css_classes: RefCell<BTreeMap<usize, BTreeSet<String>>>,
+    /// Tracks the list of response IDs currently added to each AlertDialog,
+    /// keyed by the widget's GObject pointer.
+    alert_dialog_responses: RefCell<BTreeMap<usize, Vec<Box<str>>>>,
 }
 
 impl<V> Default for GtkConcreteHost<V>
@@ -230,6 +233,7 @@ where
             queued_window_keys: Rc::new(GtkWindowKeyQueue::default()),
             event_notifier: Rc::new(RefCell::new(None)),
             managed_css_classes: RefCell::new(BTreeMap::new()),
+            alert_dialog_responses: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -3314,6 +3318,9 @@ where
             }
         }
         self.managed_css_classes
+            .borrow_mut()
+            .remove(&(mounted.widget.as_ptr() as usize));
+        self.alert_dialog_responses
             .borrow_mut()
             .remove(&(mounted.widget.as_ptr() as usize));
         if mounted.schema.is_window_root() {

@@ -1,8 +1,8 @@
 {
   "root": "manual",
-  "scanned_files": 93,
-  "scanned_blocks": 963,
-  "rewritten_blocks": 6,
+  "scanned_files": 94,
+  "scanned_blocks": 969,
+  "rewritten_blocks": 0,
   "unresolved_fragments": 160,
   "entries": [
     {
@@ -2844,13 +2844,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellX`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellX`?"
         },
         {
           "severity": "error",
