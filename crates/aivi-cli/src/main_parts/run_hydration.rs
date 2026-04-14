@@ -737,7 +737,7 @@ fn plan_run_node<'a>(
             )?,
         }),
         GtkBridgeNodeKind::Show(show) => {
-            let when = runtime_bool(evaluate_run_input(
+            let when = runtime_truthy_bool(evaluate_run_input(
                 &shared.inputs,
                 globals,
                 show.when.input,
@@ -747,7 +747,7 @@ fn plan_run_node<'a>(
             )?)
             .ok_or_else(|| {
                 format!(
-                    "run view `{view_name}` expected `<show when>` on {instance} to evaluate to Bool"
+                    "run view `{view_name}` expected `<show when>` on {instance} to evaluate to Bool or a canonical truthy/falsy carrier"
                 )
             })?;
             let (keep_mounted_input, keep_mounted) = match &show.mount {
@@ -1297,6 +1297,19 @@ fn evaluate_compiled_run_text<'a>(
 
 fn runtime_bool(value: RuntimeValue) -> Option<bool> {
     strip_signal_runtime_value(value).as_bool()
+}
+
+fn runtime_truthy_bool(value: RuntimeValue) -> Option<bool> {
+    match strip_signal_runtime_value(value) {
+        RuntimeValue::Bool(value) => Some(value),
+        RuntimeValue::OptionNone
+        | RuntimeValue::ResultErr(_)
+        | RuntimeValue::ValidationInvalid(_) => Some(false),
+        RuntimeValue::OptionSome(_)
+        | RuntimeValue::ResultOk(_)
+        | RuntimeValue::ValidationValid(_) => Some(true),
+        _ => None,
+    }
 }
 
 fn runtime_list_values(value: RuntimeValue) -> Option<Vec<RuntimeValue>> {

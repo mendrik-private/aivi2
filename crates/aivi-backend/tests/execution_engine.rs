@@ -745,7 +745,12 @@ value filledNegative:Int =
     let mut interpreter = KernelEvaluator::new(&backend);
     let globals = BTreeMap::new();
 
-    for name in ["filledResult", "filledWidth", "filledRows", "filledNegative"] {
+    for name in [
+        "filledResult",
+        "filledWidth",
+        "filledRows",
+        "filledNegative",
+    ] {
         let item = find_item(&backend, name);
         assert_eq!(
             jit.evaluate_item(item, &globals)

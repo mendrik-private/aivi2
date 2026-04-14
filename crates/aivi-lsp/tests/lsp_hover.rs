@@ -189,8 +189,8 @@ async fn hover_on_from_source_survives_multibyte_text_in_reversi() {
     );
 
     assert!(
-        markup.contains("signal state : Signal {"),
-        "hover on the `from state` source should resolve without panicking; got: {}",
+        markup.contains("signal state : Signal State"),
+        "hover on the `state` reference inside `from state` should resolve without panicking; got: {}",
         markup
     );
 }

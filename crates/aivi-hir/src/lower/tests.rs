@@ -130,6 +130,19 @@ fn find_value<'a>(module: &'a crate::Module, name: &str) -> &'a crate::ValueItem
     }
 }
 
+fn resolved_signal_name(module: &crate::Module, expr_id: crate::ExprId) -> String {
+    let ExprKind::Name(reference) = &module.exprs()[expr_id].kind else {
+        panic!("expected expression to lower as a direct name reference");
+    };
+    let ResolutionState::Resolved(TermResolution::Item(item_id)) = reference.resolution else {
+        panic!("expected expression to resolve to a same-module item");
+    };
+    match &module.items()[item_id] {
+        Item::Signal(signal) => signal.name.text().to_owned(),
+        other => panic!("expected resolved item to be a signal, found {other:?}"),
+    }
+}
+
 fn signal_dependency_names(module: &crate::Module, item: &crate::SignalItem) -> Vec<String> {
     item.signal_dependencies
         .iter()
@@ -152,6 +165,105 @@ fn signal_item_names(module: &crate::Module, dependencies: &[crate::ItemId]) -> 
             }
         })
         .collect()
+}
+
+#[test]
+fn lowers_request_resource_companions_and_rewrites_resource_members() {
+    let lowered = lower_text(
+        "resource-companions.aivi",
+        r#"signal refresh : Signal Unit
+signal enabled = True
+
+@source http.get "/users" with {
+  refreshOn: refresh,
+  activeWhen: enabled
+}
+signal usersResult : Signal (Result Text (List Text))
+
+value rerun = usersResult.run
+value success = usersResult.success
+value failure = usersResult.error
+value loading = usersResult.loading
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "resource companions should lower cleanly, got diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+
+    let module = lowered.module();
+    let users_result = find_signal(module, "usersResult");
+    let run = find_signal(module, "usersResult#run");
+    let trigger = find_signal(module, "usersResult#trigger");
+    let success = find_signal(module, "usersResult#success");
+    let failure = find_signal(module, "usersResult#error");
+    let loading = find_signal(module, "usersResult#loading");
+
+    assert!(
+        run.body.is_none(),
+        "resource run companion should lower as an input-backed signal"
+    );
+    assert_eq!(
+        signal_dependency_names(module, trigger),
+        vec!["refresh".to_owned(), "usersResult#run".to_owned()],
+        "resource trigger helper should depend on the explicit trigger and the hidden run input"
+    );
+    assert_eq!(
+        signal_dependency_names(module, success),
+        vec!["usersResult".to_owned()],
+        "success companion should depend on the raw source signal"
+    );
+    assert_eq!(
+        signal_dependency_names(module, failure),
+        vec!["usersResult".to_owned()],
+        "error companion should depend on the raw source signal"
+    );
+    let loading_dependencies = signal_dependency_names(module, loading);
+    assert!(
+        loading_dependencies.contains(&"enabled".to_owned()),
+        "loading companion should track activeWhen"
+    );
+    assert!(
+        loading_dependencies.contains(&"usersResult#trigger".to_owned()),
+        "loading companion should react to hidden retriggers"
+    );
+    assert!(
+        loading_dependencies.contains(&"usersResult".to_owned()),
+        "loading companion should settle on source publications"
+    );
+
+    let source_dependencies = signal_item_names(
+        module,
+        &users_result
+            .source_metadata
+            .as_ref()
+            .unwrap()
+            .lifecycle_dependencies
+            .explicit_triggers,
+    );
+    assert_eq!(
+        source_dependencies,
+        vec!["usersResult#trigger".to_owned()],
+        "request-like source should wake from the synthesized trigger helper"
+    );
+
+    assert_eq!(
+        resolved_signal_name(module, find_value(module, "rerun").body),
+        "usersResult#run"
+    );
+    assert_eq!(
+        resolved_signal_name(module, find_value(module, "success").body),
+        "usersResult#success"
+    );
+    assert_eq!(
+        resolved_signal_name(module, find_value(module, "failure").body),
+        "usersResult#error"
+    );
+    assert_eq!(
+        resolved_signal_name(module, find_value(module, "loading").body),
+        "usersResult#loading"
+    );
 }
 
 #[test]
@@ -1546,9 +1658,9 @@ fn preserves_bodyless_source_signals_and_provider_paths() {
         "interpolated source arguments should mark the source as reactive"
     );
     assert_eq!(
-        metadata.signal_dependencies.len(),
-        1,
-        "source metadata should capture the static signal dependency set"
+        signal_item_names(lowered.module(), &metadata.signal_dependencies),
+        vec!["apiHost".to_owned(), "users#trigger".to_owned()],
+        "request-like source metadata should include both the reactive argument dependency and the synthesized trigger helper"
     );
     assert_eq!(
         users.signal_dependencies, metadata.signal_dependencies,
@@ -2298,8 +2410,8 @@ value cleanup = files.delete "cache.txt"
     );
     assert_eq!(
         signal_dependency_names(lowered.module(), config),
-        vec!["projectRoot".to_owned()],
-        "synthesized provider arguments should depend on the inherited handle root, not the handle anchor itself"
+        vec!["projectRoot".to_owned(), "config#trigger".to_owned()],
+        "capability-lowered request sources should depend on both the inherited handle root and the synthesized trigger helper"
     );
 
     let cleanup = find_value(lowered.module(), "cleanup");

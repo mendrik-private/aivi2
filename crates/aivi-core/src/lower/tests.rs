@@ -40,7 +40,8 @@ fn lower_text(path: &str, text: &str) -> aivi_hir::LoweringResult {
 }
 
 fn expect_executable_evidence_item(core: &crate::Module, expr_id: crate::ExprId) -> crate::ItemId {
-    let crate::ExprKind::Reference(Reference::ExecutableEvidence(item)) = &core.exprs()[expr_id].kind
+    let crate::ExprKind::Reference(Reference::ExecutableEvidence(item)) =
+        &core.exprs()[expr_id].kind
     else {
         panic!("expected executable evidence item reference");
     };
@@ -77,7 +78,9 @@ fn expect_builtin_evidence_item(
                 "builtin evidence wrapper should forward each synthetic parameter"
             );
         }
-        other => panic!("builtin evidence item should lower to a builtin wrapper body, found {other:?}"),
+        other => {
+            panic!("builtin evidence item should lower to a builtin wrapper body, found {other:?}")
+        }
     }
     item
 }
@@ -1192,7 +1195,8 @@ value totalAuthored : Int =
         "uniform higher-kinded evidence fixture should lower to HIR: {:?}",
         local.diagnostics()
     );
-    let local_core = lower_module(local.module()).expect("local uniform evidence fixture should lower into typed core");
+    let local_core = lower_module(local.module())
+        .expect("local uniform evidence fixture should lower into typed core");
 
     let mapped_builtin = expect_builtin_evidence_item(
         &local_core,
@@ -1219,8 +1223,10 @@ value totalAuthored : Int =
     );
 
     for name in ["mappedAuthored", "totalAuthored"] {
-        let evidence_item =
-            expect_executable_evidence_item(&local_core, expect_value_apply_callee(&local_core, name));
+        let evidence_item = expect_executable_evidence_item(
+            &local_core,
+            expect_value_apply_callee(&local_core, name),
+        );
         let hidden = &local_core.items()[evidence_item];
         assert!(
             hidden.name.starts_with("instance#"),
@@ -1282,8 +1288,8 @@ export (Box, one)
         "imported higher-kinded evidence fixture should lower to HIR: {:?}",
         imported.diagnostics()
     );
-    let imported_core =
-        lower_module(imported.module()).expect("imported higher-kinded evidence fixture should lower into typed core");
+    let imported_core = lower_module(imported.module())
+        .expect("imported higher-kinded evidence fixture should lower into typed core");
 
     for name in ["mappedImported", "totalImported"] {
         let evidence_item = expect_executable_evidence_item(
@@ -1410,7 +1416,10 @@ value filtered:List Int =
     else {
         panic!("compare evidence item should lower to a builtin wrapper call");
     };
-    assert_eq!(compare_arguments.len(), core.items()[ordered_item].parameters.len());
+    assert_eq!(
+        compare_arguments.len(),
+        core.items()[ordered_item].parameters.len()
+    );
     let crate::ExprKind::Reference(Reference::BuiltinClassMember(
         BuiltinClassMemberIntrinsic::Compare { subject, .. },
     )) = &core.exprs()[*compare_callee].kind

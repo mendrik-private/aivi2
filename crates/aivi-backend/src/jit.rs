@@ -19,8 +19,8 @@ use crate::{
     EvalFrame, EvaluationCallProfile, EvaluationError, ItemId, KernelEvaluationProfile,
     KernelEvaluator, KernelExprId, KernelFingerprint, KernelId, LayoutId, LayoutKind,
     NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program, RuntimeBigInt,
-    RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
-    RuntimeRecordField, RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
+    RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
+    RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
     cache::{compile_kernel_jit_cached, instantiate_native_kernel_artifact},
     codegen::CompiledJitKernel,
     compute_kernel_fingerprint,
@@ -126,11 +126,9 @@ impl<'a> LazyJitExecutionEngine<'a> {
 
     fn prepare_kernel_plan(&mut self, kernel_id: KernelId) -> KernelFingerprint {
         let fingerprint = compute_kernel_fingerprint(self.program, kernel_id);
-        self.kernel_plans
-            .entry(fingerprint)
-            .or_insert_with(|| {
-                CachedKernelPlan::build(self.program, self.native_artifacts, kernel_id)
-            });
+        self.kernel_plans.entry(fingerprint).or_insert_with(|| {
+            CachedKernelPlan::build(self.program, self.native_artifacts, kernel_id)
+        });
         fingerprint
     }
 

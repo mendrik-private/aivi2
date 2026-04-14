@@ -96,6 +96,12 @@ fn compute_signal_metadata(
     });
     let (mut signal_dependencies, mut import_signal_dependencies) =
         collect_all_signal_dependencies(module, work);
+    signal_dependencies.extend(
+        item.reactive_updates
+            .iter()
+            .filter_map(|update| update.trigger_source),
+    );
+    normalize_dependency_list(&mut signal_dependencies);
     if let Some((source_signal_dependencies, source_import_signal_dependencies)) =
         source_dependencies.as_ref()
     {

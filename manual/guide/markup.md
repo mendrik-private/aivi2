@@ -68,6 +68,23 @@ value view =
 
 `<show>` renders its body only when the condition holds.
 
+`when` accepts `Bool`, and it also accepts the canonical truthy/falsy carriers `Option`, `Result`,
+and `Validation` (plus one outer `Signal`). That means request helpers such as
+`usersResult.error` or `usersResult.success` can plug straight into markup:
+
+```aivi
+value fetchError = Some "offline"
+
+value view =
+    <Window title="Status">
+        <show when={fetchError}>
+            <Label text="Failed" />
+        </show>
+    </Window>
+```
+
+`keepMounted` stays a plain `Bool`.
+
 ## Local bindings with `<with>`
 
 ```aivi

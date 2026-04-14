@@ -165,7 +165,7 @@ fn db_live_lifecycle_keeps_changed_refresh_and_active_when() {
             assert_eq!(plan.explicit_triggers[0].option_name.text(), "refreshOn");
             assert_eq!(
                 plan.explicit_triggers[0].signal,
-                Some(item_id(lowered.module(), "usersChanged"))
+                Some(item_id(lowered.module(), "rows#trigger"))
             );
             let active_when = plan
                 .active_when

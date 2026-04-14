@@ -834,6 +834,48 @@ fn run_hydration_planner_precomputes_control_and_setter_updates_off_thread() {
 }
 
 #[test]
+fn run_hydration_show_accepts_truthy_option_conditions() {
+    let artifact = prepare_run_from_text(
+        "show-option-window.aivi",
+        r#"
+value maybeError = Some "offline"
+
+value view =
+    <Window title="Host">
+        <show when={maybeError}>
+            <Label text="Failed" />
+        </show>
+    </Window>
+"#,
+        None,
+    )
+    .expect("truthy carrier show conditions should compile for live run hydration");
+    let shared = RunHydrationStaticState {
+        view_name: artifact.view_name.clone(),
+        patterns: artifact.patterns.clone(),
+        bridge: artifact.bridge.clone(),
+        inputs: artifact.hydration_inputs.clone(),
+    };
+    let plan = plan_run_hydration(&shared, &BTreeMap::new())
+        .expect("truthy carrier show conditions should hydrate");
+
+    let HydratedRunNode::Widget { children, .. } = &plan.root else {
+        panic!("expected a window hydration root");
+    };
+    let [HydratedRunNode::Show { when, children, .. }] = children.as_ref() else {
+        panic!("expected a single show child under the window root");
+    };
+    assert!(
+        *when,
+        "Option carriers with a payload should render `<show when>` as visible"
+    );
+    assert!(
+        matches!(children.as_ref(), [HydratedRunNode::Widget { .. }]),
+        "visible show nodes should still hydrate their child subtree"
+    );
+}
+
+#[test]
 fn run_hydration_profile_tracks_fragment_and_kernel_activity() {
     let artifact = prepare_run_from_text("planner-window.aivi", planner_window_source(), None)
         .expect("planner window should compile for live run hydration");
@@ -921,6 +963,46 @@ value view =
         .expect("button should keep one event hook")
         .handler;
     assert!(artifact.event_handlers.contains_key(&handler));
+}
+
+#[test]
+fn prepare_run_accepts_resource_run_event_hooks() {
+    let artifact = prepare_run_from_text(
+        "resource-run-event-hook.aivi",
+        r#"
+@source http.get "https://api.example.com/users"
+signal usersResult : Signal (Result Text (List Text))
+
+value view =
+    <Window title="Host">
+        <Button label="Retry" onClick={usersResult.run} />
+    </Window>
+"#,
+        None,
+    )
+    .expect("resource run helpers should lower to direct input signal event hooks");
+    let widget = artifact
+        .bridge
+        .nodes()
+        .iter()
+        .find_map(|node| match &node.kind {
+            GtkBridgeNodeKind::Widget(widget)
+                if widget.widget.segments().last().text() == "Button" =>
+            {
+                Some(widget)
+            }
+            _ => None,
+        })
+        .expect("bridge should keep the retry button widget");
+    let handler = widget
+        .event_hooks
+        .first()
+        .expect("retry button should keep one event hook")
+        .handler;
+    assert!(
+        artifact.event_handlers.contains_key(&handler),
+        "resource run helpers should resolve through ordinary direct event handlers"
+    );
 }
 
 #[test]

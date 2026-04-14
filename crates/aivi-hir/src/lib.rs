@@ -19,6 +19,7 @@ mod ids;
 mod lower;
 mod recurrence_elaboration;
 pub mod resolver;
+mod resource_signal_elaboration;
 mod sequence;
 mod signal_metadata_elaboration;
 mod source_contract_resolution;

@@ -92,5 +92,7 @@ pub fn lower_module_with_resolver(
         &mut lowerer.diagnostics,
     );
     crate::signal_metadata_elaboration::populate_signal_metadata(&mut lowerer.module);
+    crate::resource_signal_elaboration::elaborate_resource_signal_companions(&mut lowerer.module);
+    crate::signal_metadata_elaboration::populate_signal_metadata(&mut lowerer.module);
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }

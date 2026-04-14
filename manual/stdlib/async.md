@@ -1,8 +1,12 @@
 # aivi.async
 
-Lifecycle tracker for `Result`-producing signals. Wraps the raw `Result E A` stream from any
-async source (HTTP, file reads, D-Bus, database queries) into a record with three observable
-projections: `pending`, `done`, and `error`.
+Lifecycle tracker for `Result`-producing signals when you need more than the built-in request
+companions. Built-in request-like sources now synthesize `.run`, `.loading`, `.success`, and
+`.error` directly on `Signal (Result E A)`, so `aivi.async.AsyncTracker` is mainly for:
+
+1. **stale-while-revalidate** — keep the last successful value visible after a later failure
+2. **custom folds** — derive lifecycle state from any arbitrary `Result` signal, not just a built-in request source
+3. **record-style projections** — expose one accumulated record with `pending`, `done`, and `error`
 
 Once you have a `Signal (AsyncTracker E A)`, the projections become signals themselves — no
 extra derivations needed.

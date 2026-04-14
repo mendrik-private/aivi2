@@ -1760,3 +1760,51 @@ fn check_accepts_delay_and_burst_pipe_stages() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+#[test]
+fn check_accepts_request_resource_companion_surface_without_hidden_unused_warnings() {
+    let dir = TempDir::new("check-resource-companions");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "@source http.get \"https://api.example.com/users\"\n",
+            "signal usersResult : Signal (Result HttpError (List Text))\n",
+            "\n",
+            "value retry = usersResult.run\n",
+            "value users = usersResult.success\n",
+            "value failure = usersResult.error\n",
+            "value loading = usersResult.loading\n",
+            "\n",
+            "value view =\n",
+            "    <Window title=\"Host\">\n",
+            "        <Button label=\"Retry\" onClick={usersResult.run} />\n",
+            "        <show when={failure}>\n",
+            "            <Label text=\"Failed\" />\n",
+            "        </show>\n",
+            "        <show when={loading}>\n",
+            "            <Label text=\"Loading\" />\n",
+            "        </show>\n",
+            "    </Window>\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected request resource companion surface to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("syntax + HIR passed"),
+        "expected success output, got stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("usersResult#"),
+        "hidden resource helper names should stay out of unused-symbol output, got stdout: {stdout}"
+    );
+}

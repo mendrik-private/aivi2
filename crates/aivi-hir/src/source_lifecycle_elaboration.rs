@@ -373,7 +373,7 @@ fn active_when_binding(
     })
 }
 
-fn resolve_source_option_signal_binding(
+pub(crate) fn resolve_source_option_signal_binding(
     module: &Module,
     expr: ExprId,
     allow_db_changed_projection: bool,

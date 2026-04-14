@@ -757,7 +757,9 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
             Reference::DomainMember(handle) => {
                 write!(f, "{}.{}", handle.domain_name, handle.member_name)
             }
-            Reference::ExecutableEvidence(item) => write!(f, "evidence {}", module.item_name(*item)),
+            Reference::ExecutableEvidence(item) => {
+                write!(f, "evidence {}", module.item_name(*item))
+            }
             Reference::BuiltinClassMember(intrinsic) => write!(f, "{intrinsic:?}"),
             Reference::Builtin(term) => write!(f, "{term:?}"),
             Reference::IntrinsicValue(value) => write!(f, "{value}"),

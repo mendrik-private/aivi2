@@ -308,80 +308,56 @@ keyboard     ──→  keyDown signal
 Every arrow is a declared dependency. There are no hidden subscriptions, no manual wiring, and
 no callbacks.
 
-## Tracking async state
+## Request-like source companions
 
-When a signal is backed by an async source — an HTTP request, a file read, a database query — you
-often need to know more than just the latest `Result`. You want to know: *is it still loading? did
-it ever succeed? is there an error right now?*
+Built-in request-like sources that produce `Signal (Result E A)` synthesize a companion surface on
+the signal itself:
 
-`aivi.async.AsyncTracker` gives you exactly that. It is a plain record type:
-
-```aivi
-type AsyncTracker E A = {
-    pending: Bool,
-    done: Option A,
-    error: Option E
-}
-```
-
-Combine it with `+|>` to turn any `Result`-producing signal into a tracker signal:
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `.run` | `Signal Unit` | Publish to refetch or restart the source |
+| `.loading` | `Signal Bool` | `True` while the active request is still pending |
+| `.success` | `Signal (Option A)` | Current successful payload when the latest result is `Ok` |
+| `.error` | `Signal (Option E)` | Current error payload when the latest result is `Err` |
 
 ```aivi
-use aivi.async (
-    AsyncTracker
-    step
-)
-
-use aivi.http (
-    HttpError
-    HttpSource
-)
-
 type User = {
     id: Int,
     name: Text
 }
 
-@source http "https://api.example.com"
-signal api : HttpSource
+@source http.get "https://api.example.com/users"
+signal usersResult : Signal (Result HttpError (List User))
 
-signal rawUsers : Signal (Result HttpError (List User)) = api.get "/users"
-
-value initialUsers : AsyncTracker HttpError (List User) = {
-    pending: True,
-    done: None,
-    error: None
-}
-
-signal users : Signal (AsyncTracker HttpError (List User)) = rawUsers
- +|> initialUsers step
-```
-
-Because `AsyncTracker` is a record, the three fields become independent signal projections:
-
-```aivi
-```
-
-This is the `sig.pending`, `sig.done`, `sig.error` pattern — no magic, just record projection
-on the tracker payload. Use them anywhere a `Signal Bool` or `Signal (Option A)` is expected:
-
-```aivi
 value main =
     <Window title="Users">
         <Box>
-            <Spinner />
-            <Box />
-            <Label text="Failed to load" />
-            <Label text="No data yet" />
-            <Label text="{items}" />
+            <Button label="Refresh" onClick={usersResult.run} />
+            <show when={usersResult.loading}>
+                <Spinner />
+            </show>
+            <show when={usersResult.error}>
+                <Label text="Failed to load" />
+            </show>
+            <match on={usersResult.success}>
+                <case pattern={Some users}>
+                    <each of={users} as={user} key={user.id}>
+                        <Label text={user.name} />
+                    </each>
+                </case>
+            </match>
         </Box>
     </Window>
-
-export main
 ```
 
-**Stale-while-revalidate:** when a retry fails after a previous success, `done` keeps the last
-successful value. `error` shows the failure. The UI can show both at once without any extra logic.
+`success` and `error` are ordinary `Option` carriers, so they slot directly into existing
+truthy/falsy pipes, `<show when>`, and `<match>` without inventing a UI-only async language.
+
+### When to keep using AsyncTracker
+
+`aivi.async.AsyncTracker` is still the right tool when you want **stale-while-revalidate** or when
+you are folding an arbitrary `Result` signal that is not one of the built-in request-like sources.
+Unlike `.success`, `AsyncTracker.done` keeps the last successful value even after a later failure.
 
 ### Fire once when done
 
@@ -391,16 +367,19 @@ syntax:
 
 ```aivi
 // A Bool that becomes True on the first success and never resets
-type Bool -> Option A -> Bool
-func trackFirstDone = hasFired newDone => hasFired
+type Option Text -> Bool -> Bool
+func trackFirstDone = newDone hasFired => hasFired
  T|> True
  F|> isSome newDone
 
-signal firstLoadDone : Signal Bool = users.done
+@source http.get "https://api.example.com/users"
+signal usersResult : Signal (Result HttpError Text)
+
+signal firstLoadDone : Signal Bool = usersResult.success
  +|> False trackFirstDone
 ```
 
-`firstLoadDone` is `False` until `users.done` is first `Some`, then `True` forever. Gate any
+`firstLoadDone` is `False` until `usersResult.success` is first `Some`, then `True` forever. Gate any
 follow-up source with `activeWhen: firstLoadDone` to fire it exactly once.
 
 See [`aivi.async`](/stdlib/async) for the full `AsyncTracker` reference.

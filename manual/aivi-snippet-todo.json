@@ -1,9 +1,9 @@
 {
   "root": "manual",
   "scanned_files": 91,
-  "scanned_blocks": 950,
+  "scanned_blocks": 948,
   "rewritten_blocks": 0,
-  "unresolved_fragments": 165,
+  "unresolved_fragments": 161,
   "entries": [
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -2558,46 +2558,6 @@
       "suggested_snippet": "type Event = Tick | Reset\n\ntype Key = Key Text\n\n@source timer.every 1sec\nsignal tick : Signal Unit\n\n@source window.keyDown\nsignal keyDown : Signal Key\n\nsignal event : Signal Event = tick | keyDown\n  ||> tick _ => Tick\n  ||> keyDown (Key \"Space\") => Reset\n  ||> _ => Tick\n\ntype Event -> Int -> Int\nfunc step = event count => event\n ||> Tick  -> count + 1\n ||> Reset -> 0\n\nsignal elapsed = event\n +|> 0 step\n\nsignal label = elapsed\n  |> formatInt\n\nvalue main =\n    <Window title=\"Timer\">\n        <Label text={label} />\n    </Window>\n\nexport main\n"
     },
     {
-      "markdown_path": "manual/guide/signals.md",
-      "block_index": 16,
-      "fence_info": "aivi",
-      "start_line": 369,
-      "end_line": 380,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `items`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `items`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/signals/block_16.aivi:8:27\n  |\n 8 |             <Label text=\"{items}\" />\n  |                           ^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "value main =\n    <Window title=\"Users\">\n        <Box>\n            <Spinner />\n            <Box />\n            <Label text=\"Failed to load\" />\n            <Label text=\"No data yet\" />\n            <Label text=\"{items}\" />\n        </Box>\n    </Window>\n\nexport main\n"
-    },
-    {
-      "markdown_path": "manual/guide/signals.md",
-      "block_index": 17,
-      "fence_info": "aivi",
-      "start_line": 393,
-      "end_line": 400,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `users`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `users`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/signals/block_17.aivi:7:38\n  |\n 7 | signal firstLoadDone : Signal Bool = users.done\n  |                                      ^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "// A Bool that becomes True on the first success and never resets\ntype Bool -> Option A -> Bool\nfunc trackFirstDone = hasFired newDone => hasFired\n T|> True\n F|> isSome newDone\n\nsignal firstLoadDone : Signal Bool = users.done\n +|> False trackFirstDone\n"
-    },
-    {
       "markdown_path": "manual/guide/source-catalog.md",
       "block_index": 1,
       "fence_info": "aivi",
@@ -3095,8 +3055,8 @@
       "markdown_path": "manual/stdlib/async.md",
       "block_index": 4,
       "fence_info": "aivi",
-      "start_line": 96,
-      "end_line": 100,
+      "start_line": 100,
+      "end_line": 104,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 3,
@@ -3127,8 +3087,8 @@
       "markdown_path": "manual/stdlib/async.md",
       "block_index": 8,
       "fence_info": "aivi",
-      "start_line": 165,
-      "end_line": 205,
+      "start_line": 169,
+      "end_line": 209,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 1,
@@ -3147,8 +3107,8 @@
       "markdown_path": "manual/stdlib/async.md",
       "block_index": 9,
       "fence_info": "aivi",
-      "start_line": 217,
-      "end_line": 252,
+      "start_line": 221,
+      "end_line": 256,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 0,
@@ -3567,26 +3527,6 @@
     },
     {
       "markdown_path": "manual/stdlib/db.md",
-      "block_index": 18,
-      "fence_info": "aivi",
-      "start_line": 319,
-      "end_line": 343,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 0,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::source-option-type-mismatch",
-          "message": "source option `refreshOn` for `db.live` expects `Signal B`, but this expression proves `DbSource`",
-          "rendered": "error[hir::source-option-type-mismatch]: source option `refreshOn` for `db.live` expects `Signal B`, but this expression proves `DbSource`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/db/block_18.aivi:23:16\n  |\n23 |     refreshOn: database\n  |                ^^^^^^^^\n  = this source option expression proves `DbSource`\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/db/block_18.aivi:23:5\n  |\n23 |     refreshOn: database\n  |     -------------------\n  |     note: `refreshOn` expects `Signal B`\nnote: current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals including any generic arguments the resolved literal-member result proves, same-module constructors checked against the expected contract type or re-inferred as bare roots with `_` holes for any still-unproven generic arguments, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list/map/set expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values\nnote: bare contract-parameter roots now also cover nested same-module generic constructor applications, unannotated local value bodies, tuple/record/list literals, `Some` roots, context-free `None` / `Ok` / `Err` / `Valid` / `Invalid` holes carried through local source-option bindings, and constructor fields whose tuple/record or built-in container shape can be proved locally; imports without compiler-known type metadata and otherwise unproven ordinary expressions still wait for fuller expression typing"
-        }
-      ],
-      "suggested_snippet": "use aivi.db (\n    DbSource\n    DbError\n    Connection\n    DbRow\n    DbStatement\n    DbParam\n)\n\nvalue conn : Connection = {\n    database: \"data/todos.db\"\n}\n\n@source db conn\nsignal database : DbSource\n\nvalue loadTodos : DbStatement = {\n    sql: \"select id, title, done from todos order by id\",\n    arguments: []\n}\n\n@source db.live loadTodos with {\n    refreshOn: database\n}\nsignal todos : Signal (Result DbError (List DbRow))\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/db.md",
       "block_index": 19,
       "fence_info": "aivi",
       "start_line": 353,
@@ -3604,26 +3544,6 @@
         }
       ],
       "suggested_snippet": "type Text -> DbParam\nfunc textParam = value =>\n    {\n        kind: \"text\",\n        bool: None,\n        int: None,\n        float: None,\n        decimal: None,\n        bigInt: None,\n        text: Some value,\n        bytes: None\n    }\n\ntype Text -> DbStatement\nfunc insertTodo = title =>\n    {\n        sql: \"insert into todos (title, done) values (?, 0)\",\n        arguments: [textParam title]\n    }\n\nvalue addTask : Task Text Unit = database.commit (insertTodo \"Buy groceries\")\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/db.md",
-      "block_index": 21,
-      "fence_info": "aivi",
-      "start_line": 414,
-      "end_line": 475,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 0,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::source-option-type-mismatch",
-          "message": "source option `refreshOn` for `db.live` expects `Signal B`, but this expression proves `DbSource`",
-          "rendered": "error[hir::source-option-type-mismatch]: source option `refreshOn` for `db.live` expects `Signal B`, but this expression proves `DbSource`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/db/block_21.aivi:49:16\n  |\n49 |     refreshOn: database\n  |                ^^^^^^^^\n  = this source option expression proves `DbSource`\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/db/block_21.aivi:49:5\n  |\n49 |     refreshOn: database\n  |     -------------------\n  |     note: `refreshOn` expects `Signal B`\nnote: current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals including any generic arguments the resolved literal-member result proves, same-module constructors checked against the expected contract type or re-inferred as bare roots with `_` holes for any still-unproven generic arguments, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list/map/set expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values\nnote: bare contract-parameter roots now also cover nested same-module generic constructor applications, unannotated local value bodies, tuple/record/list literals, `Some` roots, context-free `None` / `Ok` / `Err` / `Valid` / `Invalid` holes carried through local source-option bindings, and constructor fields whose tuple/record or built-in container shape can be proved locally; imports without compiler-known type metadata and otherwise unproven ordinary expressions still wait for fuller expression typing"
-        }
-      ],
-      "suggested_snippet": "use aivi.db (\n    DbSource\n    DbError\n    Connection\n    DbRow\n    DbStatement\n    DbParam\n)\n\ntype Text -> DbParam\nfunc textParam = value =>\n    {\n        kind: \"text\",\n        bool: None,\n        int: None,\n        float: None,\n        decimal: None,\n        bigInt: None,\n        text: Some value,\n        bytes: None\n    }\n\ntype Int -> DbParam\nfunc intParam = value =>\n    {\n        kind: \"int\",\n        bool: None,\n        int: Some value,\n        float: None,\n        decimal: None,\n        bigInt: None,\n        text: None,\n        bytes: None\n    }\n\nvalue conn : Connection = {\n    database: \"data/todos.db\"\n}\n\n@source db conn\nsignal database : DbSource\n\nvalue listQuery : DbStatement = {\n    sql: \"select id, title, done from todos order by id\",\n    arguments: []\n}\n\n@source db.live listQuery with {\n    refreshOn: database\n}\nsignal todoRows : Signal (Result DbError (List DbRow))\n\nsignal todoCount : Signal Text\n\nvalue main =\n    <Window title=\"Todos\">\n        <Box orientation=\"vertical\" spacing={8}>\n            <Label text={todoCount} />\n        </Box>\n    </Window>\n\nexport main\n"
     },
     {
       "markdown_path": "manual/stdlib/dbus.md",

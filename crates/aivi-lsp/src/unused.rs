@@ -160,6 +160,9 @@ fn collect_exported_items(module: &Module) -> HashSet<ItemId> {
 }
 
 fn skip_unused_diagnostic(module: &Module, item_id: ItemId) -> bool {
+    if item_has_internal_name(module, item_id) {
+        return true;
+    }
     module.items()[item_id]
         .decorators()
         .iter()
@@ -169,6 +172,22 @@ fn skip_unused_diagnostic(module: &Module, item_id: ItemId) -> bool {
                 DecoratorPayload::Test(_)
             )
         })
+}
+
+fn item_has_internal_name(module: &Module, item_id: ItemId) -> bool {
+    match &module.items()[item_id] {
+        Item::Type(item) => item.name.text().contains('#'),
+        Item::Value(item) => item.name.text().contains('#'),
+        Item::Function(item) => item.name.text().contains('#'),
+        Item::Signal(item) => item.name.text().contains('#'),
+        Item::Class(item) => item.name.text().contains('#'),
+        Item::Domain(item) => item.name.text().contains('#'),
+        Item::SourceProviderContract(_)
+        | Item::Instance(_)
+        | Item::Use(_)
+        | Item::Export(_)
+        | Item::Hoist(_) => false,
+    }
 }
 
 /// Extract the name text and name span for an item, if the item kind has a

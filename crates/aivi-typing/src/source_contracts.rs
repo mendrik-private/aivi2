@@ -317,6 +317,16 @@ impl SourceContract {
     pub fn wakeup_option(self, name: &str) -> Option<&'static SourceOptionWakeupContract> {
         self.recurrence.option(name)
     }
+
+    pub fn trigger_signal_option(self) -> Option<&'static SourceOptionWakeupContract> {
+        self.options
+            .iter()
+            .map(|option| option.name())
+            .find_map(|name| {
+                self.wakeup_option(name)
+                    .filter(|option| option.cause() == SourceOptionWakeupCause::TriggerSignal)
+            })
+    }
 }
 
 /// One legal option field for a built-in source provider.

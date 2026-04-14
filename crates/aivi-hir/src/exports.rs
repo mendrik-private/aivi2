@@ -976,7 +976,8 @@ fn flatten_exported_instance_member_type_application(
                     class_substitutions,
                 )
             }
-            _ => resolve_type_constructor(module, reference).map(|constructor| (constructor, Vec::new())),
+            _ => resolve_type_constructor(module, reference)
+                .map(|constructor| (constructor, Vec::new())),
         },
         TypeKind::Tuple(_)
         | TypeKind::Record(_)
