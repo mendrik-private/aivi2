@@ -46,7 +46,7 @@ Key lookup functions:
 - `lookup_widget_event(schema, name)` — look up a `GtkEventDescriptor`
 - `supported_widget_schemas()` — full list of supported widgets
 
-**Widget kinds** (`GtkConcreteWidgetKind`): 48 supported GTK4 and Adwaita widgets as of this writing. Includes: Window, HeaderBar, Paned, Box, ScrolledWindow, Frame, Viewport, Label, Button, Entry, Switch, CheckButton, ToggleButton, SpinButton, Scale, Image, Spinner, ProgressBar, Revealer, Separator, StatusPage, Clamp, Banner, ToolbarView, ActionRow, ExpanderRow, SwitchRow, SpinRow, EntryRow, ListBox, ListBoxRow, DropDown, SearchEntry, Expander, NavigationView, NavigationPage, ToastOverlay, PreferencesGroup, PreferencesPage, PreferencesWindow, ComboRow, PasswordEntryRow, Overlay, MultilineEntry, Picture, ViewStack, ViewStackPage, AlertDialog.
+**Widget kinds** (`GtkConcreteWidgetKind`): 67 supported GTK4 and Adwaita widgets. Includes all prior widgets plus the Tier 1 additions: CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView, TabPage, TabBar, Carousel, CarouselIndicatorDots, CarouselIndicatorLines, Grid, GridChild, FileDialog.
 
 **Property setters** (`GtkPropertySetter`):
 - `GtkTextPropertySetter` — sets a string property
@@ -126,16 +126,30 @@ Key lookup functions:
 
 ## GTK Source Providers
 
-Two builtin source providers are backed directly by GTK/Adwaita APIs:
+Five builtin source providers are backed directly by GTK/Adwaita APIs:
 
 | Key | Output type | Backing API |
 |-----|-------------|-------------|
 | `window.keyDown` | `Text` (key name) | `gtk::EventControllerKey` on the main window |
 | `gtk.darkMode` | `Bool` (`True` = dark) | `adw::StyleManager::connect_dark_notify` |
+| `clipboard.changed` | `Text` (clipboard text) | `gdk::Display::clipboard().connect_changed` |
+| `window.size` | `{ width: Int, height: Int }` | `GtkWindow::notify::width/height` |
+| `window.focus` | `Bool` (`True` = focused) | `GtkWindow::notify::is-active` |
 
 `gtk.darkMode` pushes the current state once at startup (before the first tick) and
 again each time the user changes the system appearance in GNOME Settings. The source
 has no options and is idempotent: only one watcher is installed per host instance
 regardless of how many `@source gtk.darkMode` declarations appear.
+
+`clipboard.changed` pushes the current clipboard text once at activation, then again
+on every GDK clipboard change. Non-text clipboard contents (images, files) yield an
+empty string. The queue is coalescing: rapid clipboard changes between scheduler ticks
+collapse to a single update. Only one watcher is installed per host instance.
+
+`window.size` fires once at startup with the current dimensions, then each time the
+root window width or height changes. The output must decode to `{ width: Int, height: Int }`.
+
+`window.focus` fires once at startup with the current focus state, then on each
+`is-active` property change. The output must decode to `Bool`.
 
 *See also: [runtime.md](runtime.md), [signal-model.md](signal-model.md)*

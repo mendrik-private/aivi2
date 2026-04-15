@@ -427,3 +427,32 @@ Documented the ambient class graph outside the primary executable slice.
 - Filled empty `ViewStack` and `AlertDialog` code blocks in `markup.md` with real examples.
 - Added missing events to `markup.md`: `ExpanderRow.onExpanded`, `Expander.onExpanded`, `NavigationPage.onShowing`/`onHiding`, `EntryRow.onFocusIn`/`onFocusOut`, `PasswordEntryRow.onFocusIn`/`onFocusOut`.
 - Added `gtk.darkMode` section to `source-catalog.md`.
+
+## [2025-07-16] feat | GTK widgets, properties, and clipboard source
+- Added 5 new widgets: Calendar, FlowBox, FlowBoxChild, MenuButton, Popover.
+- Added Window properties: maximized, fullscreen, decorated, hideOnClose; events: onMaximize, onFullscreen.
+- Added Label properties: xalign, yalign, widthChars, singleLineMode.
+- Added Scale properties: valuePos (Top/Bottom/Left/Right), fillLevel.
+- Added Button property: receivesDefault.
+- Added HeaderBar property: decorationLayout.
+- Added new source: clipboard.changed (coalescing Text stream backed by GDK clipboard).
+- Updated manual/guide/markup.md and manual/guide/source-catalog.md.
+- Updated wiki/gtk-bridge.md: widget count 48→53, added clipboard.changed to source providers table.
+
+## [2025-07-14] implement | GTK tier-1 completeness
+- Added 14 new widget kinds: CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView, TabPage, TabBar, Carousel, CarouselIndicatorDots, CarouselIndicatorLines, Grid, GridChild, FileDialog.
+- Added window.size and window.focus source providers.
+- Added SecondaryClick, LongPress, SwipeLeft, SwipeRight gesture events.
+- Updated validator.rs for new BuiltinSourceProvider variants.
+- Updated wiki/gtk-bridge.md: widget count 53→67.
+
+## [2025-07-13] fix | GTK schema descriptor gaps + documentation
+
+- Added SECONDARY_CLICK_EVENT, LONG_PRESS_EVENT, SWIPE_LEFT_EVENT, SWIPE_RIGHT_EVENT descriptor constants to schema.rs; wired to Box, Label, Button, Image, Carousel schemas. These were implemented in host.rs but had no schema descriptors, making them inaccessible from AIVI markup.
+- Added ENTRY_PRIMARY_ICON_NAME_PROPERTY, ENTRY_SECONDARY_ICON_NAME_PROPERTY to schema.rs + Entry schema.
+- Added LIST_BOX_SHOW_SEPARATORS_PROPERTY to schema.rs + ListBox schema.
+- Added HEADER_BAR_CENTERING_POLICY_PROPERTY to schema.rs + HeaderBar schema.
+- Added ACTION_ROW_PREFIX_CHILD_GROUP to schema.rs + ActionRow schema (prefix child slot was implemented in host.rs but not exposed).
+- Updated manual/guide/markup.md: added sections for all 14 new tier-1 widgets (CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView+TabPage+TabBar, Carousel+indicators, Grid+GridChild, FileDialog); documented gesture events under Button section; added Entry icon props, HeaderBar centeringPolicy, ActionRow prefix, ListBox showSeparators.
+- Updated manual/guide/source-catalog.md: added window.size and window.focus provider sections to GTK input section.
+- Updated wiki/gtk-bridge.md: GTK Source Providers table updated from 3→5 entries; added window.size and window.focus rows.

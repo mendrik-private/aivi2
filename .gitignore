@@ -32,3 +32,4 @@ npm-debug.log*
 manual/public/wasm/
 **/*.vsix
 tooling/packages/vscode-aivi/vscode-aivi-0.1.0.vsix
+report.*

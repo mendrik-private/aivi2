@@ -656,6 +656,28 @@ impl GlibLinkedRuntimeDriver {
         });
     }
 
+    /// Publishes a clipboard text change to all active `clipboard.changed` source instances.
+    /// Called from the GTK main thread when `gdk::Display::default().clipboard()` changes.
+    pub fn dispatch_clipboard_changed(&self, text: String) {
+        self.with_state_mut(|state| {
+            state.providers.dispatch_clipboard_changed(text);
+        });
+    }
+
+    /// Publishes a window size change to all active `window.size` source instances.
+    pub fn dispatch_window_size_changed(&self, width: i32, height: i32) {
+        self.with_state_mut(|state| {
+            state.providers.dispatch_window_size_changed(width, height);
+        });
+    }
+
+    /// Publishes a window focus change to all active `window.focus` source instances.
+    pub fn dispatch_window_focus_changed(&self, focused: bool) {
+        self.with_state_mut(|state| {
+            state.providers.dispatch_window_focus_changed(focused);
+        });
+    }
+
     pub fn queued_message_count(&self) -> usize {
         self.with_state(|state| state.linked.queued_message_count())
     }

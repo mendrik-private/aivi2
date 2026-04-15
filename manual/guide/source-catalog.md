@@ -346,6 +346,89 @@ signal theme : Theme
 - Uses `adw::StyleManager::default()`, so it reflects the system-wide GNOME preference
   or any app-level override set via `adw::StyleManager::set_color_scheme()`.
 
+### `clipboard.changed`
+
+**Form:** `@source clipboard.changed`
+
+No options.  The output must decode to `Text`.
+
+Emits the current clipboard text once at startup and again each time the GDK clipboard
+content changes.  Backed by `gdk::Display::default().clipboard()`.  Non-text clipboard
+contents (images, files) yield an empty string.
+
+**Example**
+
+```aivi
+@source clipboard.changed
+signal clipboardText : Text
+
+value view =
+    <Window title="Clipboard Watcher">
+        <Label text={clipboardText} wrap={True} halign="Start" marginStart={12} marginEnd={12} marginTop={12} marginBottom={12} />
+    </Window>
+```
+
+**Notes**
+
+- The source fires one initial value before the first render tick, so `clipboardText`
+  is always populated when the UI first appears.
+- Only the latest clipboard text is kept per tick (coalescing queue); rapid clipboard
+  changes between scheduler ticks collapse to a single update.
+- Reads happen asynchronously on the GLib main thread; the signal updates on the next
+  scheduler tick after the read completes.
+
+### `window.size`
+
+**Form:** `@source window.size`
+
+No options.  The output must decode to `{ width: Int, height: Int }`.
+
+Emits the current window dimensions once at startup and again each time the width or
+height of the application's root window changes.
+
+**Example**
+
+```aivi
+@source window.size
+signal windowDimensions : { width: Int, height: Int }
+
+value view =
+    <Window title="App">
+        <Label text={"W=" + Int.toText windowDimensions.width + " H=" + Int.toText windowDimensions.height} halign="Center" valign="Center" />
+    </Window>
+```
+
+**Notes**
+
+- Fires one initial value at startup before the first render tick.
+- Width and height changes from the same scheduler tick are coalesced into a single update.
+
+### `window.focus`
+
+**Form:** `@source window.focus`
+
+No options.  The output must decode to `Bool`.
+
+Emits `True` when the application window gains focus and `False` when it loses focus.
+Fires once at startup with the initial focus state.
+
+**Example**
+
+```aivi
+@source window.focus
+signal hasFocus : Bool
+
+value view =
+    <Window title="App">
+        <Label text={if hasFocus "Focused" "Unfocused"} halign="Center" valign="Center" />
+    </Window>
+```
+
+**Notes**
+
+- Backed by `GtkWindow::is-active` property notifications.
+- Fires one initial value at startup.
+
 ## D-Bus
 
 ### `dbus.ownName`

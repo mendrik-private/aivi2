@@ -6104,6 +6104,9 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::DbusMethod
                             | BuiltinSourceProvider::WindowKeyDown
                             | BuiltinSourceProvider::GtkDarkMode
+                            | BuiltinSourceProvider::GtkClipboard
+                            | BuiltinSourceProvider::GtkWindowSize
+                            | BuiltinSourceProvider::GtkWindowFocus
                             | BuiltinSourceProvider::ImapIdle
                             | BuiltinSourceProvider::ImapFetchBody
                             | BuiltinSourceProvider::SmtpSend

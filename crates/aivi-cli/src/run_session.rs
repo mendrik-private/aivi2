@@ -755,6 +755,18 @@ impl RunSessionState {
             self.driver.dispatch_dark_mode_changed(is_dark);
             self.driver.tick_now();
         }
+        for text in self.executor.host_mut().drain_clipboard_events() {
+            self.driver.dispatch_clipboard_changed(text);
+            self.driver.tick_now();
+        }
+        for (width, height) in self.executor.host_mut().drain_window_size_events() {
+            self.driver.dispatch_window_size_changed(width, height);
+            self.driver.tick_now();
+        }
+        for focused in self.executor.host_mut().drain_window_focus_events() {
+            self.driver.dispatch_window_focus_changed(focused);
+            self.driver.tick_now();
+        }
         let failures = self.driver.drain_failures();
         if !failures.is_empty() {
             let source_map = self.driver.build_source_map();

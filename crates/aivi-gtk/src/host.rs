@@ -214,6 +214,81 @@ impl GtkDarkModeQueue {
     }
 }
 
+/// Coalescing queue for `clipboard.changed` events. Only the latest clipboard text matters;
+/// rapid clipboard changes collapse to the final text seen before the next drain.
+struct GtkClipboardQueue {
+    events: Mutex<VecDeque<String>>,
+}
+
+impl Default for GtkClipboardQueue {
+    fn default() -> Self {
+        Self {
+            events: Mutex::new(VecDeque::new()),
+        }
+    }
+}
+
+impl GtkClipboardQueue {
+    fn push(&self, text: String) {
+        let mut q = self
+            .events
+            .lock()
+            .expect("GtkClipboardQueue mutex should not be poisoned");
+        q.clear(); // Only the latest value matters.
+        q.push_back(text);
+    }
+
+    fn drain(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .expect("GtkClipboardQueue mutex should not be poisoned")
+            .drain(..)
+            .collect()
+    }
+}
+
+struct GtkWindowSizeQueue {
+    events: Mutex<VecDeque<(i32, i32)>>,
+}
+
+impl Default for GtkWindowSizeQueue {
+    fn default() -> Self {
+        Self { events: Mutex::new(VecDeque::new()) }
+    }
+}
+
+impl GtkWindowSizeQueue {
+    fn push(&self, event: (i32, i32)) {
+        let mut guard = self.events.lock().expect("GtkWindowSizeQueue mutex should not be poisoned");
+        guard.clear();
+        guard.push_back(event);
+    }
+    fn drain(&self) -> Vec<(i32, i32)> {
+        self.events.lock().expect("GtkWindowSizeQueue mutex should not be poisoned").drain(..).collect()
+    }
+}
+
+struct GtkWindowFocusQueue {
+    events: Mutex<VecDeque<bool>>,
+}
+
+impl Default for GtkWindowFocusQueue {
+    fn default() -> Self {
+        Self { events: Mutex::new(VecDeque::new()) }
+    }
+}
+
+impl GtkWindowFocusQueue {
+    fn push(&self, event: bool) {
+        let mut guard = self.events.lock().expect("GtkWindowFocusQueue mutex should not be poisoned");
+        guard.clear();
+        guard.push_back(event);
+    }
+    fn drain(&self) -> Vec<bool> {
+        self.events.lock().expect("GtkWindowFocusQueue mutex should not be poisoned").drain(..).collect()
+    }
+}
+
 impl<V> GtkEventQueue<V> {
     fn push(&self, event: GtkQueuedEvent<V>) {
         self.events
@@ -237,6 +312,31 @@ struct ViewStackPageMeta {
     name: String,
     title: String,
     icon_name: String,
+}
+
+#[derive(Clone)]
+struct GridChildMeta {
+    column: i32,
+    row: i32,
+    column_span: i32,
+    row_span: i32,
+}
+
+impl Default for GridChildMeta {
+    fn default() -> Self {
+        Self { column: 0, row: 0, column_span: 1, row_span: 1 }
+    }
+}
+
+#[derive(Clone, Default)]
+struct TabPageMeta {
+    title: String,
+    needs_attention: bool,
+    loading: bool,
+}
+
+struct FileChooserNativeState {
+    native: gtk::FileChooserNative,
 }
 
 pub struct GtkConcreteHost<V>
@@ -266,6 +366,18 @@ where
     queued_dark_mode: Rc<GtkDarkModeQueue>,
     /// Whether the dark-mode watcher has been connected to `adw::StyleManager`.
     dark_mode_watcher_installed: bool,
+    /// Queue of `clipboard.changed` text values pushed by the GDK clipboard watcher.
+    /// Drained each tick and dispatched to the runtime.
+    queued_clipboard: Rc<GtkClipboardQueue>,
+    /// Whether the clipboard watcher has been connected to the GDK display clipboard.
+    clipboard_watcher_installed: bool,
+    grid_child_meta: RefCell<BTreeMap<usize, GridChildMeta>>,
+    tab_page_meta: RefCell<BTreeMap<usize, TabPageMeta>>,
+    file_chooser_states: Rc<RefCell<BTreeMap<usize, FileChooserNativeState>>>,
+    queued_window_size: Rc<GtkWindowSizeQueue>,
+    window_size_watcher_installed: bool,
+    queued_window_focus: Rc<GtkWindowFocusQueue>,
+    window_focus_watcher_installed: bool,
 }
 
 impl<V> Default for GtkConcreteHost<V>
@@ -286,6 +398,15 @@ where
             view_stack_page_meta: RefCell::new(BTreeMap::new()),
             queued_dark_mode: Rc::new(GtkDarkModeQueue::default()),
             dark_mode_watcher_installed: false,
+            queued_clipboard: Rc::new(GtkClipboardQueue::default()),
+            clipboard_watcher_installed: false,
+            grid_child_meta: RefCell::new(BTreeMap::new()),
+            tab_page_meta: RefCell::new(BTreeMap::new()),
+            file_chooser_states: Rc::new(RefCell::new(BTreeMap::new())),
+            queued_window_size: Rc::new(GtkWindowSizeQueue::default()),
+            window_size_watcher_installed: false,
+            queued_window_focus: Rc::new(GtkWindowFocusQueue::default()),
+            window_focus_watcher_installed: false,
         }
     }
 }
@@ -368,6 +489,123 @@ where
         }
         style_manager.connect_dark_notify(move |mgr| {
             queue.push(mgr.is_dark());
+            if let Some(n) = notifier.borrow().clone() {
+                n();
+            }
+        });
+    }
+
+    /// Drains all pending clipboard events queued by the GDK clipboard watcher.
+    /// Returns at most one value (the latest text) since the queue is coalescing.
+    pub fn drain_clipboard_events(&mut self) -> Vec<String> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        self.queued_clipboard.drain()
+    }
+
+    /// Installs a one-time GDK clipboard watcher.  Idempotent.
+    /// Pushes the current clipboard text immediately at activation.
+    fn setup_clipboard_watcher(&mut self) {
+        if self.clipboard_watcher_installed {
+            return;
+        }
+        self.clipboard_watcher_installed = true;
+        let queue = self.queued_clipboard.clone();
+        let notifier = self.event_notifier.clone();
+        let Some(display) = gtk::gdk::Display::default() else {
+            return;
+        };
+        let clipboard = display.clipboard();
+        // Read initial clipboard text to populate the source before first tick.
+        {
+            let queue_init = queue.clone();
+            let notifier_init = notifier.clone();
+            clipboard.read_text_async(
+                None::<&gtk::gio::Cancellable>,
+                move |result| {
+                    let text = result
+                        .ok()
+                        .flatten()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    queue_init.push(text);
+                    if let Some(n) = notifier_init.borrow().clone() {
+                        n();
+                    }
+                },
+            );
+        }
+        clipboard.connect_changed(move |cb| {
+            let queue = queue.clone();
+            let notifier = notifier.clone();
+            cb.read_text_async(
+                None::<&gtk::gio::Cancellable>,
+                move |result| {
+                    let text = result
+                        .ok()
+                        .flatten()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    queue.push(text);
+                    if let Some(n) = notifier.borrow().clone() {
+                        n();
+                    }
+                },
+            );
+        });
+    }
+
+    pub fn drain_window_size_events(&mut self) -> Vec<(i32, i32)> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        self.queued_window_size.drain()
+    }
+
+    pub fn drain_window_focus_events(&mut self) -> Vec<bool> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        self.queued_window_focus.drain()
+    }
+
+    fn setup_window_size_watcher(&mut self, window: &gtk::Window) {
+        if self.window_size_watcher_installed {
+            return;
+        }
+        self.window_size_watcher_installed = true;
+        let queue = self.queued_window_size.clone();
+        let notifier = self.event_notifier.clone();
+        queue.push((window.width(), window.height()));
+        if let Some(n) = self.event_notifier.borrow().clone() {
+            n();
+        }
+        {
+            let queue = queue.clone();
+            let notifier = notifier.clone();
+            window.connect_notify_local(Some("default-width"), move |w, _| {
+                queue.push((w.width(), w.height()));
+                if let Some(n) = notifier.borrow().clone() {
+                    n();
+                }
+            });
+        }
+        window.connect_notify_local(Some("default-height"), move |w, _| {
+            queue.push((w.width(), w.height()));
+            if let Some(n) = notifier.borrow().clone() {
+                n();
+            }
+        });
+    }
+
+    fn setup_window_focus_watcher(&mut self, window: &gtk::Window) {
+        if self.window_focus_watcher_installed {
+            return;
+        }
+        self.window_focus_watcher_installed = true;
+        let queue = self.queued_window_focus.clone();
+        let notifier = self.event_notifier.clone();
+        queue.push(window.is_active());
+        if let Some(n) = self.event_notifier.borrow().clone() {
+            n();
+        }
+        window.connect_is_active_notify(move |w| {
+            queue.push(w.is_active());
             if let Some(n) = notifier.borrow().clone() {
                 n();
             }
@@ -529,6 +767,61 @@ where
             }
             GtkConcreteWidgetKind::AlertDialog => {
                 adw::MessageDialog::new(None::<&gtk::Window>, None, None).upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Calendar => gtk::Calendar::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::FlowBox => gtk::FlowBox::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::FlowBoxChild => gtk::FlowBoxChild::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::MenuButton => gtk::MenuButton::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Popover => gtk::Popover::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::CenterBox => gtk::CenterBox::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::AboutDialog => {
+                adw::AboutDialog::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::SplitButton => adw::SplitButton::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::NavigationSplitView => {
+                adw::NavigationSplitView::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::OverlaySplitView => {
+                adw::OverlaySplitView::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::TabView => adw::TabView::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::TabPage => {
+                let bin = adw::Bin::new();
+                let key = bin.as_ptr() as usize;
+                self.tab_page_meta.borrow_mut().insert(key, TabPageMeta::default());
+                bin.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::TabBar => adw::TabBar::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Carousel => adw::Carousel::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::CarouselIndicatorDots => {
+                adw::CarouselIndicatorDots::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::CarouselIndicatorLines => {
+                adw::CarouselIndicatorLines::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Grid => gtk::Grid::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::GridChild => {
+                let bin = adw::Bin::new();
+                let key = bin.as_ptr() as usize;
+                self.grid_child_meta.borrow_mut().insert(key, GridChildMeta::default());
+                bin.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::FileDialog => {
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
+                let native = gtk::FileChooserNative::new(
+                    None,
+                    None::<&gtk::Window>,
+                    gtk::FileChooserAction::Open,
+                    None,
+                    None,
+                );
+                let key = placeholder.as_ptr() as usize;
+                self.file_chooser_states.borrow_mut().insert(
+                    key,
+                    FileChooserNativeState { native },
+                );
+                placeholder.upcast::<gtk::Widget>()
             }
         };
         ensure_aivi_widget_styles();
@@ -995,6 +1288,210 @@ where
                         expected_type: "gtk::Picture",
                     })?
                     .set_can_shrink(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowMaximized) => {
+                let window = widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?;
+                if value {
+                    window.maximize();
+                } else {
+                    window.unmaximize();
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowFullscreen) => {
+                let window = widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?;
+                if value {
+                    window.fullscreen();
+                } else {
+                    window.unfullscreen();
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowDecorated) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_decorated(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowHideOnClose) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_hide_on_close(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonReceivesDefault) => {
+                widget.set_receives_default(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelSingleLineMode) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_single_line_mode(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::MenuButtonActive) => {
+                let mb = widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::MenuButton",
+                    })?;
+                mb.set_property("active", value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::MenuButtonUseUnderline) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::MenuButton",
+                    })?
+                    .set_use_underline(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::PopoverAutohide) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Popover>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Popover",
+                    })?
+                    .set_autohide(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::PopoverHasArrow) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Popover>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Popover",
+                    })?
+                    .set_has_arrow(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::AboutDialogVisible) => {
+                if let Ok(dialog) = widget.clone().downcast::<adw::AboutDialog>() {
+                    if value {
+                        dialog.present(None::<&gtk::Window>);
+                    }
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::FileDialogVisible) => {
+                if value {
+                    let key = widget.as_ptr() as usize;
+                    if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                        state.native.show();
+                    }
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::NavigationSplitViewShowContent) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?
+                    .set_show_content(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::OverlaySplitViewShowSidebar) => {
+                widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_show_sidebar(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::TabPageNeedsAttention) => {
+                let key = widget.as_ptr() as usize;
+                self.tab_page_meta.borrow_mut().entry(key).or_default().needs_attention = value;
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::TabPageLoading) => {
+                let key = widget.as_ptr() as usize;
+                self.tab_page_meta.borrow_mut().entry(key).or_default().loading = value;
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::TabBarAutohide) => {
+                widget
+                    .clone()
+                    .downcast::<adw::TabBar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::TabBar",
+                    })?
+                    .set_autohide(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::TabBarExpandTabs) => {
+                widget
+                    .clone()
+                    .downcast::<adw::TabBar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::TabBar",
+                    })?
+                    .set_expand_tabs(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::CarouselInteractive) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Carousel>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Carousel",
+                    })?
+                    .set_interactive(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::GridRowHomogeneous) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Grid>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Grid",
+                    })?
+                    .set_row_homogeneous(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::GridColumnHomogeneous) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Grid>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Grid",
+                    })?
+                    .set_column_homogeneous(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ListBoxShowSeparators) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ListBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListBox",
+                    })?
+                    .set_show_separators(value);
             }
             _ => {
                 return Err(self.invalid_property_value(
@@ -1823,6 +2320,278 @@ where
 
                 *current_ids = new_ids;
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::HeaderBarDecorationLayout) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::HeaderBar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::HeaderBar",
+                    })?
+                    .set_decoration_layout(Some(value));
+                return Ok(());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ScaleValuePos) => {
+                let pos = match value {
+                    "Top" => gtk::PositionType::Top,
+                    "Bottom" => gtk::PositionType::Bottom,
+                    "Left" => gtk::PositionType::Left,
+                    "Right" => gtk::PositionType::Right,
+                    _ => {
+                        return Err(self.invalid_property_value(
+                            schema,
+                            property,
+                            "Top, Bottom, Left, or Right",
+                        ));
+                    }
+                };
+                widget
+                    .clone()
+                    .downcast::<gtk::Scale>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Scale",
+                    })?
+                    .set_value_pos(pos);
+                return Ok(());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FlowBoxSelectionMode) => {
+                let mode = match value {
+                    "None" => gtk::SelectionMode::None,
+                    "Single" => gtk::SelectionMode::Single,
+                    "Browse" => gtk::SelectionMode::Browse,
+                    "Multiple" => gtk::SelectionMode::Multiple,
+                    _ => {
+                        return Err(self.invalid_property_value(
+                            schema,
+                            property,
+                            "None, Single, Browse, or Multiple",
+                        ));
+                    }
+                };
+                widget
+                    .clone()
+                    .downcast::<gtk::FlowBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::FlowBox",
+                    })?
+                    .set_selection_mode(mode);
+                return Ok(());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::MenuButtonLabel) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::MenuButton",
+                    })?
+                    .set_label(value);
+                return Ok(());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::MenuButtonIconName) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::MenuButton",
+                    })?
+                    .set_icon_name(value);
+                return Ok(());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogAppName) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_application_name(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogVersion) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_version(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogDeveloperName) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_developer_name(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogComments) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_comments(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogWebsite) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_website(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogIssueUrl) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_issue_url(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogLicenseType) => {
+                let license = match value {
+                    "Agpl30" => gtk::License::Agpl30,
+                    "Agpl30Only" => gtk::License::Agpl30Only,
+                    "Apache20" => gtk::License::Apache20,
+                    "Artistic" => gtk::License::Artistic,
+                    "Bsd" => gtk::License::Bsd,
+                    "Gpl20" => gtk::License::Gpl20,
+                    "Gpl20Only" => gtk::License::Gpl20Only,
+                    "Gpl30" => gtk::License::Gpl30,
+                    "Gpl30Only" => gtk::License::Gpl30Only,
+                    "Lgpl21" => gtk::License::Lgpl21,
+                    "Lgpl21Only" => gtk::License::Lgpl21Only,
+                    "Lgpl30" => gtk::License::Lgpl30,
+                    "Lgpl30Only" => gtk::License::Lgpl30Only,
+                    "Mit" => gtk::License::MitX11,
+                    "MplTwo" => gtk::License::Mpl20,
+                    "Custom" => gtk::License::Custom,
+                    _ => gtk::License::Unknown,
+                };
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_license_type(license);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogApplicationIcon) => {
+                widget
+                    .clone()
+                    .downcast::<adw::AboutDialog>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::AboutDialog",
+                    })?
+                    .set_application_icon(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::TabPageTitle) => {
+                let key = widget.as_ptr() as usize;
+                self.tab_page_meta.borrow_mut().entry(key).or_default().title = value.to_owned();
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::SplitButtonLabel) => {
+                widget
+                    .clone()
+                    .downcast::<adw::SplitButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SplitButton",
+                    })?
+                    .set_label(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::SplitButtonIconName) => {
+                widget
+                    .clone()
+                    .downcast::<adw::SplitButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SplitButton",
+                    })?
+                    .set_icon_name(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::NavigationSplitViewSidebarPosition) => {
+                // set_sidebar_position requires libadwaita v1.7 which is not yet enabled; no-op.
+                let _ = value;
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::OverlaySplitViewSidebarPosition) => {
+                let pack_type = if value == "End" { gtk::PackType::End } else { gtk::PackType::Start };
+                widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_sidebar_position(pack_type);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogTitle) => {
+                let key = widget.as_ptr() as usize;
+                if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                    state.native.set_title(value);
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogMode) => {
+                let action = match value {
+                    "Save" => gtk::FileChooserAction::Save,
+                    "OpenMultiple" => gtk::FileChooserAction::Open,
+                    "SelectFolder" => gtk::FileChooserAction::SelectFolder,
+                    _ => gtk::FileChooserAction::Open,
+                };
+                let key = widget.as_ptr() as usize;
+                if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                    state.native.set_action(action);
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogAcceptLabel) => {
+                let key = widget.as_ptr() as usize;
+                if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                    state.native.set_accept_label(Some(value));
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogCancelLabel) => {
+                let key = widget.as_ptr() as usize;
+                if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                    state.native.set_cancel_label(Some(value));
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::EntryPrimaryIconName) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Entry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
+                    .set_primary_icon_name(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::EntrySecondaryIconName) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Entry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
+                    .set_secondary_icon_name(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::HeaderBarCenteringPolicy) => {
+                // gtk::HeaderBar in GTK4 does not expose centering-policy in Rust bindings; no-op.
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -2106,6 +2875,161 @@ where
                     .set_right_margin(margin);
                 Ok(())
             }
+            GtkPropertySetter::I64(GtkI64PropertySetter::LabelWidthChars) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_width_chars(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::CalendarYear) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Calendar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Calendar",
+                    })?
+                    .set_year(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::CalendarMonth) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Calendar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Calendar",
+                    })?
+                    .set_month(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::CalendarDay) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Calendar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Calendar",
+                    })?
+                    .set_day(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::FlowBoxRowSpacing) => {
+                let spacing = u32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "non-negative 32-bit integer")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::FlowBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::FlowBox",
+                    })?
+                    .set_row_spacing(spacing);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::FlowBoxColumnSpacing) => {
+                let spacing = u32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "non-negative 32-bit integer")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::FlowBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::FlowBox",
+                    })?
+                    .set_column_spacing(spacing);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridRowSpacing) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Grid>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Grid",
+                    })?
+                    .set_row_spacing(value.max(0) as u32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridColumnSpacing) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Grid>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Grid",
+                    })?
+                    .set_column_spacing(value.max(0) as u32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumn) => {
+                let key = widget.as_ptr() as usize;
+                self.grid_child_meta.borrow_mut().entry(key).or_default().column = value as i32;
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRow) => {
+                let key = widget.as_ptr() as usize;
+                self.grid_child_meta.borrow_mut().entry(key).or_default().row = value as i32;
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumnSpan) => {
+                let key = widget.as_ptr() as usize;
+                self.grid_child_meta.borrow_mut().entry(key).or_default().column_span = value.max(1) as i32;
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRowSpan) => {
+                let key = widget.as_ptr() as usize;
+                self.grid_child_meta.borrow_mut().entry(key).or_default().row_span = value.max(1) as i32;
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::CarouselSpacing) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Carousel>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Carousel",
+                    })?
+                    .set_spacing(value.max(0) as u32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::CarouselRevealDuration) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Carousel>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Carousel",
+                    })?
+                    .set_reveal_duration(value.max(0) as u32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::TabViewSelectedPage) => {
+                let tab_view = widget
+                    .clone()
+                    .downcast::<adw::TabView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::TabView",
+                    })?;
+                let n = tab_view.n_pages();
+                let idx = value as i32;
+                if idx >= 0 && idx < n {
+                    if let Some(page) = tab_view.pages().item(idx as u32) {
+                        if let Ok(tab_page) = page.downcast::<adw::TabPage>() {
+                            tab_view.set_selected_page(&tab_page);
+                        }
+                    }
+                }
+                Ok(())
+            }
             _ => Err(self.invalid_property_value(
                 schema,
                 property,
@@ -2258,6 +3182,106 @@ where
                     }
                 })?;
                 spin.adjustment().set_step_increment(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::ScaleFillLevel) => {
+                let scale = widget
+                    .clone()
+                    .downcast::<gtk::Scale>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Scale",
+                    })?;
+                scale.set_show_fill_level(true);
+                scale.set_fill_level(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::LabelXalign) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_xalign(value as f32);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::LabelYalign) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_yalign(value as f32);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewSidebarWidthFraction) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?
+                    .set_sidebar_width_fraction(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewMinSidebarWidth) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?
+                    .set_min_sidebar_width(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewMaxSidebarWidth) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?
+                    .set_max_sidebar_width(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewSidebarWidthFraction) => {
+                widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_sidebar_width_fraction(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewMinSidebarWidth) => {
+                widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_min_sidebar_width(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewMaxSidebarWidth) => {
+                widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_max_sidebar_width(value);
                 Ok(())
             }
             _ => Err(self.invalid_property_value(
@@ -2464,6 +3488,66 @@ where
                     stack.add_titled_with_icon(child, name, &meta.title, &meta.icon_name);
                 }
             }
+            GtkChildMountRoute::FlowBoxChildren => {
+                let flow_box = parent_widget
+                    .clone()
+                    .downcast::<gtk::FlowBox>()
+                    .expect("flow box widget should downcast");
+                for child in previous {
+                    flow_box.remove(child);
+                }
+                for child in next {
+                    flow_box.append(child);
+                }
+            }
+            GtkChildMountRoute::CarouselPages => {
+                let carousel = parent_widget
+                    .clone()
+                    .downcast::<adw::Carousel>()
+                    .expect("carousel widget should downcast");
+                for child in previous {
+                    carousel.remove(child);
+                }
+                for child in next {
+                    carousel.append(child);
+                }
+            }
+            GtkChildMountRoute::TabViewPages => {
+                let tab_view = parent_widget
+                    .clone()
+                    .downcast::<adw::TabView>()
+                    .expect("tab view widget should downcast");
+                for child in previous {
+                    let page = tab_view.page(child);
+                    tab_view.close_page(&page);
+                    tab_view.close_page_finish(&page, true);
+                }
+                let meta_map = self.tab_page_meta.borrow();
+                for child in next {
+                    let page = tab_view.append(child);
+                    let key = child.as_ptr() as usize;
+                    if let Some(meta) = meta_map.get(&key) {
+                        page.set_title(&meta.title);
+                        page.set_needs_attention(meta.needs_attention);
+                        page.set_loading(meta.loading);
+                    }
+                }
+            }
+            GtkChildMountRoute::GridChildren => {
+                let grid = parent_widget
+                    .clone()
+                    .downcast::<gtk::Grid>()
+                    .expect("grid widget should downcast");
+                for child in previous {
+                    grid.remove(child);
+                }
+                let meta_map = self.grid_child_meta.borrow();
+                for child in next {
+                    let key = child.as_ptr() as usize;
+                    let meta = meta_map.get(&key).cloned().unwrap_or_default();
+                    grid.attach(child, meta.column, meta.row, meta.column_span.max(1), meta.row_span.max(1));
+                }
+            }
             _ => unreachable!("replace_sequence_children requires a sequence child group"),
         }
     }
@@ -2649,6 +3733,193 @@ where
                     })?
                     .set_child(child);
             }
+            GtkChildMountRoute::FlowBoxChildContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::FlowBoxChild>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "FlowBoxChild".into(),
+                        expected_type: "gtk::FlowBoxChild",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::MenuButtonPopover => {
+                let btn = parent_widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "MenuButton".into(),
+                        expected_type: "gtk::MenuButton",
+                    })?;
+                match child {
+                    Some(c) => {
+                        if let Ok(popover) = c.clone().downcast::<gtk::Popover>() {
+                            btn.set_popover(Some(&popover));
+                        }
+                    }
+                    None => btn.set_popover(None::<&gtk::Popover>),
+                }
+            }
+            GtkChildMountRoute::PopoverContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Popover>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Popover".into(),
+                        expected_type: "gtk::Popover",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::CenterBoxStart => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::CenterBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "CenterBox".into(),
+                        expected_type: "gtk::CenterBox",
+                    })?
+                    .set_start_widget(child);
+            }
+            GtkChildMountRoute::CenterBoxCenter => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::CenterBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "CenterBox".into(),
+                        expected_type: "gtk::CenterBox",
+                    })?
+                    .set_center_widget(child);
+            }
+            GtkChildMountRoute::CenterBoxEnd => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::CenterBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "CenterBox".into(),
+                        expected_type: "gtk::CenterBox",
+                    })?
+                    .set_end_widget(child);
+            }
+            GtkChildMountRoute::NavigationSplitViewSidebar => {
+                let nav = parent_widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "NavigationSplitView".into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?;
+                match child {
+                    Some(c) => {
+                        if let Ok(page) = c.clone().downcast::<adw::NavigationPage>() {
+                            nav.set_sidebar(Some(&page));
+                        }
+                    }
+                    None => nav.set_sidebar(None::<&adw::NavigationPage>),
+                }
+            }
+            GtkChildMountRoute::NavigationSplitViewContent => {
+                let nav = parent_widget
+                    .clone()
+                    .downcast::<adw::NavigationSplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "NavigationSplitView".into(),
+                        expected_type: "adw::NavigationSplitView",
+                    })?;
+                match child {
+                    Some(c) => {
+                        if let Ok(page) = c.clone().downcast::<adw::NavigationPage>() {
+                            nav.set_content(Some(&page));
+                        }
+                    }
+                    None => nav.set_content(None::<&adw::NavigationPage>),
+                }
+            }
+            GtkChildMountRoute::OverlaySplitViewSidebar => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "OverlaySplitView".into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_sidebar(child);
+            }
+            GtkChildMountRoute::OverlaySplitViewContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::OverlaySplitView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "OverlaySplitView".into(),
+                        expected_type: "adw::OverlaySplitView",
+                    })?
+                    .set_content(child);
+            }
+            GtkChildMountRoute::TabViewTabBar => {
+                if let Some(tab_view) = parent_widget.clone().downcast::<adw::TabView>().ok() {
+                    if let Some(c) = child {
+                        if let Ok(bar) = c.clone().downcast::<adw::TabBar>() {
+                            bar.set_view(Some(&tab_view));
+                        }
+                    }
+                }
+            }
+            GtkChildMountRoute::TabPageContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Bin>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "TabPage".into(),
+                        expected_type: "adw::Bin",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::GridChildContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Bin>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "GridChild".into(),
+                        expected_type: "adw::Bin",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ActionRowPrefix => {
+                let row = parent_widget
+                    .clone()
+                    .downcast::<adw::ActionRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "ActionRow".into(),
+                        expected_type: "adw::ActionRow",
+                    })?;
+                if let Some(c) = child {
+                    row.add_prefix(c);
+                }
+            }
+            GtkChildMountRoute::SplitButtonPopover => {
+                let btn = parent_widget
+                    .clone()
+                    .downcast::<adw::SplitButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "SplitButton".into(),
+                        expected_type: "adw::SplitButton",
+                    })?;
+                match child {
+                    Some(c) => {
+                        if let Ok(popover) = c.clone().downcast::<gtk::Popover>() {
+                            btn.set_popover(Some(&popover));
+                        }
+                    }
+                    None => btn.set_popover(None::<&gtk::Popover>),
+                }
+            }
+            GtkChildMountRoute::CarouselDots => {
+                // CarouselIndicatorDots connects to the carousel via its set_carousel call
+                // when mounted; the dots widget has no relationship to the parent Carousel here.
+                let _ = child;
+            }
+            GtkChildMountRoute::CarouselLines => {
+                let _ = child;
+            }
             GtkChildMountRoute::HeaderBarStart
             | GtkChildMountRoute::HeaderBarEnd
             | GtkChildMountRoute::BoxChildren
@@ -2662,7 +3933,11 @@ where
             | GtkChildMountRoute::PreferencesPageChildren
             | GtkChildMountRoute::PreferencesWindowPages
             | GtkChildMountRoute::OverlayOverlay
-            | GtkChildMountRoute::ViewStackPages => {
+            | GtkChildMountRoute::ViewStackPages
+            | GtkChildMountRoute::FlowBoxChildren
+            | GtkChildMountRoute::CarouselPages
+            | GtkChildMountRoute::TabViewPages
+            | GtkChildMountRoute::GridChildren => {
                 unreachable!("sequence child groups are handled by explicit sequence APIs")
             }
         }
@@ -2692,6 +3967,11 @@ where
         let (schema, widget) = self.create_supported_widget(widget)?;
         if schema.is_window_root() {
             self.setup_dark_mode_watcher();
+            self.setup_clipboard_watcher();
+            if let Ok(window) = widget.clone().downcast::<gtk::Window>() {
+                self.setup_window_size_watcher(&window);
+                self.setup_window_focus_watcher(&window);
+            }
         }
         self.widgets.insert(
             handle.0,
@@ -3442,6 +4722,317 @@ where
                     queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::from_text(response),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::WindowMaximized => widget
+                .clone()
+                .downcast::<gtk::Window>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Window",
+                })?
+                .connect_maximized_notify(move |win| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(win.is_maximized()),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::WindowFullscreened => widget
+                .clone()
+                .downcast::<gtk::Window>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Window",
+                })?
+                .connect_fullscreened_notify(move |win| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(win.is_fullscreen()),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::CalendarDaySelected => widget
+                .clone()
+                .downcast::<gtk::Calendar>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Calendar",
+                })?
+                .connect_day_selected(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::FlowBoxChildActivated => widget
+                .clone()
+                .downcast::<gtk::FlowBox>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::FlowBox",
+                })?
+                .connect_child_activated(move |_, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::MenuButtonToggled => {
+                let btn = widget
+                    .clone()
+                    .downcast::<gtk::MenuButton>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::MenuButton",
+                    })?;
+                use glib::prelude::ObjectExt as _;
+                btn.connect_notify_local(Some("active"), move |btn, _| {
+                    use glib::prelude::ObjectExt as _;
+                    let active: bool = btn.property("active");
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(active),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                })
+            }
+            GtkEventSignal::PopoverClosed => widget
+                .clone()
+                .downcast::<gtk::Popover>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Popover",
+                })?
+                .connect_closed(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SecondaryClick => {
+                let controller = gtk::GestureClick::new();
+                controller.set_button(3);
+                let sid = controller.connect_pressed(move |_, _, _, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::LongPress => {
+                let controller = gtk::GestureLongPress::new();
+                let sid = controller.connect_pressed(move |_, _, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::SwipeLeft => {
+                let controller = gtk::GestureSwipe::new();
+                let sid = controller.connect_swipe(move |_, velocity_x, _| {
+                    if velocity_x < 0.0 {
+                        queue.push(GtkQueuedEvent {
+                            route: route_id,
+                            value: V::unit(),
+                        });
+                        if let Some(notifier) = notifier.borrow().clone() {
+                            notifier();
+                        }
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::SwipeRight => {
+                let controller = gtk::GestureSwipe::new();
+                let sid = controller.connect_swipe(move |_, velocity_x, _| {
+                    if velocity_x > 0.0 {
+                        queue.push(GtkQueuedEvent {
+                            route: route_id,
+                            value: V::unit(),
+                        });
+                        if let Some(notifier) = notifier.borrow().clone() {
+                            notifier();
+                        }
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::NavigationSplitViewShowContentChanged => widget
+                .clone()
+                .downcast::<adw::NavigationSplitView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::NavigationSplitView",
+                })?
+                .connect_show_content_notify(move |nav| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(nav.shows_content()),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::OverlaySplitViewShowSidebarChanged => widget
+                .clone()
+                .downcast::<adw::OverlaySplitView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::OverlaySplitView",
+                })?
+                .connect_show_sidebar_notify(move |ov| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(ov.shows_sidebar()),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::TabViewPageAdded => widget
+                .clone()
+                .downcast::<adw::TabView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::TabView",
+                })?
+                .connect_page_attached(move |_, _, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::TabViewPageClosed => widget
+                .clone()
+                .downcast::<adw::TabView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::TabView",
+                })?
+                .connect_close_page(move |_, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                    glib::Propagation::Proceed
+                }),
+            GtkEventSignal::TabViewSelectedPageChanged => widget
+                .clone()
+                .downcast::<adw::TabView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::TabView",
+                })?
+                .connect_selected_page_notify(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::CarouselPageChanged => widget
+                .clone()
+                .downcast::<adw::Carousel>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::Carousel",
+                })?
+                .connect_page_changed(move |_, idx| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_i64(idx as i64),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::FileDialogResponse => {
+                let key = widget.as_ptr() as usize;
+                if let Some(state) = self.file_chooser_states.borrow().get(&key) {
+                    let native = state.native.clone();
+                    native.connect_response(move |_, response| {
+                        let val = match response {
+                            gtk::ResponseType::Accept => 1,
+                            gtk::ResponseType::Cancel => 0,
+                            gtk::ResponseType::DeleteEvent => -4,
+                            gtk::ResponseType::Other(v) => v as i64,
+                            _ => -1,
+                        };
+                        queue.push(GtkQueuedEvent {
+                            route: route_id,
+                            value: V::from_i64(val),
+                        });
+                        if let Some(notifier) = notifier.borrow().clone() {
+                            notifier();
+                        }
+                    })
+                } else {
+                    widget.connect_notify_local(Some("visible"), move |_, _| {
+                        queue.push(GtkQueuedEvent {
+                            route: route_id,
+                            value: V::from_i64(0),
+                        });
+                        if let Some(notifier) = notifier.borrow().clone() {
+                            notifier();
+                        }
+                    })
+                }
+            }
+            GtkEventSignal::SplitButtonClicked => widget
+                .clone()
+                .downcast::<adw::SplitButton>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::SplitButton",
+                })?
+                .connect_clicked(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
                     });
                     if let Some(notifier) = notifier.borrow().clone() {
                         notifier();

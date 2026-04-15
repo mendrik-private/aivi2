@@ -202,7 +202,17 @@ value view =
     </Window>
 ```
 
-**Properties:** `title`, `defaultWidth`, `defaultHeight`, `resizable`, `modal`, `visible`, `sensitive`, `opacity`, `hexpand`, `vexpand`, `halign`, `valign`, `widthRequest`, `heightRequest`, `marginStart`, `marginEnd`, `marginTop`, `marginBottom`, `tooltip`, `cssClasses`, `animateOpacity`
+**Properties:** `title`, `defaultWidth`, `defaultHeight`, `resizable`, `modal`, `maximized`, `fullscreen`, `decorated`, `hideOnClose`, `visible`, `sensitive`, `opacity`, `hexpand`, `vexpand`, `halign`, `valign`, `widthRequest`, `heightRequest`, `marginStart`, `marginEnd`, `marginTop`, `marginBottom`, `tooltip`, `cssClasses`, `animateOpacity`
+
+- `maximized` (Bool) — maximize or unmaximize the window
+- `fullscreen` (Bool) — enter or exit fullscreen mode
+- `decorated` (Bool) — show or hide window decorations (title bar, borders)
+- `hideOnClose` (Bool) — hide rather than destroy the window when closed
+
+**Events:** `onCloseRequest` (Unit), `onMaximize` (Bool), `onFullscreen` (Bool)
+
+- `onMaximize` fires with `True` when maximized, `False` when restored
+- `onFullscreen` fires with `True` when entering fullscreen, `False` when leaving
 
 ### `HeaderBar`
 
@@ -212,7 +222,7 @@ Title bar with optional start/end widget slots.
 value view =
     <Window title="App">
         <Window.titlebar>
-            <HeaderBar>
+            <HeaderBar decorationLayout="close:">
                 <HeaderBar.start>
                     <Button label="Back" />
                 </HeaderBar.start>
@@ -224,6 +234,11 @@ value view =
         <Label text="Content" />
     </Window>
 ```
+
+**Properties:** `showTitleButtons`, `decorationLayout`, `centeringPolicy`
+
+- `decorationLayout` (Text) — overrides the system button layout; format is `"left-buttons:right-buttons"` where tokens include `close`, `maximize`, `minimize`, `icon` (e.g. `"close:"`, `"menu:minimize,maximize,close"`)
+- `centeringPolicy` (Text) — controls title centering; `"Loose"` (default) centres the title when space allows, `"Strict"` always centres it even when the start/end widgets are asymmetric
 
 ### `Box`
 
@@ -298,9 +313,16 @@ Text display widget.
 ```aivi
 value view =
     <Window title="App">
-        <Label text="Hello, world!" wrap={True} halign="Start" />
+        <Label text="Hello, world!" wrap={True} halign="Start" xalign={0.0} />
     </Window>
 ```
+
+**Properties (extra):** `xalign`, `yalign`, `widthChars`, `singleLineMode`
+
+- `xalign` (F64) — horizontal text alignment within the widget; `0.0` = left, `0.5` = center, `1.0` = right
+- `yalign` (F64) — vertical text alignment within the widget
+- `widthChars` (I64) — minimum width in characters; useful for stable layouts
+- `singleLineMode` (Bool) — when `True`, forces text to render as a single line (truncates or scrolls)
 
 ### `Button`
 
@@ -313,6 +335,19 @@ value view =
     </Window>
 ```
 
+**Extra properties:** `iconName`, `useUnderline`, `receivesDefault`
+
+- `iconName` (Text) — symbolic icon name; when set alongside `label`, produces an icon+label button; when set without `label`, produces an icon-only button (e.g. `"list-add-symbolic"`)
+- `useUnderline` (Bool) — when `True`, a `_` in `label` marks the next character as a mnemonic accelerator
+- `receivesDefault` (Bool) — when `True`, this button activates when Enter is pressed in its window (if no focused widget intercepts the key)
+
+**Gesture events (also available on `Box`, `Label`, `Image`):**
+
+- `onSecondaryClick` (Unit) — fires on right-button / secondary-button click
+- `onLongPress` (Unit) — fires after a long press gesture is held
+- `onSwipeLeft` (Unit) — fires when a left-ward swipe is detected
+- `onSwipeRight` (Unit) — fires when a right-ward swipe is detected
+
 ### `Entry`
 
 Single-line text input.
@@ -320,9 +355,16 @@ Single-line text input.
 ```aivi
 value view =
     <Window title="App">
-        <Entry placeholder="Type something..." hexpand={True} />
+        <Entry placeholder="Type something..." hexpand={True} primaryIconName="system-search-symbolic" />
     </Window>
 ```
+
+**Extra properties:** `primaryIconName`, `secondaryIconName`
+
+- `primaryIconName` (Text) — icon name for the leading (start) icon slot; use a symbolic icon name such as `"system-search-symbolic"`
+- `secondaryIconName` (Text) — icon name for the trailing (end) icon slot; commonly used for a clear button (`"edit-clear-symbolic"`)
+
+**Events:** `onChange` (Text), `onActivated` (Unit), `onFocusIn` (Unit), `onFocusOut` (Unit)
 
 ### `Switch`
 
@@ -375,9 +417,14 @@ Slider for numeric values.
 ```aivi
 value view =
     <Window title="App">
-        <Scale value={50.0} min={0.0} max={100.0} step={1.0} drawValue={True} hexpand={True} />
+        <Scale value={50.0} min={0.0} max={100.0} step={1.0} drawValue={True} valuePos="Bottom" hexpand={True} />
     </Window>
 ```
+
+**Extra properties:** `valuePos`, `fillLevel`
+
+- `valuePos` (Text) — position of the numeric label when `drawValue` is `True`; one of `"Top"`, `"Bottom"`, `"Left"`, `"Right"`
+- `fillLevel` (F64) — fills the track up to this value (also enables the fill-level indicator automatically); useful for buffered-progress UIs
 
 ### `Image`
 
@@ -531,7 +578,7 @@ value view =
 
 **Properties:** `title`, `subtitle`, `activatable`  
 **Events:** `onActivated` (Unit)  
-**Children:** `suffix` (sequence)
+**Children:** `prefix` (sequence — widgets placed before the title), `suffix` (sequence — widgets placed after the title)
 
 #### `ExpanderRow`
 
@@ -625,7 +672,7 @@ value view =
     </Window>
 ```
 
-**Properties:** `selectionMode` (`None`|`Single`|`Browse`|`Multiple`)  
+**Properties:** `selectionMode` (`None`|`Single`|`Browse`|`Multiple`), `showSeparators` (Bool)  
 **Events:** `onRowActivated` (Int — zero-based row index)  
 **Children:** `children` (sequence)
 
@@ -983,3 +1030,419 @@ value view =
 
 **Events:**
 - `onResponse` (Text) — fires with the response ID when the user activates a response
+
+### `Calendar`
+
+Month calendar with optional day selection.
+
+```aivi
+signal selectedDay : Int = 1
+signal selectedMonth : Int = 0
+signal selectedYear : Int = 2025
+
+value view =
+    <Window title="App">
+        <Calendar year={selectedYear} month={selectedMonth} day={selectedDay} onDaySelected={.}></Window>
+    </Window>
+```
+
+**Properties:** `year`, `month`, `day`
+
+- `year` (I64) — displayed year
+- `month` (I64) — displayed month, **0-based** (0 = January, 11 = December)
+- `day` (I64) — selected day of the month (1–31)
+
+**Events:**
+- `onDaySelected` (Unit) — fires when the user clicks a day
+
+### `FlowBox` + `FlowBoxChild`
+
+Reflowing grid of child widgets. Children wrap to the next row when the available width is exhausted.
+
+```aivi
+value view =
+    <Window title="App">
+        <ScrolledWindow hexpand={True} vexpand={True}>
+            <FlowBox selectionMode="Single" rowSpacing={6} columnSpacing={6}>
+                <FlowBoxChild>
+                    <Label text="Item A" />
+                </FlowBoxChild>
+                <FlowBoxChild>
+                    <Label text="Item B" />
+                </FlowBoxChild>
+                <FlowBoxChild>
+                    <Label text="Item C" />
+                </FlowBoxChild>
+            </FlowBox>
+        </ScrolledWindow>
+    </Window>
+```
+
+**FlowBox properties:** `selectionMode`, `rowSpacing`, `columnSpacing`
+
+- `selectionMode` (Text) — `"None"`, `"Single"`, `"Browse"`, or `"Multiple"`
+- `rowSpacing` (I64) — pixels of space between rows
+- `columnSpacing` (I64) — pixels of space between columns
+
+**FlowBox events:**
+- `onChildActivated` (Unit) — fires when a child is activated (double-clicked or Enter)
+
+**FlowBox children:** `children` — sequence of `FlowBoxChild` widgets
+
+**FlowBoxChild children:** `content` — single child slot (the widget displayed inside the cell)
+
+### `MenuButton`
+
+A button that opens a `Popover` when clicked.
+
+```aivi
+signal menuOpen : Bool = False
+
+value view =
+    <Window title="App">
+        <Window.titlebar>
+            <HeaderBar>
+                <HeaderBar.end>
+                    <MenuButton iconName="open-menu-symbolic" onToggled={open => menuOpen}>
+                        <MenuButton.popover>
+                            <Popover>
+                                <Popover.content>
+                                    <Box orientation="Vertical" spacing={4} marginTop={8} marginBottom={8} marginStart={8} marginEnd={8}>
+                                        <Button label="Settings" />
+                                        <Button label="About" />
+                                    </Box>
+                                </Popover.content>
+                            </Popover>
+                        </MenuButton.popover>
+                    </MenuButton>
+                </HeaderBar.end>
+            </HeaderBar>
+        </Window.titlebar>
+        <Label text="Content" />
+    </Window>
+```
+
+**Properties:** `label`, `iconName`, `active`, `useUnderline`
+
+- `label` (Text) — button label text (use `iconName` for icon-only buttons)
+- `iconName` (Text) — icon name from the icon theme (e.g. `"open-menu-symbolic"`)
+- `active` (Bool) — whether the popover is currently open
+- `useUnderline` (Bool) — interpret `_` in the label as a mnemonic underline
+
+**Events:**
+- `onToggled` (Bool) — fires with `True` when the popover opens, `False` when it closes
+
+**Children:** `popover` — single `Popover` child slot
+
+### `Popover`
+
+A floating overlay widget anchored to its parent. Typically used as the child of `MenuButton`.
+
+```aivi
+value view =
+    <Window title="App">
+        <MenuButton label="Options">
+            <MenuButton.popover>
+                <Popover autohide={True} hasArrow={True} onClosed={.}>
+                    <Popover.content>
+                        <Label text="Hello from popover!" marginStart={8} marginEnd={8} marginTop={8} marginBottom={8} />
+                    </Popover.content>
+                </Popover>
+            </MenuButton.popover>
+        </MenuButton>
+    </Window>
+```
+
+**Properties:** `autohide`, `hasArrow`
+
+- `autohide` (Bool) — close the popover automatically when focus leaves it (default `True`)
+- `hasArrow` (Bool) — draw a pointing arrow towards the anchor widget (default `True`)
+
+**Events:**
+- `onClosed` (Unit) — fires when the popover is dismissed
+
+**Children:** `content` — single child slot for the popover body widget
+
+---
+
+### `CenterBox`
+
+A three-slot horizontal container that aligns a center child between optional start and end children.
+
+```aivi
+value view =
+    <Window title="App">
+        <CenterBox hexpand={True}>
+            <CenterBox.start>
+                <Button label="Back" />
+            </CenterBox.start>
+            <CenterBox.center>
+                <Label text="Title" />
+            </CenterBox.center>
+            <CenterBox.end>
+                <Button label="Forward" />
+            </CenterBox.end>
+        </CenterBox>
+    </Window>
+```
+
+**Children:** `start` (single), `center` (single — default), `end` (single)
+
+---
+
+### `AboutDialog`
+
+Adwaita About dialog showing application metadata. Acts as a top-level window; set `visible` reactively to show or hide it.
+
+```aivi
+value view =
+    <Window title="App">
+        <AboutDialog visible={showAbout} appName="My App" version="1.0.0" developerName="Jane Doe" website="https://example.com" issueUrl="https://github.com/example/issues" licenseType="MIT" applicationIcon="my-app" />
+        <Button label="About" onClick={True}></Window>
+    </Window>
+```
+
+**Properties:** `visible`, `appName`, `version`, `developerName`, `comments`, `website`, `issueUrl`, `licenseType`, `applicationIcon`
+
+- `licenseType` (Text) — one of the GLib/GTK license identifiers: `"MIT"`, `"GPL-2.0"`, `"GPL-3.0"`, `"LGPL-2.1"`, `"LGPL-3.0"`, `"AGPL-3.0"`, `"Apache-2.0"`, `"MPL-2.0"`, `"Custom"`, `"Unknown"`
+
+---
+
+### `SplitButton`
+
+A combined button + dropdown arrow that opens a `Popover` for secondary actions.
+
+```aivi
+value view =
+    <Window title="App">
+        <SplitButton label="Save" onClick={.} hexpand={False}>
+            <SplitButton.popover>
+                <Popover>
+                    <Popover.content>
+                        <Box orientation="Vertical" spacing={4}>
+                            <Button label="Save As…" />
+                            <Button label="Export…" />
+                        </Box>
+                    </Popover.content>
+                </Popover>
+            </SplitButton.popover>
+        </SplitButton>
+    </Window>
+```
+
+**Properties:** `label`, `iconName`
+
+- `label` (Text) — text for the main button half
+- `iconName` (Text) — icon name alternative to `label`
+
+**Events:** `onClick` (Unit) — fires when the main button half is clicked
+
+**Children:** `popover` (single — a `Popover` widget for the dropdown)
+
+---
+
+### `NavigationSplitView`
+
+An adaptive two-panel layout (sidebar + content) that collapses to a single column on narrow displays. Both panels should contain `NavigationPage` widgets.
+
+```aivi
+value view =
+    <Window title="App" defaultWidth={900} defaultHeight={600}>
+        <NavigationSplitView showContent={True} sidebarWidthFraction={0.3}>
+            <NavigationSplitView.sidebar>
+                <NavigationPage title="Sidebar">
+                    <Label text="Sidebar content" />
+                </NavigationPage>
+            </NavigationSplitView.sidebar>
+            <NavigationSplitView.content>
+                <NavigationPage title="Content">
+                    <Label text="Main content" />
+                </NavigationPage>
+            </NavigationSplitView.content>
+        </NavigationSplitView>
+    </Window>
+```
+
+**Properties:** `showContent`, `sidebarWidthFraction`, `minSidebarWidth`, `maxSidebarWidth`, `sidebarPosition`
+
+- `showContent` (Bool) — when collapsed, whether the content panel is shown (vs. the sidebar)
+- `sidebarWidthFraction` (Float) — sidebar width as a fraction of the total width (default `0.25`)
+- `minSidebarWidth` / `maxSidebarWidth` (Float) — clamp sidebar width in pixels
+- `sidebarPosition` (Text) — `"Start"` (default) or `"End"`
+
+**Events:** `onShowContent` (Bool) — fires when `showContent` changes
+
+**Children:** `sidebar` (single), `content` (single — default)
+
+---
+
+### `OverlaySplitView`
+
+Like `NavigationSplitView` but the sidebar slides over the content rather than pushing it.
+
+```aivi
+value view =
+    <Window title="App" defaultWidth={800} defaultHeight={600}>
+        <OverlaySplitView showSidebar={sidebarOpen}>
+            <OverlaySplitView.sidebar>
+                <Box orientation="Vertical" spacing={8} marginStart={12} marginTop={12}>
+                    <Label text="Navigation" />
+                </Box>
+            </OverlaySplitView.sidebar>
+            <OverlaySplitView.content>
+                <Label text="Content" halign="Center" valign="Center" />
+            </OverlaySplitView.content>
+        </OverlaySplitView>
+    </Window>
+```
+
+**Properties:** `showSidebar`, `sidebarPosition`, `sidebarWidthFraction`, `minSidebarWidth`, `maxSidebarWidth`
+
+- `showSidebar` (Bool) — show or hide the overlay sidebar
+- `sidebarPosition` (Text) — `"Start"` (default) or `"End"`
+
+**Events:** `onShowSidebar` (Bool) — fires when `showSidebar` changes
+
+**Children:** `sidebar` (single), `content` (single — default)
+
+---
+
+### `TabView` + `TabPage` + `TabBar`
+
+A tabbed interface. `TabView` holds pages; `TabBar` provides the tab strip.
+
+```aivi
+value view =
+    <Window title="App">
+        <Box orientation="Vertical">
+            <TabView selectedPage={activeTab} onSelectedPageChanged={.} hexpand={True} vexpand={True}>
+                <TabView.tabBar>
+                    <TabBar autohide={False} expandTabs={True} />
+                </TabView.tabBar>
+                <TabView.pages>
+                    <TabPage title="Documents">
+                        <TabPage.content>
+                            <Label text="Documents tab" halign="Center" valign="Center" />
+                        </TabPage.content>
+                    </TabPage>
+                    <TabPage title="Settings" needsAttention={True}>
+                        <TabPage.content>
+                            <Label text="Settings tab" halign="Center" valign="Center" />
+                        </TabPage.content>
+                    </TabPage>
+                </TabView.pages>
+            </TabView>
+        </Box>
+    </Window>
+```
+
+#### `TabView`
+
+**Properties:** `selectedPage` (Int — zero-based index)  
+**Events:** `onPageAdded` (Unit), `onPageClosed` (Unit), `onSelectedPageChanged` (Unit)  
+**Children:** `pages` (sequence of `TabPage` — default), `tabBar` (single `TabBar`)
+
+#### `TabPage`
+
+**Properties:** `visible`, `title`, `needsAttention` (Bool — shows a dot indicator), `loading` (Bool — shows a spinner)  
+**Children:** `content` (single — default)
+
+#### `TabBar`
+
+**Properties:** `autohide` (Bool — hides bar when there is only one page), `expandTabs` (Bool — tabs expand to fill the bar width)
+
+---
+
+### `Carousel` + indicators
+
+A swipe carousel backed by `adw::Carousel`. Attach `CarouselIndicatorDots` or `CarouselIndicatorLines` as the `dots`/`lines` child to get navigation indicators.
+
+```aivi
+value view =
+    <Window title="App">
+        <Box orientation="Vertical" spacing={8} hexpand={True} vexpand={True}>
+            <Carousel spacing={16} interactive={True} hexpand={True} vexpand={True} onPageChanged={.} onSwipeLeft={.} onSwipeRight={.}>
+                <Carousel.dots>
+                    <CarouselIndicatorDots />
+                </Carousel.dots>
+                <Carousel.pages>
+                    <Label text="Page 1" halign="Center" valign="Center" />
+                    <Label text="Page 2" halign="Center" valign="Center" />
+                    <Label text="Page 3" halign="Center" valign="Center" />
+                </Carousel.pages>
+            </Carousel>
+        </Box>
+    </Window>
+```
+
+**Carousel properties:** `spacing` (Int), `revealDuration` (Int — ms), `interactive` (Bool)  
+**Carousel events:** `onPageChanged` (Int — zero-based page index), `onSwipeLeft` (Unit), `onSwipeRight` (Unit)  
+**Carousel children:** `pages` (sequence — default), `dots` (single `CarouselIndicatorDots`), `lines` (single `CarouselIndicatorLines`)
+
+`CarouselIndicatorDots` and `CarouselIndicatorLines` have no widget-specific properties; they automatically link to their parent Carousel.
+
+---
+
+### `Grid` + `GridChild`
+
+A two-dimensional grid layout. Each child must be wrapped in a `GridChild` that specifies its position.
+
+```aivi
+value view =
+    <Window title="App">
+        <Grid rowSpacing={8} columnSpacing={8} marginStart={12} marginEnd={12} marginTop={12} marginBottom={12}>
+            <GridChild column={0} row={0} columnSpan={2}>
+                <GridChild.content>
+                    <Label text="Wide header" hexpand={True} />
+                </GridChild.content>
+            </GridChild>
+            <GridChild column={0} row={1}>
+                <GridChild.content>
+                    <Button label="A" />
+                </GridChild.content>
+            </GridChild>
+            <GridChild column={1} row={1}>
+                <GridChild.content>
+                    <Button label="B" />
+                </GridChild.content>
+            </GridChild>
+        </Grid>
+    </Window>
+```
+
+#### `Grid`
+
+**Properties:** `rowSpacing`, `columnSpacing` (Int), `rowHomogeneous`, `columnHomogeneous` (Bool)  
+**Children:** `children` (sequence of `GridChild` — default)
+
+#### `GridChild`
+
+**Properties:** `column`, `row`, `columnSpan`, `rowSpan` (Int — default span is 1)  
+**Children:** `content` (single — default)
+
+---
+
+### `FileDialog`
+
+A native file-chooser dialog backed by `gtk::FileChooserNative`. Set `visible` to `True` to show the dialog; the response is delivered via `onResponse`.
+
+```aivi
+value view =
+    <Window title="App">
+        <FileDialog visible={dialogOpen} title="Open file" mode="Open" acceptLabel="Open" cancelLabel="Cancel" onResponse={code}>
+            <Button label="Open file…" onClick={True}></Window>
+        </FileDialog>
+    </Window>
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|---|---|---|
+| `visible` | Bool | Show (`True`) or hide (`False`) the dialog |
+| `title` | Text | Window title of the chooser |
+| `mode` | Text | `"Open"` (default) or `"Save"` |
+| `acceptLabel` | Text | Label for the accept button |
+| `cancelLabel` | Text | Label for the cancel button |
+
+**Events:** `onResponse` (Int) — response code; `1` = accepted, `0` = cancelled (matches `gtk::ResponseType`)

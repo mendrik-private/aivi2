@@ -28,6 +28,21 @@ enum ActiveProviderState {
         provider: RuntimeSourceProvider,
         port: DetachedRuntimePublicationPort,
     },
+    /// Live clipboard stream: publishes `Text` on each clipboard content change.
+    Clipboard {
+        provider: RuntimeSourceProvider,
+        port: DetachedRuntimePublicationPort,
+    },
+    /// Live window-size stream: publishes a Record `{ width: Int, height: Int }` on each resize.
+    WindowSize {
+        provider: RuntimeSourceProvider,
+        port: DetachedRuntimePublicationPort,
+    },
+    /// Live window-focus stream: publishes `Bool` (true = focused) on each focus change.
+    WindowFocus {
+        provider: RuntimeSourceProvider,
+        port: DetachedRuntimePublicationPort,
+    },
 }
 
 impl ActiveProviderState {
@@ -36,7 +51,10 @@ impl ActiveProviderState {
             Self::Passive { provider, .. }
             | Self::Mailbox { provider, .. }
             | Self::Window { provider, .. }
-            | Self::DarkMode { provider, .. } => provider,
+            | Self::DarkMode { provider, .. }
+            | Self::Clipboard { provider, .. }
+            | Self::WindowSize { provider, .. }
+            | Self::WindowFocus { provider, .. } => provider,
         }
     }
 }
@@ -147,6 +165,52 @@ impl SourceProviderManager {
             };
             let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
                 RuntimeValue::Bool(is_dark),
+            ));
+        }
+    }
+
+    /// Publishes a clipboard change to all active `clipboard.changed` source instances.
+    /// Called by the GTK main thread whenever the GDK clipboard content changes.
+    pub fn dispatch_clipboard_changed(&mut self, text: String) {
+        for state in self.active.values() {
+            let ActiveProviderState::Clipboard { port, .. } = state else {
+                continue;
+            };
+            let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
+                RuntimeValue::Text(text.clone().into()),
+            ));
+        }
+    }
+
+    /// Publishes a window size change to all active `window.size` source instances.
+    pub fn dispatch_window_size_changed(&mut self, width: i32, height: i32) {
+        for state in self.active.values() {
+            let ActiveProviderState::WindowSize { port, .. } = state else {
+                continue;
+            };
+            let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
+                RuntimeValue::Record(vec![
+                    aivi_backend::RuntimeRecordField {
+                        label: "width".into(),
+                        value: RuntimeValue::Int(width as i64),
+                    },
+                    aivi_backend::RuntimeRecordField {
+                        label: "height".into(),
+                        value: RuntimeValue::Int(height as i64),
+                    },
+                ]),
+            ));
+        }
+    }
+
+    /// Publishes a window focus change to all active `window.focus` source instances.
+    pub fn dispatch_window_focus_changed(&mut self, focused: bool) {
+        for state in self.active.values() {
+            let ActiveProviderState::WindowFocus { port, .. } = state else {
+                continue;
+            };
+            let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
+                RuntimeValue::Bool(focused),
             ));
         }
     }
@@ -662,6 +726,33 @@ impl SourceProviderManager {
                     port,
                 }
             }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::GtkClipboard) => {
+                validate_argument_count(instance, BuiltinSourceProvider::GtkClipboard, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::GtkClipboard, config)?;
+                // The GTK host publishes the initial clipboard text via `dispatch_clipboard_changed`
+                // shortly after activation. Subsequent changes are pushed whenever the GDK
+                // clipboard changes.
+                ActiveProviderState::Clipboard {
+                    provider: config.provider.clone(),
+                    port,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::GtkWindowSize) => {
+                validate_argument_count(instance, BuiltinSourceProvider::GtkWindowSize, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::GtkWindowSize, config)?;
+                ActiveProviderState::WindowSize {
+                    provider: config.provider.clone(),
+                    port,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::GtkWindowFocus) => {
+                validate_argument_count(instance, BuiltinSourceProvider::GtkWindowFocus, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::GtkWindowFocus, config)?;
+                ActiveProviderState::WindowFocus {
+                    provider: config.provider.clone(),
+                    port,
+                }
+            }
             RuntimeSourceProvider::Builtin(
                 BuiltinSourceProvider::ImapConnect
                 | BuiltinSourceProvider::ImapIdle
@@ -717,7 +808,7 @@ impl SourceProviderManager {
                     .expect("mailbox hub mutex should not be poisoned")
                     .unsubscribe(mailbox, *subscriber_id);
             }
-            ActiveProviderState::Window { .. } | ActiveProviderState::DarkMode { .. } => {}
+            ActiveProviderState::Window { .. } | ActiveProviderState::DarkMode { .. } | ActiveProviderState::Clipboard { .. } | ActiveProviderState::WindowSize { .. } | ActiveProviderState::WindowFocus { .. } => {}
         }
         // Join any worker threads associated with this instance.  The stop flag
         // was already set above so each thread should exit on its next iteration;

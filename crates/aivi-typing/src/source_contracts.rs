@@ -38,6 +38,9 @@ pub enum BuiltinSourceProvider {
     DbusMethod,
     WindowKeyDown,
     GtkDarkMode,
+    GtkClipboard,
+    GtkWindowSize,
+    GtkWindowFocus,
     ImapConnect,
     ImapIdle,
     ImapFetchBody,
@@ -52,7 +55,7 @@ pub enum BuiltinSourceProvider {
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 39] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -78,6 +81,7 @@ impl BuiltinSourceProvider {
         Self::DbusMethod,
         Self::WindowKeyDown,
         Self::GtkDarkMode,
+        Self::GtkClipboard,
         Self::ImapConnect,
         Self::ImapIdle,
         Self::ImapFetchBody,
@@ -89,6 +93,8 @@ impl BuiltinSourceProvider {
         Self::ApiPut,
         Self::ApiPatch,
         Self::ApiDelete,
+        Self::GtkWindowSize,
+        Self::GtkWindowFocus,
     ];
 
     pub fn parse(key: &str) -> Option<Self> {
@@ -118,6 +124,9 @@ impl BuiltinSourceProvider {
             "dbus.method" => Some(Self::DbusMethod),
             "window.keyDown" => Some(Self::WindowKeyDown),
             "gtk.darkMode" => Some(Self::GtkDarkMode),
+            "clipboard.changed" => Some(Self::GtkClipboard),
+            "window.size" => Some(Self::GtkWindowSize),
+            "window.focus" => Some(Self::GtkWindowFocus),
             "imap.connect" => Some(Self::ImapConnect),
             "imap.idle" => Some(Self::ImapIdle),
             "imap.fetchBody" => Some(Self::ImapFetchBody),
@@ -160,6 +169,9 @@ impl BuiltinSourceProvider {
             Self::DbusMethod => "dbus.method",
             Self::WindowKeyDown => "window.keyDown",
             Self::GtkDarkMode => "gtk.darkMode",
+            Self::GtkClipboard => "clipboard.changed",
+            Self::GtkWindowSize => "window.size",
+            Self::GtkWindowFocus => "window.focus",
             Self::ImapConnect => "imap.connect",
             Self::ImapIdle => "imap.idle",
             Self::ImapFetchBody => "imap.fetchBody",
@@ -257,6 +269,16 @@ impl BuiltinSourceProvider {
                     STREAM_LIFECYCLE,
                 )
             }
+            Self::GtkClipboard => {
+                // Provider-triggered stream: fires with Text (clipboard content) on every
+                // clipboard change. Publishes once at activation with current clipboard text.
+                SourceContract::new(
+                    self,
+                    &NO_OPTIONS,
+                    DARK_MODE_RECURRENCE,
+                    STREAM_LIFECYCLE,
+                )
+            }
             Self::ImapConnect => {
                 SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -275,6 +297,12 @@ impl BuiltinSourceProvider {
             }
             Self::ApiGet | Self::ApiPost | Self::ApiPut | Self::ApiPatch | Self::ApiDelete => {
                 SourceContract::new(self, api_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::GtkWindowSize => {
+                SourceContract::new(self, &NO_OPTIONS, DARK_MODE_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::GtkWindowFocus => {
+                SourceContract::new(self, &NO_OPTIONS, DARK_MODE_RECURRENCE, STREAM_LIFECYCLE)
             }
         }
     }

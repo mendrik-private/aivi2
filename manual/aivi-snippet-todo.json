@@ -1,9 +1,9 @@
 {
   "root": "manual",
   "scanned_files": 94,
-  "scanned_blocks": 970,
-  "rewritten_blocks": 3,
-  "unresolved_fragments": 163,
+  "scanned_blocks": 986,
+  "rewritten_blocks": 4,
+  "unresolved_fragments": 172,
   "entries": [
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -1971,9 +1971,9 @@
       "markdown_path": "manual/guide/markup.md",
       "block_index": 53,
       "fence_info": "aivi",
-      "start_line": 919,
-      "end_line": 940,
-      "formatting_changed": true,
+      "start_line": 966,
+      "end_line": 987,
+      "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 0,
       "compiler_problem_count": 1,
@@ -1991,9 +1991,9 @@
       "markdown_path": "manual/guide/markup.md",
       "block_index": 54,
       "fence_info": "aivi",
-      "start_line": 967,
-      "end_line": 985,
-      "formatting_changed": true,
+      "start_line": 1014,
+      "end_line": 1021,
+      "formatting_changed": false,
       "syntax_problem_count": 1,
       "lsp_problem_count": 1,
       "compiler_problem_count": 2,
@@ -2018,6 +2018,162 @@
         }
       ],
       "suggested_snippet": "signal showConfirm : Bool = False\nsignal lastResponse : Text = \"\"\n\nvalue view =\n    <Window title=\"App\">\n        <AlertDialog visible={showConfirm} heading=\"Delete item?\" body=\"This action cannot be undone.\" defaultResponse=\"delete\" closeResponse=\"cancel\" responses=\"delete:Delete:destructive|cancel:Cancel\"></AlertDialog>\n        <Button label=\"Delete\" cssClasses=\"destructive-action\"></Window>\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 55,
+      "fence_info": "aivi",
+      "start_line": 1039,
+      "end_line": 1046,
+      "formatting_changed": false,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 3,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::invalid-signal-annotation",
+          "message": "signal bodies require a `Signal A` annotation, found `Int`",
+          "rendered": "error[hir::invalid-signal-annotation]: signal bodies require a `Signal A` annotation, found `Int`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_55.aivi:1:28\n  |\n 1 | signal selectedDay : Int = 1\n  |                            ^\n  = this signal body is checked against the payload type of `Signal A`"
+        },
+        {
+          "severity": "error",
+          "code": "hir::invalid-signal-annotation",
+          "message": "signal bodies require a `Signal A` annotation, found `Int`",
+          "rendered": "error[hir::invalid-signal-annotation]: signal bodies require a `Signal A` annotation, found `Int`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_55.aivi:2:30\n  |\n 2 | signal selectedMonth : Int = 0\n  |                              ^\n  = this signal body is checked against the payload type of `Signal A`"
+        },
+        {
+          "severity": "error",
+          "code": "hir::invalid-signal-annotation",
+          "message": "signal bodies require a `Signal A` annotation, found `Int`",
+          "rendered": "error[hir::invalid-signal-annotation]: signal bodies require a `Signal A` annotation, found `Int`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_55.aivi:3:29\n  |\n 3 | signal selectedYear : Int = 2025\n  |                             ^^^^\n  = this signal body is checked against the payload type of `Signal A`"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::mismatched-markup-close",
+          "message": "markup closing tag does not match the open tag",
+          "rendered": "error[syntax::mismatched-markup-close]: markup closing tag does not match the open tag\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_55.aivi:7:99\n  |\n 7 |         <Calendar year={selectedYear} month={selectedMonth} day={selectedDay} onDaySelected={.}></Window>\n  |                                                                                                   ^^^^^^\n  = expected `</Calendar>` to close this node\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_55.aivi:7:10\n  |\n 7 |         <Calendar year={selectedYear} month={selectedMonth} day={selectedDay} onDaySelected={.}></Window>\n  |          --------\n  |          note: `<Calendar>` was opened here\nhelp: ensure opening and closing tags match"
+        }
+      ],
+      "suggested_snippet": "signal selectedDay : Int = 1\nsignal selectedMonth : Int = 0\nsignal selectedYear : Int = 2025\n\nvalue view =\n    <Window title=\"App\">\n        <Calendar year={selectedYear} month={selectedMonth} day={selectedDay} onDaySelected={.}></Window>\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 57,
+      "fence_info": "aivi",
+      "start_line": 1099,
+      "end_line": 1122,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 0,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::invalid-signal-annotation",
+          "message": "signal bodies require a `Signal A` annotation, found `Bool`",
+          "rendered": "error[hir::invalid-signal-annotation]: signal bodies require a `Signal A` annotation, found `Bool`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_57.aivi:1:26\n  |\n 1 | signal menuOpen : Bool = False\n  |                          ^^^^^\n  = this signal body is checked against the payload type of `Signal A`"
+        }
+      ],
+      "suggested_snippet": "signal menuOpen : Bool = False\n\nvalue view =\n    <Window title=\"App\">\n        <Window.titlebar>\n            <HeaderBar>\n                <HeaderBar.end>\n                    <MenuButton iconName=\"open-menu-symbolic\" onToggled={open => menuOpen}>\n                        <MenuButton.popover>\n                            <Popover>\n                                <Popover.content>\n                                    <Box orientation=\"Vertical\" spacing={4} marginTop={8} marginBottom={8} marginStart={8} marginEnd={8}>\n                                        <Button label=\"Settings\" />\n                                        <Button label=\"About\" />\n                                    </Box>\n                                </Popover.content>\n                            </Popover>\n                        </MenuButton.popover>\n                    </MenuButton>\n                </HeaderBar.end>\n            </HeaderBar>\n        </Window.titlebar>\n        <Label text=\"Content\" />\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 60,
+      "fence_info": "aivi",
+      "start_line": 1198,
+      "end_line": 1211,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `showAbout`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `showAbout`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_60.aivi:3:31\n  |\n 3 |         <AboutDialog visible={showAbout} appName=\"My App\" version=\"1.0.0\" developerName=\"Jane Doe\" website=\"https://example.com\" issueUrl=\"https://github.com/example/issues\" licenseType=\"MIT\" applicationIcon=\"my-app\" />\n  |                               ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::mismatched-markup-close",
+          "message": "markup closing tag does not match the open tag",
+          "rendered": "error[syntax::mismatched-markup-close]: markup closing tag does not match the open tag\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_60.aivi:4:48\n  |\n 4 |         <Button label=\"About\" onClick={True}></Window>\n  |                                                ^^^^^^\n  = expected `</Button>` to close this node\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_60.aivi:4:10\n  |\n 4 |         <Button label=\"About\" onClick={True}></Window>\n  |          ------\n  |          note: `<Button>` was opened here\nhelp: ensure opening and closing tags match"
+        }
+      ],
+      "suggested_snippet": "value view =\n    <Window title=\"App\">\n        <AboutDialog visible={showAbout} appName=\"My App\" version=\"1.0.0\" developerName=\"Jane Doe\" website=\"https://example.com\" issueUrl=\"https://github.com/example/issues\" licenseType=\"MIT\" applicationIcon=\"my-app\" />\n        <Button label=\"About\" onClick={True}></Window>\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 63,
+      "fence_info": "aivi",
+      "start_line": 1293,
+      "end_line": 1305,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `sidebarOpen`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `sidebarOpen`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_63.aivi:3:40\n  |\n 3 |         <OverlaySplitView showSidebar={sidebarOpen}>\n  |                                        ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        }
+      ],
+      "suggested_snippet": "value view =\n    <Window title=\"App\" defaultWidth={800} defaultHeight={600}>\n        <OverlaySplitView showSidebar={sidebarOpen}>\n            <OverlaySplitView.sidebar>\n                <Box orientation=\"Vertical\" spacing={8} marginStart={12} marginTop={12}>\n                    <Label text=\"Navigation\" />\n                </Box>\n            </OverlaySplitView.sidebar>\n            <OverlaySplitView.content>\n                <Label text=\"Content\" halign=\"Center\" valign=\"Center\" />\n            </OverlaySplitView.content>\n        </OverlaySplitView>\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 64,
+      "fence_info": "aivi",
+      "start_line": 1324,
+      "end_line": 1345,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `activeTab`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `activeTab`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_64.aivi:4:36\n  |\n 4 |             <TabView selectedPage={activeTab} onSelectedPageChanged={.} hexpand={True} vexpand={True}>\n  |                                    ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        }
+      ],
+      "suggested_snippet": "value view =\n    <Window title=\"App\">\n        <Box orientation=\"Vertical\">\n            <TabView selectedPage={activeTab} onSelectedPageChanged={.} hexpand={True} vexpand={True}>\n                <TabView.tabBar>\n                    <TabBar autohide={False} expandTabs={True} />\n                </TabView.tabBar>\n                <TabView.pages>\n                    <TabPage title=\"Documents\">\n                        <TabPage.content>\n                            <Label text=\"Documents tab\" halign=\"Center\" valign=\"Center\" />\n                        </TabPage.content>\n                    </TabPage>\n                    <TabPage title=\"Settings\" needsAttention={True}>\n                        <TabPage.content>\n                            <Label text=\"Settings tab\" halign=\"Center\" valign=\"Center\" />\n                        </TabPage.content>\n                    </TabPage>\n                </TabView.pages>\n            </TabView>\n        </Box>\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 67,
+      "fence_info": "aivi",
+      "start_line": 1440,
+      "end_line": 1451,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 3,
+      "compiler_problem_count": 2,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `code`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `code`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_67.aivi:3:124\n  |\n 3 |         <FileDialog visible={dialogOpen} title=\"Open file\" mode=\"Open\" acceptLabel=\"Open\" cancelLabel=\"Cancel\" onResponse={code}>\n  |                                                                                                                            ^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `dialogOpen`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `dialogOpen`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_67.aivi:3:30\n  |\n 3 |         <FileDialog visible={dialogOpen} title=\"Open file\" mode=\"Open\" acceptLabel=\"Open\" cancelLabel=\"Cancel\" onResponse={code}>\n  |                              ^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::mismatched-markup-close",
+          "message": "markup closing tag does not match the open tag",
+          "rendered": "error[syntax::mismatched-markup-close]: markup closing tag does not match the open tag\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_67.aivi:4:59\n  |\n 4 |             <Button label=\"Open file…\" onClick={True}></Window>\n  |                                                           ^^^^^^\n  = expected `</Button>` to close this node\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/markup/block_67.aivi:4:14\n  |\n 4 |             <Button label=\"Open file…\" onClick={True}></Window>\n  |              ------\n  |              note: `<Button>` was opened here\nhelp: ensure opening and closing tags match"
+        }
+      ],
+      "suggested_snippet": "value view =\n    <Window title=\"App\">\n        <FileDialog visible={dialogOpen} title=\"Open file\" mode=\"Open\" acceptLabel=\"Open\" cancelLabel=\"Cancel\" onResponse={code}>\n            <Button label=\"Open file…\" onClick={True}></Window>\n        </FileDialog>\n    </Window>\n"
     },
     {
       "markdown_path": "manual/guide/modules.md",
@@ -2640,8 +2796,8 @@
       "block_index": 2,
       "fence_info": "aivi",
       "start_line": 334,
-      "end_line": 340,
-      "formatting_changed": true,
+      "end_line": 339,
+      "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 1,
       "compiler_problem_count": 1,
@@ -2654,6 +2810,84 @@
         }
       ],
       "suggested_snippet": "type Theme = Light | Dark\n\n@source gtk.darkMode\nsignal rawDark : Bool\n\nsignal theme : Theme\n"
+    },
+    {
+      "markdown_path": "manual/guide/source-catalog.md",
+      "block_index": 3,
+      "fence_info": "aivi",
+      "start_line": 362,
+      "end_line": 368,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::invalid-source-capability-provider",
+          "message": "source capability handles must name a provider family such as `fs`, not a concrete provider variant",
+          "rendered": "error[hir::invalid-source-capability-provider]: source capability handles must name a provider family such as `fs`, not a concrete provider variant\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_3.aivi:1:9\n  |\n 1 | @source clipboard.changed\n  |         ^^^^^^^^^^^^^^^^^\n  = `clipboard.changed` is already a concrete provider binding"
+        }
+      ],
+      "suggested_snippet": "@source clipboard.changed\nsignal clipboardText : Text\n\nvalue view =\n    <Window title=\"Clipboard Watcher\">\n        <Label text={clipboardText} wrap={True} halign=\"Start\" marginStart={12} marginEnd={12} marginTop={12} marginBottom={12} />\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/source-catalog.md",
+      "block_index": 4,
+      "fence_info": "aivi",
+      "start_line": 392,
+      "end_line": 399,
+      "formatting_changed": true,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 3,
+      "compiler_problem_count": 3,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::invalid-source-capability-provider",
+          "message": "source capability handles must name a provider family such as `fs`, not a concrete provider variant",
+          "rendered": "error[hir::invalid-source-capability-provider]: source capability handles must name a provider family such as `fs`, not a concrete provider variant\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_4.aivi:1:9\n  |\n 1 | @source window.size\n  |         ^^^^^^^^^^^\n  = `window.size` is already a concrete provider binding"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `Int`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Int`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_4.aivi:6:29\n  |\n 6 |         <Label text={\"W=\" + Int.toText windowDimensions.width + \" H=\" + Int.toText windowDimensions.height} halign=\"Center\" valign=\"Center\" />\n  |                             ^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `Int`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Int`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_4.aivi:6:73\n  |\n 6 |         <Label text={\"W=\" + Int.toText windowDimensions.width + \" H=\" + Int.toText windowDimensions.height} halign=\"Center\" valign=\"Center\" />\n  |                                                                         ^^^\n  = reported during Milestone 2 HIR lowering"
+        }
+      ],
+      "suggested_snippet": "@source window.size\nsignal windowDimensions : { width: Int, height: Int }\n\nvalue view =\n    <Window title=\"App\">\n        <Label text={\"W=\" + Int.toText windowDimensions.width + \" H=\" + Int.toText windowDimensions.height} halign=\"Center\" valign=\"Center\" />\n    </Window>\n"
+    },
+    {
+      "markdown_path": "manual/guide/source-catalog.md",
+      "block_index": 5,
+      "fence_info": "aivi",
+      "start_line": 419,
+      "end_line": 425,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 2,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::invalid-source-capability-provider",
+          "message": "source capability handles must name a provider family such as `fs`, not a concrete provider variant",
+          "rendered": "error[hir::invalid-source-capability-provider]: source capability handles must name a provider family such as `fs`, not a concrete provider variant\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_5.aivi:1:9\n  |\n 1 | @source window.focus\n  |         ^^^^^^^^^^^^\n  = `window.focus` is already a concrete provider binding"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unresolved-term-name",
+          "message": "unknown term `if`",
+          "rendered": "error[hir::unresolved-term-name]: unknown term `if`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/source-catalog/block_5.aivi:6:22\n  |\n 6 |         <Label text={if hasFocus \"Focused\" \"Unfocused\"} halign=\"Center\" valign=\"Center\" />\n  |                      ^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `min`?"
+        }
+      ],
+      "suggested_snippet": "@source window.focus\nsignal hasFocus : Bool\n\nvalue view =\n    <Window title=\"App\">\n        <Label text={if hasFocus \"Focused\" \"Unfocused\"} halign=\"Center\" valign=\"Center\" />\n    </Window>\n"
     },
     {
       "markdown_path": "manual/guide/sources.md",
@@ -2916,13 +3150,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellX`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellX`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/types/block_11.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
         },
         {
           "severity": "error",

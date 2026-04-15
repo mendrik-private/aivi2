@@ -91,6 +91,27 @@ pub enum GtkConcreteWidgetKind {
     ViewStackPage,
     // Group J: Dialogs
     AlertDialog,
+    // Group K: Interactive and layout widgets
+    Calendar,
+    FlowBox,
+    FlowBoxChild,
+    MenuButton,
+    Popover,
+    // Group L: Navigation and layout (Tier 1)
+    CenterBox,
+    AboutDialog,
+    SplitButton,
+    NavigationSplitView,
+    OverlaySplitView,
+    TabView,
+    TabPage,
+    TabBar,
+    Carousel,
+    CarouselIndicatorDots,
+    CarouselIndicatorLines,
+    Grid,
+    GridChild,
+    FileDialog,
 }
 
 impl GtkConcreteWidgetKind {
@@ -144,6 +165,25 @@ impl GtkConcreteWidgetKind {
             Self::ViewStack => "ViewStack",
             Self::ViewStackPage => "ViewStackPage",
             Self::AlertDialog => "AlertDialog",
+            Self::Calendar => "Calendar",
+            Self::FlowBox => "FlowBox",
+            Self::FlowBoxChild => "FlowBoxChild",
+            Self::MenuButton => "MenuButton",
+            Self::Popover => "Popover",
+            Self::CenterBox => "CenterBox",
+            Self::AboutDialog => "AboutDialog",
+            Self::SplitButton => "SplitButton",
+            Self::NavigationSplitView => "NavigationSplitView",
+            Self::OverlaySplitView => "OverlaySplitView",
+            Self::TabView => "TabView",
+            Self::TabPage => "TabPage",
+            Self::TabBar => "TabBar",
+            Self::Carousel => "Carousel",
+            Self::CarouselIndicatorDots => "CarouselIndicatorDots",
+            Self::CarouselIndicatorLines => "CarouselIndicatorLines",
+            Self::Grid => "Grid",
+            Self::GridChild => "GridChild",
+            Self::FileDialog => "FileDialog",
         }
     }
 }
@@ -235,6 +275,34 @@ pub enum GtkBoolPropertySetter {
     MultilineEntryMonospace,
     // Group H: Picture
     PictureCanShrink,
+    // Window state
+    WindowMaximized,
+    WindowFullscreen,
+    WindowDecorated,
+    WindowHideOnClose,
+    // Button extra
+    ButtonReceivesDefault,
+    // Label extra
+    LabelSingleLineMode,
+    // MenuButton
+    MenuButtonActive,
+    MenuButtonUseUnderline,
+    // Popover
+    PopoverAutohide,
+    PopoverHasArrow,
+    // Tier 1 additions
+    AboutDialogVisible,
+    FileDialogVisible,
+    NavigationSplitViewShowContent,
+    OverlaySplitViewShowSidebar,
+    TabPageNeedsAttention,
+    TabPageLoading,
+    TabBarAutohide,
+    TabBarExpandTabs,
+    CarouselInteractive,
+    GridRowHomogeneous,
+    GridColumnHomogeneous,
+    ListBoxShowSeparators,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -318,6 +386,36 @@ pub enum GtkTextPropertySetter {
     AlertDialogDefaultResponse,
     AlertDialogCloseResponse,
     AlertDialogResponses,
+    // HeaderBar extra
+    HeaderBarDecorationLayout,
+    // Scale extra
+    ScaleValuePos,
+    // FlowBox
+    FlowBoxSelectionMode,
+    // MenuButton
+    MenuButtonLabel,
+    MenuButtonIconName,
+    // Tier 1 additions
+    AboutDialogAppName,
+    AboutDialogVersion,
+    AboutDialogDeveloperName,
+    AboutDialogComments,
+    AboutDialogWebsite,
+    AboutDialogIssueUrl,
+    AboutDialogLicenseType,
+    AboutDialogApplicationIcon,
+    TabPageTitle,
+    SplitButtonLabel,
+    SplitButtonIconName,
+    NavigationSplitViewSidebarPosition,
+    OverlaySplitViewSidebarPosition,
+    FileDialogTitle,
+    FileDialogMode,
+    FileDialogAcceptLabel,
+    FileDialogCancelLabel,
+    EntryPrimaryIconName,
+    EntrySecondaryIconName,
+    HeaderBarCenteringPolicy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -354,6 +452,25 @@ pub enum GtkI64PropertySetter {
     MultilineEntryBottomMargin,
     MultilineEntryLeftMargin,
     MultilineEntryRightMargin,
+    // Label extra
+    LabelWidthChars,
+    // Calendar
+    CalendarYear,
+    CalendarMonth,
+    CalendarDay,
+    // FlowBox
+    FlowBoxRowSpacing,
+    FlowBoxColumnSpacing,
+    // Tier 1 additions
+    GridRowSpacing,
+    GridColumnSpacing,
+    GridChildColumn,
+    GridChildRow,
+    GridChildColumnSpan,
+    GridChildRowSpan,
+    CarouselSpacing,
+    CarouselRevealDuration,
+    TabViewSelectedPage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -373,6 +490,18 @@ pub enum GtkF64PropertySetter {
     SpinRowMin,
     SpinRowMax,
     SpinRowStep,
+    // Scale extra
+    ScaleFillLevel,
+    // Label alignment
+    LabelXalign,
+    LabelYalign,
+    // Tier 1 additions
+    NavigationSplitViewSidebarWidthFraction,
+    NavigationSplitViewMinSidebarWidth,
+    NavigationSplitViewMaxSidebarWidth,
+    OverlaySplitViewSidebarWidthFraction,
+    OverlaySplitViewMinSidebarWidth,
+    OverlaySplitViewMaxSidebarWidth,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -418,6 +547,22 @@ impl GtkPropertySetter {
             ) => "text naming a valid PolicyType value",
             Self::Text(GtkTextPropertySetter::ListBoxSelectionMode) => {
                 "text naming a valid SelectionMode value"
+            }
+            Self::Text(GtkTextPropertySetter::ScaleValuePos) => {
+                "text naming a valid PositionType value (Top, Bottom, Left, Right)"
+            }
+            Self::Text(GtkTextPropertySetter::FlowBoxSelectionMode) => {
+                "text naming a valid SelectionMode value"
+            }
+            Self::Text(GtkTextPropertySetter::HeaderBarCenteringPolicy) => {
+                "text naming a valid CenteringPolicy value (Loose, Strict)"
+            }
+            Self::Text(
+                GtkTextPropertySetter::NavigationSplitViewSidebarPosition
+                | GtkTextPropertySetter::OverlaySplitViewSidebarPosition,
+            ) => "text: Start or End",
+            Self::Text(GtkTextPropertySetter::FileDialogMode) => {
+                "text naming a valid FileChooserAction (Open, Save, OpenMultiple, SelectFolder)"
             }
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
@@ -486,6 +631,30 @@ pub enum GtkEventSignal {
     ViewStackSwitch,
     // AlertDialog (adw::MessageDialog)
     AlertDialogResponse,
+    // Window state events
+    WindowMaximized,
+    WindowFullscreened,
+    // Calendar events
+    CalendarDaySelected,
+    // FlowBox events
+    FlowBoxChildActivated,
+    // MenuButton event
+    MenuButtonToggled,
+    // Popover event
+    PopoverClosed,
+    // Tier 1 additions
+    SecondaryClick,
+    LongPress,
+    SwipeLeft,
+    SwipeRight,
+    NavigationSplitViewShowContentChanged,
+    OverlaySplitViewShowSidebarChanged,
+    TabViewPageAdded,
+    TabViewPageClosed,
+    TabViewSelectedPageChanged,
+    CarouselPageChanged,
+    FileDialogResponse,
+    SplitButtonClicked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -551,6 +720,31 @@ pub enum GtkChildMountRoute {
     // Group G: ViewStack navigation
     ViewStackPages,
     ViewStackPageContent,
+    // FlowBox
+    FlowBoxChildren,
+    FlowBoxChildContent,
+    // MenuButton
+    MenuButtonPopover,
+    // Popover
+    PopoverContent,
+    // Tier 1 additions
+    CenterBoxStart,
+    CenterBoxCenter,
+    CenterBoxEnd,
+    NavigationSplitViewSidebar,
+    NavigationSplitViewContent,
+    OverlaySplitViewSidebar,
+    OverlaySplitViewContent,
+    TabViewPages,
+    TabViewTabBar,
+    TabPageContent,
+    CarouselPages,
+    CarouselDots,
+    CarouselLines,
+    GridChildren,
+    GridChildContent,
+    ActionRowPrefix,
+    SplitButtonPopover,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -699,6 +893,12 @@ const BUTTON_USE_UNDERLINE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescript
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonUseUnderline),
 };
 
+const BUTTON_RECEIVES_DEFAULT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "receivesDefault",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonReceivesDefault),
+};
+
 const WIDTH_REQUEST_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "widthRequest",
     value_shape: GtkPropertyValueShape::I64,
@@ -727,6 +927,23 @@ const HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY: GtkPropertyDescriptor = GtkPropert
     name: "showTitleButtons",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::HeaderBarShowTitleButtons),
+};
+
+const HEADER_BAR_DECORATION_LAYOUT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "decorationLayout",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::HeaderBarDecorationLayout),
+};
+
+const HEADER_BAR_CENTERING_POLICY_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "CenteringPolicy",
+    variants: &["Loose", "Strict"],
+};
+
+const HEADER_BAR_CENTERING_POLICY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "centeringPolicy",
+    value_shape: GtkPropertyValueShape::Enum(HEADER_BAR_CENTERING_POLICY_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::HeaderBarCenteringPolicy),
 };
 
 const BOX_ORIENTATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -994,6 +1211,42 @@ const WINDOW_CLOSE_REQUEST_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     signal: GtkEventSignal::WindowCloseRequest,
 };
 
+const WINDOW_MAXIMIZED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maximized",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowMaximized),
+};
+
+const WINDOW_FULLSCREEN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "fullscreen",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowFullscreen),
+};
+
+const WINDOW_DECORATED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "decorated",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowDecorated),
+};
+
+const WINDOW_HIDE_ON_CLOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hideOnClose",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowHideOnClose),
+};
+
+const WINDOW_MAXIMIZE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onMaximize",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::WindowMaximized,
+};
+
+const WINDOW_FULLSCREEN_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onFullscreen",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::WindowFullscreened,
+};
+
 // ── Label-specific properties ────────────────────────────────────────────────
 
 const WRAP_MODE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
@@ -1059,6 +1312,30 @@ const LABEL_LINES_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     setter: GtkPropertySetter::I64(GtkI64PropertySetter::LabelLines),
 };
 
+const LABEL_XALIGN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "xalign",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::LabelXalign),
+};
+
+const LABEL_YALIGN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "yalign",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::LabelYalign),
+};
+
+const LABEL_WIDTH_CHARS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "widthChars",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::LabelWidthChars),
+};
+
+const LABEL_SINGLE_LINE_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "singleLineMode",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelSingleLineMode),
+};
+
 // ── Entry-specific properties ────────────────────────────────────────────────
 
 const INPUT_PURPOSE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
@@ -1084,6 +1361,18 @@ const ENTRY_INPUT_PURPOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescripto
     name: "inputPurpose",
     value_shape: GtkPropertyValueShape::Enum(INPUT_PURPOSE_VALUE_SHAPE),
     setter: GtkPropertySetter::Text(GtkTextPropertySetter::EntryInputPurpose),
+};
+
+const ENTRY_PRIMARY_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "primaryIconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::EntryPrimaryIconName),
+};
+
+const ENTRY_SECONDARY_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "secondaryIconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::EntrySecondaryIconName),
 };
 
 // ── ScrolledWindow-specific properties ───────────────────────────────────────
@@ -1187,6 +1476,32 @@ const POINTER_LEAVE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     name: "onPointerLeave",
     payload: GtkConcreteEventPayload::Unit,
     signal: GtkEventSignal::PointerLeave,
+};
+
+// ── Gesture events ────────────────────────────────────────────────────────────
+
+const SECONDARY_CLICK_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSecondaryClick",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::SecondaryClick,
+};
+
+const LONG_PRESS_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onLongPress",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::LongPress,
+};
+
+const SWIPE_LEFT_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSwipeLeft",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::SwipeLeft,
+};
+
+const SWIPE_RIGHT_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSwipeRight",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::SwipeRight,
 };
 
 // ── Adwaita: StatusPage ───────────────────────────────────────────────────────
@@ -1318,8 +1633,12 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         WINDOW_DEFAULT_HEIGHT_PROPERTY,
         WINDOW_RESIZABLE_PROPERTY,
         WINDOW_MODAL_PROPERTY,
+        WINDOW_MAXIMIZED_PROPERTY,
+        WINDOW_FULLSCREEN_PROPERTY,
+        WINDOW_DECORATED_PROPERTY,
+        WINDOW_HIDE_ON_CLOSE_PROPERTY,
     ],
-    events: &[WINDOW_CLOSE_REQUEST_EVENT],
+    events: &[WINDOW_CLOSE_REQUEST_EVENT, WINDOW_MAXIMIZE_EVENT, WINDOW_FULLSCREEN_EVENT],
     default_child_group_override: Some(&WINDOW_CONTENT_CHILD_GROUP),
     child_groups: &[WINDOW_CONTENT_CHILD_GROUP, WINDOW_TITLEBAR_CHILD_GROUP],
 };
@@ -1347,6 +1666,8 @@ const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         TOOLTIP_PROPERTY,
         CSS_CLASSES_PROPERTY,
         HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY,
+        HEADER_BAR_DECORATION_LAYOUT_PROPERTY,
+        HEADER_BAR_CENTERING_POLICY_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
@@ -1410,7 +1731,7 @@ const BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         BOX_SPACING_PROPERTY,
         BOX_HOMOGENEOUS_PROPERTY,
     ],
-    events: &[],
+    events: &[SECONDARY_CLICK_EVENT, LONG_PRESS_EVENT, SWIPE_LEFT_EVENT, SWIPE_RIGHT_EVENT],
     default_child_group_override: None,
     child_groups: &[BOX_CHILDREN_CHILD_GROUP],
 };
@@ -1533,12 +1854,20 @@ const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         LABEL_SELECTABLE_PROPERTY,
         LABEL_USE_MARKUP_PROPERTY,
         LABEL_LINES_PROPERTY,
+        LABEL_XALIGN_PROPERTY,
+        LABEL_YALIGN_PROPERTY,
+        LABEL_WIDTH_CHARS_PROPERTY,
+        LABEL_SINGLE_LINE_MODE_PROPERTY,
     ],
     events: &[
         FOCUS_IN_EVENT,
         FOCUS_OUT_EVENT,
         POINTER_ENTER_EVENT,
         POINTER_LEAVE_EVENT,
+        SECONDARY_CLICK_EVENT,
+        LONG_PRESS_EVENT,
+        SWIPE_LEFT_EVENT,
+        SWIPE_RIGHT_EVENT,
     ],
     default_child_group_override: None,
     child_groups: &[],
@@ -1571,6 +1900,7 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         BUTTON_LABEL_PROPERTY,
         BUTTON_ICON_NAME_PROPERTY,
         BUTTON_USE_UNDERLINE_PROPERTY,
+        BUTTON_RECEIVES_DEFAULT_PROPERTY,
     ],
     events: &[
         BUTTON_CLICK_EVENT,
@@ -1578,6 +1908,10 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         FOCUS_OUT_EVENT,
         POINTER_ENTER_EVENT,
         POINTER_LEAVE_EVENT,
+        SECONDARY_CLICK_EVENT,
+        LONG_PRESS_EVENT,
+        SWIPE_LEFT_EVENT,
+        SWIPE_RIGHT_EVENT,
     ],
     default_child_group_override: None,
     child_groups: &[],
@@ -1610,6 +1944,8 @@ const ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         ENTRY_VISIBILITY_PROPERTY,
         ENTRY_MAX_LENGTH_PROPERTY,
         ENTRY_INPUT_PURPOSE_PROPERTY,
+        ENTRY_PRIMARY_ICON_NAME_PROPERTY,
+        ENTRY_SECONDARY_ICON_NAME_PROPERTY,
     ],
     events: &[
         ENTRY_CHANGE_EVENT,
@@ -1881,6 +2217,25 @@ const SCALE_VALUE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     signal: GtkEventSignal::ScaleValueChanged,
 };
 
+// ── Scale extra properties ───────────────────────────────────────────────────
+
+const POSITION_TYPE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "PositionType",
+    variants: &["Top", "Bottom", "Left", "Right"],
+};
+
+const SCALE_VALUE_POS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "valuePos",
+    value_shape: GtkPropertyValueShape::Enum(POSITION_TYPE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ScaleValuePos),
+};
+
+const SCALE_FILL_LEVEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "fillLevel",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::ScaleFillLevel),
+};
+
 const SCALE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Scale",
     kind: GtkConcreteWidgetKind::Scale,
@@ -1909,6 +2264,8 @@ const SCALE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SCALE_DIGITS_PROPERTY,
         SCALE_DRAW_VALUE_PROPERTY,
         SCALE_ORIENTATION_PROPERTY,
+        SCALE_VALUE_POS_PROPERTY,
+        SCALE_FILL_LEVEL_PROPERTY,
     ],
     events: &[SCALE_VALUE_CHANGED_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
@@ -1959,7 +2316,7 @@ const IMAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         IMAGE_PIXEL_SIZE_PROPERTY,
         IMAGE_FILE_PROPERTY,
     ],
-    events: &[],
+    events: &[SECONDARY_CLICK_EVENT, LONG_PRESS_EVENT, SWIPE_LEFT_EVENT, SWIPE_RIGHT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -2356,6 +2713,14 @@ const ACTION_ROW_SUFFIX_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDesc
     max_children: None,
 };
 
+const ACTION_ROW_PREFIX_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "prefix",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ActionRowPrefix,
+    min_children: 0,
+    max_children: None,
+};
+
 const ACTION_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "ActionRow",
     kind: GtkConcreteWidgetKind::ActionRow,
@@ -2383,7 +2748,7 @@ const ACTION_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     ],
     events: &[ACTION_ROW_ACTIVATED_EVENT],
     default_child_group_override: None,
-    child_groups: &[ACTION_ROW_SUFFIX_CHILD_GROUP],
+    child_groups: &[ACTION_ROW_PREFIX_CHILD_GROUP, ACTION_ROW_SUFFIX_CHILD_GROUP],
 };
 
 // ── Adwaita: ExpanderRow ──────────────────────────────────────────────────────
@@ -2609,6 +2974,12 @@ const LIST_BOX_SELECTION_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescr
     setter: GtkPropertySetter::Text(GtkTextPropertySetter::ListBoxSelectionMode),
 };
 
+const LIST_BOX_SHOW_SEPARATORS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showSeparators",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ListBoxShowSeparators),
+};
+
 const LIST_BOX_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     name: "onRowActivated",
     payload: GtkConcreteEventPayload::I64,
@@ -2645,6 +3016,7 @@ const LIST_BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         TOOLTIP_PROPERTY,
         CSS_CLASSES_PROPERTY,
         LIST_BOX_SELECTION_MODE_PROPERTY,
+        LIST_BOX_SHOW_SEPARATORS_PROPERTY,
     ],
     events: &[LIST_BOX_ACTIVATED_EVENT],
     default_child_group_override: None,
@@ -3492,6 +3864,297 @@ const VIEW_STACK_PAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[VIEW_STACK_PAGE_CONTENT_CHILD_GROUP],
 };
 
+// ── Calendar ─────────────────────────────────────────────────────────────────
+
+const CALENDAR_YEAR_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "year",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::CalendarYear),
+};
+
+const CALENDAR_MONTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "month",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::CalendarMonth),
+};
+
+const CALENDAR_DAY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "day",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::CalendarDay),
+};
+
+const CALENDAR_DAY_SELECTED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDaySelected",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::CalendarDaySelected,
+};
+
+const CALENDAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Calendar",
+    kind: GtkConcreteWidgetKind::Calendar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        CALENDAR_YEAR_PROPERTY,
+        CALENDAR_MONTH_PROPERTY,
+        CALENDAR_DAY_PROPERTY,
+    ],
+    events: &[CALENDAR_DAY_SELECTED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── FlowBox ──────────────────────────────────────────────────────────────────
+
+const FLOW_BOX_SELECTION_MODE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "SelectionMode",
+    variants: &["None", "Single", "Browse", "Multiple"],
+};
+
+const FLOW_BOX_SELECTION_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "selectionMode",
+    value_shape: GtkPropertyValueShape::Enum(FLOW_BOX_SELECTION_MODE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FlowBoxSelectionMode),
+};
+
+const FLOW_BOX_ROW_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "rowSpacing",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::FlowBoxRowSpacing),
+};
+
+const FLOW_BOX_COLUMN_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "columnSpacing",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::FlowBoxColumnSpacing),
+};
+
+const FLOW_BOX_CHILD_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onChildActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::FlowBoxChildActivated,
+};
+
+const FLOW_BOX_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "children",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::FlowBoxChildren,
+    min_children: 0,
+    max_children: None,
+};
+
+const FLOW_BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "FlowBox",
+    kind: GtkConcreteWidgetKind::FlowBox,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        FLOW_BOX_SELECTION_MODE_PROPERTY,
+        FLOW_BOX_ROW_SPACING_PROPERTY,
+        FLOW_BOX_COLUMN_SPACING_PROPERTY,
+    ],
+    events: &[FLOW_BOX_CHILD_ACTIVATED_EVENT],
+    default_child_group_override: Some(&FLOW_BOX_CHILDREN_CHILD_GROUP),
+    child_groups: &[FLOW_BOX_CHILDREN_CHILD_GROUP],
+};
+
+// ── FlowBoxChild ─────────────────────────────────────────────────────────────
+
+const FLOW_BOX_CHILD_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::FlowBoxChildContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const FLOW_BOX_CHILD_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "FlowBoxChild",
+    kind: GtkConcreteWidgetKind::FlowBoxChild,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&FLOW_BOX_CHILD_CONTENT_CHILD_GROUP),
+    child_groups: &[FLOW_BOX_CHILD_CONTENT_CHILD_GROUP],
+};
+
+// ── MenuButton ────────────────────────────────────────────────────────────────
+
+const MENU_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::MenuButtonLabel),
+};
+
+const MENU_BUTTON_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::MenuButtonIconName),
+};
+
+const MENU_BUTTON_ACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "active",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::MenuButtonActive),
+};
+
+const MENU_BUTTON_USE_UNDERLINE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "useUnderline",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::MenuButtonUseUnderline),
+};
+
+const MENU_BUTTON_TOGGLED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onToggled",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::MenuButtonToggled,
+};
+
+const MENU_BUTTON_POPOVER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "popover",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::MenuButtonPopover,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const MENU_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "MenuButton",
+    kind: GtkConcreteWidgetKind::MenuButton,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        FOCUSABLE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        MENU_BUTTON_LABEL_PROPERTY,
+        MENU_BUTTON_ICON_NAME_PROPERTY,
+        MENU_BUTTON_ACTIVE_PROPERTY,
+        MENU_BUTTON_USE_UNDERLINE_PROPERTY,
+    ],
+    events: &[MENU_BUTTON_TOGGLED_EVENT],
+    default_child_group_override: Some(&MENU_BUTTON_POPOVER_CHILD_GROUP),
+    child_groups: &[MENU_BUTTON_POPOVER_CHILD_GROUP],
+};
+
+// ── Popover ───────────────────────────────────────────────────────────────────
+
+const POPOVER_AUTOHIDE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "autohide",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::PopoverAutohide),
+};
+
+const POPOVER_HAS_ARROW_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hasArrow",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::PopoverHasArrow),
+};
+
+const POPOVER_CLOSED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onClosed",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::PopoverClosed,
+};
+
+const POPOVER_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::PopoverContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const POPOVER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Popover",
+    kind: GtkConcreteWidgetKind::Popover,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        POPOVER_AUTOHIDE_PROPERTY,
+        POPOVER_HAS_ARROW_PROPERTY,
+    ],
+    events: &[POPOVER_CLOSED_EVENT],
+    default_child_group_override: Some(&POPOVER_CONTENT_CHILD_GROUP),
+    child_groups: &[POPOVER_CONTENT_CHILD_GROUP],
+};
+
 // ── Adwaita: AlertDialog (adw::MessageDialog) ─────────────────────────────────
 
 const ALERT_DIALOG_HEADING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -3547,6 +4210,842 @@ const ALERT_DIALOG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[],
 };
 
+// ── CenterBox ─────────────────────────────────────────────────────────────────
+
+const CENTER_BOX_START_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "start",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::CenterBoxStart,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const CENTER_BOX_CENTER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "center",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::CenterBoxCenter,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const CENTER_BOX_END_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "end",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::CenterBoxEnd,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const CENTER_BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "CenterBox",
+    kind: GtkConcreteWidgetKind::CenterBox,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&CENTER_BOX_CENTER_CHILD_GROUP),
+    child_groups: &[CENTER_BOX_START_CHILD_GROUP, CENTER_BOX_CENTER_CHILD_GROUP, CENTER_BOX_END_CHILD_GROUP],
+};
+
+// ── AboutDialog ───────────────────────────────────────────────────────────────
+
+const ABOUT_DIALOG_VISIBLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "visible",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::AboutDialogVisible),
+};
+
+const ABOUT_DIALOG_APP_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "appName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogAppName),
+};
+
+const ABOUT_DIALOG_VERSION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "version",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogVersion),
+};
+
+const ABOUT_DIALOG_DEVELOPER_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "developerName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogDeveloperName),
+};
+
+const ABOUT_DIALOG_COMMENTS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "comments",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogComments),
+};
+
+const ABOUT_DIALOG_WEBSITE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "website",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogWebsite),
+};
+
+const ABOUT_DIALOG_ISSUE_URL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "issueUrl",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogIssueUrl),
+};
+
+const ABOUT_DIALOG_LICENSE_TYPE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "licenseType",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogLicenseType),
+};
+
+const ABOUT_DIALOG_APPLICATION_ICON_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "applicationIcon",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AboutDialogApplicationIcon),
+};
+
+const ABOUT_DIALOG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "AboutDialog",
+    kind: GtkConcreteWidgetKind::AboutDialog,
+    root_kind: GtkWidgetRootKind::Window,
+    properties: &[
+        ABOUT_DIALOG_VISIBLE_PROPERTY,
+        ABOUT_DIALOG_APP_NAME_PROPERTY,
+        ABOUT_DIALOG_VERSION_PROPERTY,
+        ABOUT_DIALOG_DEVELOPER_NAME_PROPERTY,
+        ABOUT_DIALOG_COMMENTS_PROPERTY,
+        ABOUT_DIALOG_WEBSITE_PROPERTY,
+        ABOUT_DIALOG_ISSUE_URL_PROPERTY,
+        ABOUT_DIALOG_LICENSE_TYPE_PROPERTY,
+        ABOUT_DIALOG_APPLICATION_ICON_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── SplitButton ───────────────────────────────────────────────────────────────
+
+const SPLIT_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SplitButtonLabel),
+};
+
+const SPLIT_BUTTON_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SplitButtonIconName),
+};
+
+const SPLIT_BUTTON_CLICK_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onClick",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::SplitButtonClicked,
+};
+
+const SPLIT_BUTTON_POPOVER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "popover",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::SplitButtonPopover,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const SPLIT_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "SplitButton",
+    kind: GtkConcreteWidgetKind::SplitButton,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        SPLIT_BUTTON_LABEL_PROPERTY,
+        SPLIT_BUTTON_ICON_NAME_PROPERTY,
+    ],
+    events: &[SPLIT_BUTTON_CLICK_EVENT],
+    default_child_group_override: Some(&SPLIT_BUTTON_POPOVER_CHILD_GROUP),
+    child_groups: &[SPLIT_BUTTON_POPOVER_CHILD_GROUP],
+};
+
+// ── NavigationSplitView ───────────────────────────────────────────────────────
+
+const NAVIGATION_SPLIT_VIEW_SHOW_CONTENT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showContent",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::NavigationSplitViewShowContent),
+};
+
+const NAVIGATION_SPLIT_VIEW_SIDEBAR_WIDTH_FRACTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "sidebarWidthFraction",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewSidebarWidthFraction),
+};
+
+const NAVIGATION_SPLIT_VIEW_MIN_SIDEBAR_WIDTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "minSidebarWidth",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewMinSidebarWidth),
+};
+
+const NAVIGATION_SPLIT_VIEW_MAX_SIDEBAR_WIDTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxSidebarWidth",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::NavigationSplitViewMaxSidebarWidth),
+};
+
+const NAVIGATION_SPLIT_VIEW_SIDEBAR_POSITION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "sidebarPosition",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::NavigationSplitViewSidebarPosition),
+};
+
+const NAVIGATION_SPLIT_VIEW_SHOW_CONTENT_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onShowContent",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::NavigationSplitViewShowContentChanged,
+};
+
+const NAVIGATION_SPLIT_VIEW_SIDEBAR_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "sidebar",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::NavigationSplitViewSidebar,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const NAVIGATION_SPLIT_VIEW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::NavigationSplitViewContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const NAVIGATION_SPLIT_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "NavigationSplitView",
+    kind: GtkConcreteWidgetKind::NavigationSplitView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        NAVIGATION_SPLIT_VIEW_SHOW_CONTENT_PROPERTY,
+        NAVIGATION_SPLIT_VIEW_SIDEBAR_WIDTH_FRACTION_PROPERTY,
+        NAVIGATION_SPLIT_VIEW_MIN_SIDEBAR_WIDTH_PROPERTY,
+        NAVIGATION_SPLIT_VIEW_MAX_SIDEBAR_WIDTH_PROPERTY,
+        NAVIGATION_SPLIT_VIEW_SIDEBAR_POSITION_PROPERTY,
+    ],
+    events: &[NAVIGATION_SPLIT_VIEW_SHOW_CONTENT_EVENT],
+    default_child_group_override: Some(&NAVIGATION_SPLIT_VIEW_CONTENT_CHILD_GROUP),
+    child_groups: &[NAVIGATION_SPLIT_VIEW_SIDEBAR_CHILD_GROUP, NAVIGATION_SPLIT_VIEW_CONTENT_CHILD_GROUP],
+};
+
+// ── OverlaySplitView ──────────────────────────────────────────────────────────
+
+const OVERLAY_SPLIT_VIEW_SHOW_SIDEBAR_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showSidebar",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::OverlaySplitViewShowSidebar),
+};
+
+const OVERLAY_SPLIT_VIEW_SIDEBAR_POSITION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "sidebarPosition",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::OverlaySplitViewSidebarPosition),
+};
+
+const OVERLAY_SPLIT_VIEW_SIDEBAR_WIDTH_FRACTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "sidebarWidthFraction",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewSidebarWidthFraction),
+};
+
+const OVERLAY_SPLIT_VIEW_MIN_SIDEBAR_WIDTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "minSidebarWidth",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewMinSidebarWidth),
+};
+
+const OVERLAY_SPLIT_VIEW_MAX_SIDEBAR_WIDTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxSidebarWidth",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::OverlaySplitViewMaxSidebarWidth),
+};
+
+const OVERLAY_SPLIT_VIEW_SHOW_SIDEBAR_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onShowSidebar",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::OverlaySplitViewShowSidebarChanged,
+};
+
+const OVERLAY_SPLIT_VIEW_SIDEBAR_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "sidebar",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::OverlaySplitViewSidebar,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const OVERLAY_SPLIT_VIEW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::OverlaySplitViewContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const OVERLAY_SPLIT_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "OverlaySplitView",
+    kind: GtkConcreteWidgetKind::OverlaySplitView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        OVERLAY_SPLIT_VIEW_SHOW_SIDEBAR_PROPERTY,
+        OVERLAY_SPLIT_VIEW_SIDEBAR_POSITION_PROPERTY,
+        OVERLAY_SPLIT_VIEW_SIDEBAR_WIDTH_FRACTION_PROPERTY,
+        OVERLAY_SPLIT_VIEW_MIN_SIDEBAR_WIDTH_PROPERTY,
+        OVERLAY_SPLIT_VIEW_MAX_SIDEBAR_WIDTH_PROPERTY,
+    ],
+    events: &[OVERLAY_SPLIT_VIEW_SHOW_SIDEBAR_EVENT],
+    default_child_group_override: Some(&OVERLAY_SPLIT_VIEW_CONTENT_CHILD_GROUP),
+    child_groups: &[OVERLAY_SPLIT_VIEW_SIDEBAR_CHILD_GROUP, OVERLAY_SPLIT_VIEW_CONTENT_CHILD_GROUP],
+};
+
+// ── TabView ───────────────────────────────────────────────────────────────────
+
+const TAB_VIEW_SELECTED_PAGE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "selectedPage",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::TabViewSelectedPage),
+};
+
+const TAB_VIEW_PAGE_ADDED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPageAdded",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::TabViewPageAdded,
+};
+
+const TAB_VIEW_PAGE_CLOSED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPageClosed",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::TabViewPageClosed,
+};
+
+const TAB_VIEW_SELECTED_PAGE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSelectedPageChanged",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::TabViewSelectedPageChanged,
+};
+
+const TAB_VIEW_PAGES_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "pages",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::TabViewPages,
+    min_children: 0,
+    max_children: None,
+};
+
+const TAB_VIEW_TAB_BAR_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "tabBar",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::TabViewTabBar,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const TAB_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "TabView",
+    kind: GtkConcreteWidgetKind::TabView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        TAB_VIEW_SELECTED_PAGE_PROPERTY,
+    ],
+    events: &[TAB_VIEW_PAGE_ADDED_EVENT, TAB_VIEW_PAGE_CLOSED_EVENT, TAB_VIEW_SELECTED_PAGE_CHANGED_EVENT],
+    default_child_group_override: Some(&TAB_VIEW_PAGES_CHILD_GROUP),
+    child_groups: &[TAB_VIEW_PAGES_CHILD_GROUP, TAB_VIEW_TAB_BAR_CHILD_GROUP],
+};
+
+// ── TabPage ───────────────────────────────────────────────────────────────────
+
+const TAB_PAGE_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::TabPageTitle),
+};
+
+const TAB_PAGE_NEEDS_ATTENTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "needsAttention",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::TabPageNeedsAttention),
+};
+
+const TAB_PAGE_LOADING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "loading",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::TabPageLoading),
+};
+
+const TAB_PAGE_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::TabPageContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const TAB_PAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "TabPage",
+    kind: GtkConcreteWidgetKind::TabPage,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        TAB_PAGE_TITLE_PROPERTY,
+        TAB_PAGE_NEEDS_ATTENTION_PROPERTY,
+        TAB_PAGE_LOADING_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&TAB_PAGE_CONTENT_CHILD_GROUP),
+    child_groups: &[TAB_PAGE_CONTENT_CHILD_GROUP],
+};
+
+// ── TabBar ────────────────────────────────────────────────────────────────────
+
+const TAB_BAR_AUTOHIDE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "autohide",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::TabBarAutohide),
+};
+
+const TAB_BAR_EXPAND_TABS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "expandTabs",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::TabBarExpandTabs),
+};
+
+const TAB_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "TabBar",
+    kind: GtkConcreteWidgetKind::TabBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        TAB_BAR_AUTOHIDE_PROPERTY,
+        TAB_BAR_EXPAND_TABS_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Carousel ──────────────────────────────────────────────────────────────────
+
+const CAROUSEL_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "spacing",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::CarouselSpacing),
+};
+
+const CAROUSEL_REVEAL_DURATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealDuration",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::CarouselRevealDuration),
+};
+
+const CAROUSEL_INTERACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "interactive",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CarouselInteractive),
+};
+
+const CAROUSEL_PAGE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPageChanged",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::CarouselPageChanged,
+};
+
+const CAROUSEL_PAGES_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "pages",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::CarouselPages,
+    min_children: 0,
+    max_children: None,
+};
+
+const CAROUSEL_DOTS_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "dots",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::CarouselDots,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const CAROUSEL_LINES_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "lines",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::CarouselLines,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const CAROUSEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Carousel",
+    kind: GtkConcreteWidgetKind::Carousel,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        CAROUSEL_SPACING_PROPERTY,
+        CAROUSEL_REVEAL_DURATION_PROPERTY,
+        CAROUSEL_INTERACTIVE_PROPERTY,
+    ],
+    events: &[CAROUSEL_PAGE_CHANGED_EVENT, SWIPE_LEFT_EVENT, SWIPE_RIGHT_EVENT],
+    default_child_group_override: Some(&CAROUSEL_PAGES_CHILD_GROUP),
+    child_groups: &[CAROUSEL_PAGES_CHILD_GROUP, CAROUSEL_DOTS_CHILD_GROUP, CAROUSEL_LINES_CHILD_GROUP],
+};
+
+// ── CarouselIndicatorDots ─────────────────────────────────────────────────────
+
+const CAROUSEL_INDICATOR_DOTS_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "CarouselIndicatorDots",
+    kind: GtkConcreteWidgetKind::CarouselIndicatorDots,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── CarouselIndicatorLines ────────────────────────────────────────────────────
+
+const CAROUSEL_INDICATOR_LINES_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "CarouselIndicatorLines",
+    kind: GtkConcreteWidgetKind::CarouselIndicatorLines,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Grid ──────────────────────────────────────────────────────────────────────
+
+const GRID_ROW_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "rowSpacing",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridRowSpacing),
+};
+
+const GRID_COLUMN_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "columnSpacing",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridColumnSpacing),
+};
+
+const GRID_ROW_HOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "rowHomogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GridRowHomogeneous),
+};
+
+const GRID_COLUMN_HOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "columnHomogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GridColumnHomogeneous),
+};
+
+const GRID_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "children",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::GridChildren,
+    min_children: 0,
+    max_children: None,
+};
+
+const GRID_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Grid",
+    kind: GtkConcreteWidgetKind::Grid,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        GRID_ROW_SPACING_PROPERTY,
+        GRID_COLUMN_SPACING_PROPERTY,
+        GRID_ROW_HOMOGENEOUS_PROPERTY,
+        GRID_COLUMN_HOMOGENEOUS_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&GRID_CHILDREN_CHILD_GROUP),
+    child_groups: &[GRID_CHILDREN_CHILD_GROUP],
+};
+
+// ── GridChild ─────────────────────────────────────────────────────────────────
+
+const GRID_CHILD_COLUMN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "column",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumn),
+};
+
+const GRID_CHILD_ROW_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "row",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRow),
+};
+
+const GRID_CHILD_COLUMN_SPAN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "columnSpan",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumnSpan),
+};
+
+const GRID_CHILD_ROW_SPAN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "rowSpan",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRowSpan),
+};
+
+const GRID_CHILD_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::GridChildContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const GRID_CHILD_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GridChild",
+    kind: GtkConcreteWidgetKind::GridChild,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        GRID_CHILD_COLUMN_PROPERTY,
+        GRID_CHILD_ROW_PROPERTY,
+        GRID_CHILD_COLUMN_SPAN_PROPERTY,
+        GRID_CHILD_ROW_SPAN_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&GRID_CHILD_CONTENT_CHILD_GROUP),
+    child_groups: &[GRID_CHILD_CONTENT_CHILD_GROUP],
+};
+
+// ── FileDialog ────────────────────────────────────────────────────────────────
+
+const FILE_DIALOG_VISIBLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "visible",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FileDialogVisible),
+};
+
+const FILE_DIALOG_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogTitle),
+};
+
+const FILE_DIALOG_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "mode",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogMode),
+};
+
+const FILE_DIALOG_ACCEPT_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "acceptLabel",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogAcceptLabel),
+};
+
+const FILE_DIALOG_CANCEL_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "cancelLabel",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FileDialogCancelLabel),
+};
+
+const FILE_DIALOG_RESPONSE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onResponse",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::FileDialogResponse,
+};
+
+const FILE_DIALOG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "FileDialog",
+    kind: GtkConcreteWidgetKind::FileDialog,
+    root_kind: GtkWidgetRootKind::Window,
+    properties: &[
+        FILE_DIALOG_VISIBLE_PROPERTY,
+        FILE_DIALOG_TITLE_PROPERTY,
+        FILE_DIALOG_MODE_PROPERTY,
+        FILE_DIALOG_ACCEPT_LABEL_PROPERTY,
+        FILE_DIALOG_CANCEL_LABEL_PROPERTY,
+    ],
+    events: &[FILE_DIALOG_RESPONSE_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
     HEADER_BAR_SCHEMA,
@@ -3596,6 +5095,25 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     VIEW_STACK_SCHEMA,
     VIEW_STACK_PAGE_SCHEMA,
     ALERT_DIALOG_SCHEMA,
+    CALENDAR_SCHEMA,
+    FLOW_BOX_SCHEMA,
+    FLOW_BOX_CHILD_SCHEMA,
+    MENU_BUTTON_SCHEMA,
+    POPOVER_SCHEMA,
+    CENTER_BOX_SCHEMA,
+    ABOUT_DIALOG_SCHEMA,
+    SPLIT_BUTTON_SCHEMA,
+    NAVIGATION_SPLIT_VIEW_SCHEMA,
+    OVERLAY_SPLIT_VIEW_SCHEMA,
+    TAB_VIEW_SCHEMA,
+    TAB_PAGE_SCHEMA,
+    TAB_BAR_SCHEMA,
+    CAROUSEL_SCHEMA,
+    CAROUSEL_INDICATOR_DOTS_SCHEMA,
+    CAROUSEL_INDICATOR_LINES_SCHEMA,
+    GRID_SCHEMA,
+    GRID_CHILD_SCHEMA,
+    FILE_DIALOG_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -3725,6 +5243,25 @@ mod tests {
                 "ViewStack",
                 "ViewStackPage",
                 "AlertDialog",
+                "Calendar",
+                "FlowBox",
+                "FlowBoxChild",
+                "MenuButton",
+                "Popover",
+                "CenterBox",
+                "AboutDialog",
+                "SplitButton",
+                "NavigationSplitView",
+                "OverlaySplitView",
+                "TabView",
+                "TabPage",
+                "TabBar",
+                "Carousel",
+                "CarouselIndicatorDots",
+                "CarouselIndicatorLines",
+                "Grid",
+                "GridChild",
+                "FileDialog",
             ]
         );
     }
