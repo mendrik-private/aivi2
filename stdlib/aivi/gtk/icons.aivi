@@ -1,0 +1,440 @@
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+/** Create a new document. **/
+value documentNew : Text = "document-new"
+
+/** Open an existing document. **/
+value documentOpen : Text = "document-open"
+
+/** Save the current document. **/
+value documentSave : Text = "document-save"
+
+/** Save the current document under a new name. **/
+value documentSaveAs : Text = "document-save-as"
+
+/** Close the current document. **/
+value documentClose : Text = "document-close"
+
+/** Print the current document. **/
+value documentPrint : Text = "document-print"
+
+/** Copy the selection to the clipboard. **/
+value editCopy : Text = "edit-copy"
+
+/** Cut the selection to the clipboard. **/
+value editCut : Text = "edit-cut"
+
+/** Paste from the clipboard. **/
+value editPaste : Text = "edit-paste"
+
+/** Delete the selection. **/
+value editDelete : Text = "edit-delete"
+
+/** Undo the last action. **/
+value editUndo : Text = "edit-undo"
+
+/** Redo the previously undone action. **/
+value editRedo : Text = "edit-redo"
+
+/** Open a find/search dialog. **/
+value editFind : Text = "edit-find"
+
+/** Open a find-and-replace dialog. **/
+value editFindReplace : Text = "edit-find-replace"
+
+/** Select all content. **/
+value editSelectAll : Text = "edit-select-all"
+
+/** Clear the current input or selection. **/
+value editClear : Text = "edit-clear"
+
+/** Add a new item to a list. **/
+value listAdd : Text = "list-add"
+
+/** Remove an item from a list. **/
+value listRemove : Text = "list-remove"
+
+/** Reload or refresh the current view. **/
+value viewRefresh : Text = "view-refresh"
+
+/** Enter fullscreen mode. **/
+value viewFullscreen : Text = "view-fullscreen"
+
+/** Restore from fullscreen. **/
+value viewRestoreFullscreen : Text = "view-restore"
+
+/** Increase zoom level. **/
+value zoomIn : Text = "zoom-in"
+
+/** Decrease zoom level. **/
+value zoomOut : Text = "zoom-out"
+
+/** Zoom to fit the best available area. **/
+value zoomFitBest : Text = "zoom-fit-best"
+
+/** Reset zoom to original (100%) size. **/
+value zoomOriginal : Text = "zoom-original"
+
+/** Close a window. **/
+value windowClose : Text = "window-close"
+
+/** Exit the application. **/
+value applicationExit : Text = "application-exit"
+
+/** Send a mail message. **/
+value mailSend : Text = "mail-send"
+
+/** Reply to a mail message. **/
+value mailReply : Text = "mail-reply"
+
+/** Forward a mail message. **/
+value mailForward : Text = "mail-forward"
+
+/** Start a call. **/
+value callStart : Text = "call-start"
+
+/** End a call. **/
+value callStop : Text = "call-stop"
+
+/** Start media playback. **/
+value mediaPlay : Text = "media-playback-start"
+
+/** Pause media playback. **/
+value mediaPause : Text = "media-playback-pause"
+
+/** Stop media playback. **/
+value mediaStop : Text = "media-playback-stop"
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+
+/** Navigate to the previous item. **/
+value goPrevious : Text = "go-previous"
+
+/** Navigate to the next item. **/
+value goNext : Text = "go-next"
+
+/** Navigate up one level. **/
+value goUp : Text = "go-up"
+
+/** Navigate down one level. **/
+value goDown : Text = "go-down"
+
+/** Navigate to the home location. **/
+value goHome : Text = "go-home"
+
+/** Jump to the first item. **/
+value goFirst : Text = "go-first"
+
+/** Jump to the last item. **/
+value goLast : Text = "go-last"
+
+/** Jump to a specific location. **/
+value goJump : Text = "go-jump"
+
+/** Create a new bookmark. **/
+value bookmarkNew : Text = "bookmark-new"
+
+/** Open the application menu (vertical). **/
+value openMenu : Text = "open-menu"
+
+/** Open the application menu (horizontal). **/
+value openMenuHorizontal : Text = "open-menu-horizontal"
+
+/** Show more options (vertical overflow). **/
+value viewMore : Text = "view-more"
+
+/** Show more options (horizontal overflow). **/
+value viewMoreHorizontal : Text = "view-more-horizontal"
+
+// ── Status ────────────────────────────────────────────────────────────────────
+
+/** Error dialog icon. **/
+value dialogError : Text = "dialog-error"
+
+/** Warning dialog icon. **/
+value dialogWarning : Text = "dialog-warning"
+
+/** Informational dialog icon. **/
+value dialogInformation : Text = "dialog-information"
+
+/** Question dialog icon. **/
+value dialogQuestion : Text = "dialog-question"
+
+/** Success or confirmation emblem. **/
+value emblemOk : Text = "emblem-ok"
+
+/** Important or attention-required emblem. **/
+value emblemImportant : Text = "emblem-important"
+
+/** Network is offline. **/
+value networkOffline : Text = "network-offline"
+
+/** Network transmitting data. **/
+value networkTransmit : Text = "network-transmit"
+
+/** Network receiving data. **/
+value networkReceive : Text = "network-receive"
+
+/** Battery full or charging. **/
+value batteryFull : Text = "battery"
+
+/** Synchronisation in progress. **/
+value syncSynchronizing : Text = "emblem-synchronizing"
+
+/** Stop a running process. **/
+value processStop : Text = "process-stop"
+
+// ── Objects ───────────────────────────────────────────────────────────────────
+
+/** Open a new address book. **/
+value addressBook : Text = "address-book-new"
+
+/** Audio is muted. **/
+value audioVolumeMute : Text = "audio-volume-muted"
+
+/** Audio volume is high. **/
+value audioVolumeHigh : Text = "audio-volume-high"
+
+/** Audio volume is low. **/
+value audioVolumeLow : Text = "audio-volume-low"
+
+/** Audio volume is medium. **/
+value audioVolumeMedium : Text = "audio-volume-medium"
+
+/** Photo camera. **/
+value camera : Text = "camera-photo"
+
+/** Video camera. **/
+value cameraVideo : Text = "camera-video"
+
+/** Create a new contact. **/
+value contact : Text = "contact-new"
+
+/** A folder (closed). **/
+value folder : Text = "folder"
+
+/** Create a new folder. **/
+value folderNew : Text = "folder-new"
+
+/** An open folder. **/
+value folderOpen : Text = "folder-open"
+
+/** Generic image file. **/
+value image : Text = "image-x-generic"
+
+/** System preferences. **/
+value preferences : Text = "preferences-system"
+
+/** Other preferences or system settings. **/
+value systemSettings : Text = "preferences-other"
+
+/** Security — medium level. **/
+value security : Text = "security-medium"
+
+/** System users. **/
+value user : Text = "system-users"
+
+/** Computer or workstation. **/
+value computer : Text = "computer"
+
+/** Mobile phone. **/
+value phone : Text = "phone"
+
+/** Printer device. **/
+value printer : Text = "printer"
+
+/** Scanner device. **/
+value scanner : Text = "scanner"
+
+// ── Symbolic variants ─────────────────────────────────────────────────────────
+
+/** New document — single-colour symbolic variant. **/
+value documentNewSymbolic : Text = "document-new-symbolic"
+
+/** Open document — single-colour symbolic variant. **/
+value documentOpenSymbolic : Text = "document-open-symbolic"
+
+/** Save document — single-colour symbolic variant. **/
+value documentSaveSymbolic : Text = "document-save-symbolic"
+
+/** Save document as — single-colour symbolic variant. **/
+value documentSaveAsSymbolic : Text = "document-save-as-symbolic"
+
+/** Copy — single-colour symbolic variant. **/
+value editCopySymbolic : Text = "edit-copy-symbolic"
+
+/** Cut — single-colour symbolic variant. **/
+value editCutSymbolic : Text = "edit-cut-symbolic"
+
+/** Paste — single-colour symbolic variant. **/
+value editPasteSymbolic : Text = "edit-paste-symbolic"
+
+/** Delete — single-colour symbolic variant. **/
+value editDeleteSymbolic : Text = "edit-delete-symbolic"
+
+/** Undo — single-colour symbolic variant. **/
+value editUndoSymbolic : Text = "edit-undo-symbolic"
+
+/** Redo — single-colour symbolic variant. **/
+value editRedoSymbolic : Text = "edit-redo-symbolic"
+
+/** List add — single-colour symbolic variant. **/
+value listAddSymbolic : Text = "list-add-symbolic"
+
+/** List remove — single-colour symbolic variant. **/
+value listRemoveSymbolic : Text = "list-remove-symbolic"
+
+/** View refresh — single-colour symbolic variant. **/
+value viewRefreshSymbolic : Text = "view-refresh-symbolic"
+
+/** Go previous — single-colour symbolic variant. **/
+value goPreviousSymbolic : Text = "go-previous-symbolic"
+
+/** Go next — single-colour symbolic variant. **/
+value goNextSymbolic : Text = "go-next-symbolic"
+
+/** Go up — single-colour symbolic variant. **/
+value goUpSymbolic : Text = "go-up-symbolic"
+
+/** Go down — single-colour symbolic variant. **/
+value goDownSymbolic : Text = "go-down-symbolic"
+
+/** Go home — single-colour symbolic variant. **/
+value goHomeSymbolic : Text = "go-home-symbolic"
+
+/** Open menu — single-colour symbolic variant. **/
+value openMenuSymbolic : Text = "open-menu-symbolic"
+
+/** System search — symbolic glyph. **/
+value searchSymbolic : Text = "system-search-symbolic"
+
+/** System emblem — symbolic glyph. **/
+value settingsSymbolic : Text = "emblem-system-symbolic"
+
+/** Notification — symbolic glyph. **/
+value notificationSymbolic : Text = "notification-symbolic"
+
+/** System users — symbolic glyph. **/
+value userSymbolic : Text = "system-users-symbolic"
+
+/** Checkmark / ok emblem — symbolic glyph. **/
+value checkmarkSymbolic : Text = "emblem-ok-symbolic"
+
+/** Error dialog — symbolic glyph. **/
+value errorSymbolic : Text = "dialog-error-symbolic"
+
+/** Warning dialog — symbolic glyph. **/
+value warningSymbolic : Text = "dialog-warning-symbolic"
+
+/** Information dialog — symbolic glyph. **/
+value infoSymbolic : Text = "dialog-information-symbolic"
+
+export (
+    documentNew
+    documentOpen
+    documentSave
+    documentSaveAs
+    documentClose
+    documentPrint
+    editCopy
+    editCut
+    editPaste
+    editDelete
+    editUndo
+    editRedo
+    editFind
+    editFindReplace
+    editSelectAll
+    editClear
+    listAdd
+    listRemove
+    viewRefresh
+    viewFullscreen
+    viewRestoreFullscreen
+    zoomIn
+    zoomOut
+    zoomFitBest
+    zoomOriginal
+    windowClose
+    applicationExit
+    mailSend
+    mailReply
+    mailForward
+    callStart
+    callStop
+    mediaPlay
+    mediaPause
+    mediaStop
+    goPrevious
+    goNext
+    goUp
+    goDown
+    goHome
+    goFirst
+    goLast
+    goJump
+    bookmarkNew
+    openMenu
+    openMenuHorizontal
+    viewMore
+    viewMoreHorizontal
+    dialogError
+    dialogWarning
+    dialogInformation
+    dialogQuestion
+    emblemOk
+    emblemImportant
+    networkOffline
+    networkTransmit
+    networkReceive
+    batteryFull
+    syncSynchronizing
+    processStop
+    addressBook
+    audioVolumeMute
+    audioVolumeHigh
+    audioVolumeLow
+    audioVolumeMedium
+    camera
+    cameraVideo
+    contact
+    folder
+    folderNew
+    folderOpen
+    image
+    preferences
+    systemSettings
+    security
+    user
+    computer
+    phone
+    printer
+    scanner
+    documentNewSymbolic
+    documentOpenSymbolic
+    documentSaveSymbolic
+    documentSaveAsSymbolic
+    editCopySymbolic
+    editCutSymbolic
+    editPasteSymbolic
+    editDeleteSymbolic
+    editUndoSymbolic
+    editRedoSymbolic
+    listAddSymbolic
+    listRemoveSymbolic
+    viewRefreshSymbolic
+    goPreviousSymbolic
+    goNextSymbolic
+    goUpSymbolic
+    goDownSymbolic
+    goHomeSymbolic
+    openMenuSymbolic
+    searchSymbolic
+    settingsSymbolic
+    notificationSymbolic
+    userSymbolic
+    checkmarkSymbolic
+    errorSymbolic
+    warningSymbolic
+    infoSymbolic
+)
