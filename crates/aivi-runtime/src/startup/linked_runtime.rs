@@ -199,13 +199,11 @@ impl BackendLinkedRuntime {
         let runtime_committed = materialize_detached_globals(&committed);
         let mut temporal_states = self.temporal_states.clone();
         let mut pending_temporal_schedules = Vec::new();
-        let mut native_kernel_plans = BTreeMap::new();
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
             native_kernels: self.native_kernels.as_ref(),
             signal_items_by_handle: &self.signal_items_by_handle,
             derived_signals: &self.derived_signals,
-            native_kernel_plans: &mut native_kernel_plans,
             reactive_signals: &self.reactive_signals,
             reactive_clauses: &self.reactive_clauses,
             linked_recurrence_signals: &self.linked_recurrence_signals,
@@ -228,7 +226,6 @@ impl BackendLinkedRuntime {
                 native_kernels: self.native_kernels.as_ref(),
                 signal_items_by_handle: &self.signal_items_by_handle,
                 derived_signals: &self.derived_signals,
-                native_kernel_plans: &mut native_kernel_plans,
                 reactive_signals: &self.reactive_signals,
                 reactive_clauses: &self.reactive_clauses,
                 linked_recurrence_signals: &self.linked_recurrence_signals,
@@ -675,6 +672,21 @@ impl BackendLinkedRuntime {
 
 impl Drop for BackendLinkedRuntime {
     fn drop(&mut self) {
+        // Remove all thread-local kernel plans for this runtime so stale compiled code cannot
+        // survive into a new runtime that happens to occupy the same `BackendProgram` address.
+        let program_addr = Arc::as_ptr(&self.backend) as usize;
+        // Also collect addresses for reactive-clause backends (which may differ from the main one).
+        let mut addrs = std::collections::BTreeSet::new();
+        addrs.insert(program_addr);
+        // Also collect addresses for reactive-clause backends (which may differ from the main one).
+        for clause in self.reactive_clauses.values() {
+            addrs.insert(Arc::as_ptr(&clause.compiled_guard.backend) as usize);
+            addrs.insert(Arc::as_ptr(&clause.compiled_body.backend) as usize);
+        }
+        NATIVE_KERNEL_PLAN_CACHE.with(|cell| {
+            cell.borrow_mut()
+                .retain(|(addr, _), _| !addrs.contains(addr));
+        });
         for worker in self.temporal_workers.values_mut() {
             worker.stop();
         }

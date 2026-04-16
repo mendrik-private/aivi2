@@ -456,3 +456,41 @@ Documented the ambient class graph outside the primary executable slice.
 - Updated manual/guide/markup.md: added sections for all 14 new tier-1 widgets (CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView+TabPage+TabBar, Carousel+indicators, Grid+GridChild, FileDialog); documented gesture events under Button section; added Entry icon props, HeaderBar centeringPolicy, ActionRow prefix, ListBox showSeparators.
 - Updated manual/guide/source-catalog.md: added window.size and window.focus provider sections to GTK input section.
 - Updated wiki/gtk-bridge.md: GTK Source Providers table updated from 3→5 entries; added window.size and window.focus rows.
+
+## [2026-04-15] fix | O(N²) list/matrix replace performance
+
+Fixed catastrophic O(N²) performance in `aivi.list.replaceAt` and `aivi.matrix.replaceAt`.
+
+- Root cause: ambient AIVI `__aivi_listReplace` accumulated a list via `reduce`+`append`,
+  cloning the growing accumulator at each step (O(1+2+...+N) = O(N²) total copies).
+- `__aivi_matrix_doReplace` called `__aivi_listReplace` twice per cell (once for the row,
+  once for the rows list), making matrix replace O(W²+H²) per call.
+- Fix: Added two Rust intrinsics — `ListReplaceAt` and `MatrixReplaceAt` — in
+  `crates/aivi-hir/src/hir.rs` and `crates/aivi-backend/src/runtime/intrinsics.rs`.
+  - `ListReplaceAt`: O(N) — clones Vec once, overwrites index in place.
+  - `MatrixReplaceAt`: O(W+H) — clones rows Vec (O(H)), clones target row (O(W)), writes, returns.
+- Routed `("aivi.list", "replaceAt")` and `("aivi.matrix", "replaceAt")` to these intrinsics
+  in `crates/aivi-hir/src/lower/helpers.rs`, bypassing all AIVI-level indirection.
+- Snake game `matrixReplaceAt` calls go from O(1300) per cell to O(50) per cell (26x faster).
+
+## [2026-04-16] fix | Cross-tick JIT kernel plan caching
+
+Fixed the remaining snake game FPS regression: `BackendLinkedRuntime::tick()` created a fresh
+empty `BTreeMap<_, NativeKernelPlan>` on every call, causing all JIT-compiled kernels to be
+recompiled from scratch each tick (~200 ms each, ~0.2 fps).
+
+- Root cause: `let mut native_kernel_plans = BTreeMap::new()` was declared as a local inside
+  `tick()`, so `NativeKernelPlan` (which is `!Send` due to raw JIT pointers) could not be stored
+  in `BackendLinkedRuntime` (which must be `Send` for `Arc<Mutex>`).
+- Fix: thread-local `NATIVE_KERNEL_PLAN_CACHE: RefCell<BTreeMap<(usize, NativePlanCacheKey), NativeKernelPlan>>`
+  in `derived_eval.rs`. The GLib runtime drives all ticks from the GTK main thread, so the same
+  thread-local is reused every tick. Cache key includes the `BackendProgram` pointer for safety.
+- Removed the `native_kernel_plans` field from `LinkedDerivedEvaluator` entirely.
+- Added `with_native_plan()` static helper replacing the old `native_plan()` (which borrowed
+  from a per-tick map and couldn't outlive it).
+- All 5 kernel evaluation paths updated: derived, reactive seed, reactive guard, reactive body,
+  and recurrence step.
+- `Drop` impl in `linked_runtime.rs` evicts all cache entries for the runtime's backend address.
+- Regression test added: `recurrence_warm_ticks_are_fast_after_first_compile` in
+  `crates/aivi-runtime/tests/window_key_recurrence.rs` — asserts warm ticks complete in < 50 ms
+  (vs ~200 ms without caching). Full test run: 135 pass, 2 pre-existing failures unchanged.

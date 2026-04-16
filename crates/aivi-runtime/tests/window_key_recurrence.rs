@@ -431,3 +431,110 @@ signal steps : Signal Int =
         "restart requests must be consumed so later deaths do not auto-restart without a new Space press"
     );
 }
+
+/// Validates that JIT kernel plans are cached across scheduler ticks.
+///
+/// Without the cross-tick plan cache, every call to `BackendLinkedRuntime::tick()` would
+/// recompile all kernels (~200 ms each). With the thread-local `NATIVE_KERNEL_PLAN_CACHE`,
+/// only the first tick pays the compilation cost; subsequent ticks execute the pre-compiled
+/// native code and should complete in well under 50 ms.
+#[test]
+fn recurrence_warm_ticks_are_fast_after_first_compile() {
+    let lowered = lower_text(
+        "runtime-tick-cache-perf.aivi",
+        r#"
+type Int -> Int -> Int
+func inc = ev prev => prev + 1
+
+provider custom.tick
+    wakeup: providerTrigger
+
+@source custom.tick
+signal tick : Signal Int
+
+signal count : Signal Int =
+    tick
+     +|> 0 inc
+"#,
+    );
+
+    let assembly =
+        assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(assembly, &lowered.core, Arc::new(lowered.backend))
+        .expect("startup link should succeed");
+
+    // First tick — activates sources and compiles kernels (cold path).
+    let first = linked
+        .tick_with_source_lifecycle()
+        .expect("initial lifecycle tick should succeed");
+
+    let tick_instance = linked
+        .source_by_owner(item_id(lowered.hir.module(), "tick"))
+        .expect("tick source binding should exist")
+        .instance;
+    let mut tick_port = None;
+    for action in first.source_actions() {
+        match action {
+            aivi_runtime::LinkedSourceLifecycleAction::Activate { instance, port, .. }
+            | aivi_runtime::LinkedSourceLifecycleAction::Reconfigure { instance, port, .. } => {
+                if *instance == tick_instance {
+                    tick_port = Some(port.clone());
+                }
+            }
+            aivi_runtime::LinkedSourceLifecycleAction::Suspend { .. } => {}
+        }
+    }
+    let tick_port = tick_port.expect("custom tick source should activate");
+
+    let count_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "count"))
+        .expect("count signal binding should exist")
+        .signal();
+
+    // Cold tick — establishes the initial recurrence value (seed evaluation + first step
+    // compilation). We don't assert its duration; it just must complete.
+    tick_port
+        .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(1)))
+        .expect("first tick publication should queue");
+    let cold_start = Instant::now();
+    linked
+        .tick_with_source_lifecycle()
+        .expect("cold tick should succeed");
+    let cold_elapsed = cold_start.elapsed();
+
+    assert_eq!(
+        linked.runtime().current_value(count_signal).unwrap(),
+        Some(&RuntimeValue::Int(1)),
+        "count should be 1 after first tick"
+    );
+
+    // Warm ticks — kernels are now cached in the thread-local plan cache.
+    // Each warm tick should be dramatically faster than the cold compile (~200 ms).
+    // We use 50 ms as a generous ceiling; real warm ticks are typically <1 ms.
+    const WARM_TICK_LIMIT: Duration = Duration::from_millis(50);
+    const WARM_TICK_COUNT: i64 = 5;
+
+    for i in 2..=WARM_TICK_COUNT {
+        tick_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(i)))
+            .expect("tick publication should queue");
+        let warm_start = Instant::now();
+        linked
+            .tick_with_source_lifecycle()
+            .expect("warm tick should succeed");
+        let warm_elapsed = warm_start.elapsed();
+
+        assert_eq!(
+            linked.runtime().current_value(count_signal).unwrap(),
+            Some(&RuntimeValue::Int(i)),
+            "count should equal tick index after tick {i}"
+        );
+        assert!(
+            warm_elapsed < WARM_TICK_LIMIT,
+            "warm tick {i} took {warm_elapsed:?} — expected < {WARM_TICK_LIMIT:?} \
+             (cold tick took {cold_elapsed:?}; without cross-tick plan caching every tick \
+             recompiles kernels at ~200 ms each)"
+        );
+    }
+}
