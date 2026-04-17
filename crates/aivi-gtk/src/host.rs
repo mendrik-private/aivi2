@@ -930,6 +930,32 @@ where
         }
     }
 
+    /// If `widget` (an `adw::Bin` GridChild) is already attached to a `gtk::Grid`
+    /// parent, remove it and re-attach it at its current position from the meta map.
+    ///
+    /// This is required because the hydration plan sets column/row properties AFTER
+    /// `update_each_keyed` has already called `grid.attach()` with the default (0, 0)
+    /// position.  Without re-attaching, every tile would sit on top of each other at
+    /// the origin.
+    fn reattach_grid_child_if_mounted(&self, widget: &gtk::Widget, key: usize) {
+        let Some(parent) = widget.parent() else {
+            return;
+        };
+        let Ok(grid) = parent.downcast::<gtk::Grid>() else {
+            return;
+        };
+        let meta = self.grid_child_meta.borrow();
+        let meta = meta.get(&key).cloned().unwrap_or_default();
+        grid.remove(widget);
+        grid.attach(
+            widget,
+            meta.column,
+            meta.row,
+            meta.column_span.max(1),
+            meta.row_span.max(1),
+        );
+    }
+
     fn with_blocked_widget_events<T>(
         &self,
         widget: &gtk::Widget,
@@ -2997,38 +3023,74 @@ where
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumn) => {
                 let key = widget.as_ptr() as usize;
+                let prev = self
+                    .grid_child_meta
+                    .borrow()
+                    .get(&key)
+                    .map(|m| m.column);
+                let new_val = value as i32;
                 self.grid_child_meta
                     .borrow_mut()
                     .entry(key)
                     .or_default()
-                    .column = value as i32;
+                    .column = new_val;
+                if prev != Some(new_val) {
+                    self.reattach_grid_child_if_mounted(widget, key);
+                }
                 Ok(())
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRow) => {
                 let key = widget.as_ptr() as usize;
+                let prev = self
+                    .grid_child_meta
+                    .borrow()
+                    .get(&key)
+                    .map(|m| m.row);
+                let new_val = value as i32;
                 self.grid_child_meta
                     .borrow_mut()
                     .entry(key)
                     .or_default()
-                    .row = value as i32;
+                    .row = new_val;
+                if prev != Some(new_val) {
+                    self.reattach_grid_child_if_mounted(widget, key);
+                }
                 Ok(())
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumnSpan) => {
                 let key = widget.as_ptr() as usize;
+                let prev = self
+                    .grid_child_meta
+                    .borrow()
+                    .get(&key)
+                    .map(|m| m.column_span);
+                let new_val = value.max(1) as i32;
                 self.grid_child_meta
                     .borrow_mut()
                     .entry(key)
                     .or_default()
-                    .column_span = value.max(1) as i32;
+                    .column_span = new_val;
+                if prev != Some(new_val) {
+                    self.reattach_grid_child_if_mounted(widget, key);
+                }
                 Ok(())
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRowSpan) => {
                 let key = widget.as_ptr() as usize;
+                let prev = self
+                    .grid_child_meta
+                    .borrow()
+                    .get(&key)
+                    .map(|m| m.row_span);
+                let new_val = value.max(1) as i32;
                 self.grid_child_meta
                     .borrow_mut()
                     .entry(key)
                     .or_default()
-                    .row_span = value.max(1) as i32;
+                    .row_span = new_val;
+                if prev != Some(new_val) {
+                    self.reattach_grid_child_if_mounted(widget, key);
+                }
                 Ok(())
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::CarouselSpacing) => {

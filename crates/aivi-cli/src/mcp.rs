@@ -571,6 +571,7 @@ impl McpHostState {
         let role = widget_role(widget);
         let text = widget_text(widget);
         let value = widget_value(widget)?;
+        let props = widget_props(widget);
         let mut children = Vec::new();
         let mut child = widget.first_child();
         let mut child_index = 0usize;
@@ -587,6 +588,9 @@ impl McpHostState {
             role,
             text,
             value,
+            props,
+            allocated_width: widget.width(),
+            allocated_height: widget.height(),
             visible: widget.is_visible(),
             sensitive: widget.is_sensitive(),
             focused: widget.has_focus(),
@@ -1343,7 +1347,7 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "snapshot_gtk_tree",
-            "description": "Capture a semantic GTK widget tree for the live app.",
+            "description": "Capture a semantic GTK widget tree for the live app. Every node includes `allocated_width`/`allocated_height` (actual layout sizes in pixels) and a `props` object with widget-specific runtime properties: Picture nodes expose `file`, `can_shrink`, `content_fit`, `paintable_width`, `paintable_height`; Image nodes expose `file`, `pixel_size`, `storage_type`; Grid nodes expose `row_homogeneous`, `column_homogeneous`, `row_spacing`, `column_spacing`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1965,6 +1969,43 @@ fn widget_actions(widget: &gtk::Widget) -> Vec<String> {
     actions
 }
 
+fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
+    if let Ok(picture) = widget.clone().downcast::<gtk::Picture>() {
+        let file_path = picture
+            .file()
+            .and_then(|f| f.path())
+            .map(|p| JsonValue::String(p.to_string_lossy().into_owned()))
+            .unwrap_or(JsonValue::Null);
+        let (paintable_w, paintable_h) = picture
+            .paintable()
+            .map(|p| (p.intrinsic_width(), p.intrinsic_height()))
+            .unwrap_or((0, 0));
+        return Some(json!({
+            "file": file_path,
+            "can_shrink": picture.can_shrink(),
+            "content_fit": format!("{:?}", picture.content_fit()),
+            "paintable_width": paintable_w,
+            "paintable_height": paintable_h,
+        }));
+    }
+    if let Ok(image) = widget.clone().downcast::<gtk::Image>() {
+        return Some(json!({
+            "file": image.file().map(|f| f.to_string()).unwrap_or_default(),
+            "pixel_size": image.pixel_size(),
+            "storage_type": format!("{:?}", image.storage_type()),
+        }));
+    }
+    if let Ok(grid) = widget.clone().downcast::<gtk::Grid>() {
+        return Some(json!({
+            "row_homogeneous": grid.is_row_homogeneous(),
+            "column_homogeneous": grid.is_column_homogeneous(),
+            "row_spacing": grid.row_spacing(),
+            "column_spacing": grid.column_spacing(),
+        }));
+    }
+    None
+}
+
 fn collect_widget_matches(
     snapshot: &WidgetSnapshot,
     query: &FindWidgetsArgs,
@@ -1993,6 +2034,9 @@ fn collect_widget_matches(
             role: snapshot.role.clone(),
             text: snapshot.text.clone(),
             value: snapshot.value.clone(),
+            props: snapshot.props.clone(),
+            allocated_width: snapshot.allocated_width,
+            allocated_height: snapshot.allocated_height,
             visible: snapshot.visible,
             sensitive: snapshot.sensitive,
             focused: snapshot.focused,
@@ -2333,6 +2377,9 @@ struct WidgetSnapshot {
     role: String,
     text: Option<String>,
     value: Option<JsonValue>,
+    props: Option<JsonValue>,
+    allocated_width: i32,
+    allocated_height: i32,
     visible: bool,
     sensitive: bool,
     focused: bool,
@@ -2348,6 +2395,9 @@ struct WidgetMatch {
     role: String,
     text: Option<String>,
     value: Option<JsonValue>,
+    props: Option<JsonValue>,
+    allocated_width: i32,
+    allocated_height: i32,
     visible: bool,
     sensitive: bool,
     focused: bool,
