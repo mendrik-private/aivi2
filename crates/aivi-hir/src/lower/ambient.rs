@@ -875,6 +875,36 @@ domain Retry over Int = {
     suffix times : Int = value => Retry value
 }
 
+type (A, B) -> A
+func __aivi_pair_first = pair => pair
+    ||> (a, _) -> a
+
+type (A, B) -> B
+func __aivi_pair_second = pair => pair
+    ||> (_, b) -> b
+
+type (A, B) -> (B, A)
+func __aivi_pair_swap = pair => pair
+    ||> (a, b) -> (b, a)
+
+type (A -> C) -> (A, B) -> (C, B)
+func __aivi_pair_mapFirst = transform pair => pair
+    ||> (a, b) -> (transform a, b)
+
+type (B -> C) -> (A, B) -> (A, C)
+func __aivi_pair_mapSecond = transform pair => pair
+    ||> (a, b) -> (a, transform b)
+
+type (A -> C) -> (B -> D) -> (A, B) -> (C, D)
+func __aivi_pair_mapBoth = transformFst transformSnd pair => pair
+    ||> (a, b) -> (transformFst a, transformSnd b)
+
+type A -> B -> (A, B)
+func __aivi_pair_fromPair = a b => (a, b)
+
+type A -> (A, A)
+func __aivi_pair_duplicate = item => (item, item)
+
 "#;
 
 const MAX_COMPILE_TIME_RANGE_ELEMENTS: u64 = 4096;

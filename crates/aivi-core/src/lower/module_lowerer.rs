@@ -973,22 +973,6 @@ impl<'a> ModuleLowerer<'a> {
             let Some(owner) = self.item_map.get(&item.owner).copied() else {
                 continue;
             };
-            if let aivi_hir::GeneralExprOutcome::Blocked(ref blocked) = item.outcome {
-                let name = match &self.hir.items()[item.owner] {
-                    aivi_hir::Item::Function(f) => f.name.text().to_string(),
-                    aivi_hir::Item::Value(v) => v.name.text().to_string(),
-                    _ => format!("{:?}", item.owner),
-                };
-                let blockers = blocked.blockers.iter().map(|b| b.to_string()).collect::<Vec<_>>().join("; ");
-                eprintln!("[ambient-debug] blocked item `{name}`: {blockers}");
-            } else {
-                let name = match &self.hir.items()[item.owner] {
-                    aivi_hir::Item::Function(f) => f.name.text().to_string(),
-                    aivi_hir::Item::Value(v) => v.name.text().to_string(),
-                    _ => format!("{:?}", item.owner),
-                };
-                eprintln!("[ambient-debug] lowered item `{name}` → included={}, has_core_item={}", self.includes_item(item.owner), self.item_map.contains_key(&item.owner));
-            }
             self.lower_general_expr_body(
                 item.owner,
                 owner,

@@ -354,6 +354,7 @@ fn is_known_module(module: &str) -> bool {
             | "aivi.matrix"
             | "aivi.option"
             | "aivi.list"
+            | "aivi.pair"
     )
 }
 
@@ -388,6 +389,40 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         )),
         ("aivi.option", "getOrElse") => Some(ImportBindingMetadata::AmbientValue {
             name: "__aivi_option_getOrElse".into(),
+        }),
+        ("aivi.pair", "first") | ("aivi.pair", "fst") => {
+            Some(ImportBindingMetadata::AmbientValue {
+                name: "__aivi_pair_first".into(),
+            })
+        }
+        ("aivi.pair", "second") | ("aivi.pair", "snd") => {
+            Some(ImportBindingMetadata::AmbientValue {
+                name: "__aivi_pair_second".into(),
+            })
+        }
+        ("aivi.pair", "swap") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_pair_swap".into(),
+        }),
+        ("aivi.pair", "mapFirst") | ("aivi.pair", "mapFst") => {
+            Some(ImportBindingMetadata::AmbientValue {
+                name: "__aivi_pair_mapFirst".into(),
+            })
+        }
+        ("aivi.pair", "mapSecond") | ("aivi.pair", "mapSnd") => {
+            Some(ImportBindingMetadata::AmbientValue {
+                name: "__aivi_pair_mapSecond".into(),
+            })
+        }
+        ("aivi.pair", "mapBoth") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_pair_mapBoth".into(),
+        }),
+        ("aivi.pair", "fromPair") | ("aivi.pair", "toPair") => {
+            Some(ImportBindingMetadata::AmbientValue {
+                name: "__aivi_pair_fromPair".into(),
+            })
+        }
+        ("aivi.pair", "duplicate") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_pair_duplicate".into(),
         }),
         ("aivi.result", "withDefault") => Some(ImportBindingMetadata::AmbientValue {
             name: "__aivi_result_withDefault".into(),
