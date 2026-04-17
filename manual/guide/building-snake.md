@@ -8,6 +8,9 @@ Snake is still a real program — you can find it in `demos/snake.aivi` — and 
 language feature. We will build it up piece by piece and use it to show how types, functions,
 signals, sources, domains, pattern matching, and markup work together in a larger application.
 
+The live demo now renders the board with sprite assets from `demos/assets/`. This guide keeps the
+smaller text-oriented snippets in a few places so the core game logic stays easier to read.
+
 ## The game at a glance
 
 Our snake game has:

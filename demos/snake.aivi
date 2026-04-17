@@ -4,10 +4,6 @@ use aivi.nonEmpty (
     init as nelInit
 )
 
-use aivi.text (
-    join as textJoin
-)
-
 type Direction =
   | North
   | South
@@ -25,9 +21,38 @@ type Event =
 
 type Key = Key Text
 
-value boardW = 30
-value boardH = 20
+type AdjacentPairState = {
+    previous: Option Cell,
+    pairs: List (Cell, Cell)
+}
+
+type MiddleWindowState = {
+    previous: Option (Cell, Cell),
+    windows: List ((Cell, Cell), (Cell, Cell))
+}
+
+type MiddleAssetState = {
+    found: Option Text
+}
+
+value boardW = 15
+value boardH = 15
 value seed0 = 2463534242
+value tileSize = 20
+value assetRoot = "demos/assets"
+
+type Text -> Text
+func assetPath = name =>
+    "{assetRoot}/{name}"
+
+value emptyTileAsset = assetPath "empty.png"
+value foodTileAsset = assetPath "mouse.png"
+value noTextAsset : Option Text = None
+value noCellPair : Option (Cell, Cell) = None
+value noCell : Option Cell = None
+value emptyCellPairs : List (Cell, Cell) = []
+value noMiddleWindowPair : Option (Cell, Cell) = None
+value emptyMiddleWindows : List ((Cell, Cell), (Cell, Cell)) = []
 
 type Direction -> Direction
 func opposite = arg1 => arg1
@@ -94,6 +119,51 @@ func dirLabel = arg1 => arg1
  ||> East  -> "Right"
  ||> West  -> "Left"
 
+type Direction -> Text
+func dirAssetSlug = arg1 => arg1
+ ||> North -> "north"
+ ||> South -> "south"
+ ||> East  -> "east"
+ ||> West  -> "west"
+
+type Cell -> Cell -> (Int, Int)
+func delta = from to => (from, to)
+ ||> (Cell fromX fromY, Cell toX toY) -> (toX - fromX, toY - fromY)
+
+type Cell -> Cell -> Direction
+func directionFromTo = from to => delta from to
+ ||> (0, -1) -> North
+ ||> (0, 1)  -> South
+ ||> (1, 0)  -> East
+ ||> _       -> West
+
+type Direction -> Text
+func headAssetFor = dir =>
+    assetPath "head_{dirAssetSlug dir}.png"
+
+type Direction -> Text
+func tailAssetFor = dir =>
+    assetPath "tail_{dirAssetSlug dir}.png"
+
+type Direction -> Direction -> Text
+func middleAssetFor = first second => (first, second)
+ ||> (East, West)   -> assetPath "body_horizontal.png"
+ ||> (West, East)   -> assetPath "body_horizontal.png"
+ ||> (East, East)   -> assetPath "body_horizontal.png"
+ ||> (West, West)   -> assetPath "body_horizontal.png"
+ ||> (North, South) -> assetPath "body_vertical.png"
+ ||> (South, North) -> assetPath "body_vertical.png"
+ ||> (North, North) -> assetPath "body_vertical.png"
+ ||> (South, South) -> assetPath "body_vertical.png"
+ ||> (North, East)  -> assetPath "curve_ne.png"
+ ||> (East, North)  -> assetPath "curve_ne.png"
+ ||> (North, West)  -> assetPath "curve_nw.png"
+ ||> (West, North)  -> assetPath "curve_nw.png"
+ ||> (South, East)  -> assetPath "curve_se.png"
+ ||> (East, South)  -> assetPath "curve_se.png"
+ ||> (South, West)  -> assetPath "curve_sw.png"
+ ||> (West, South)  -> assetPath "curve_sw.png"
+
 value initialSnake = fromCells (cons (Cell 6 10) (cons (Cell 5 10) (singleton (Cell 4 10))))
 
 value initial = {
@@ -156,22 +226,81 @@ func resolveMoveStep = st h =>
         seed: nextSeed st.seed,
     }
 
-type List Cell -> Cell -> Cell -> Int -> Int -> Text
-func cellGlyph = body head food y x => (Cell x y == head, any (sameCell (Cell x y)) body, Cell x y == food)
- ||> (True, _, _)          -> "@"
- ||> (_, True, _)          -> "o"
- ||> (_, _, True)          -> "*"
- ||> (False, False, False) -> "·"
+type List Cell -> (List (Cell, Cell))
+func adjacentPairs = cells =>
+    (reduce adjacentPairStep { previous: noCell, pairs: emptyCellPairs } cells).pairs
 
-type List Cell -> Cell -> Cell -> Int -> Text
-func renderRowAt = body head food y => indices boardW
-  |> map (cellGlyph body head food y)
-  |> textJoin ""
+type List Cell -> (List ((Cell, Cell), (Cell, Cell)))
+func middleWindows = cells =>
+    (reduce middleWindowStep { previous: noMiddleWindowPair, windows: emptyMiddleWindows } (adjacentPairs cells)).windows
 
-type Snake -> Cell -> Text
-func renderBoard = snake food => indices boardH
-  |> map (renderRowAt snake.cells snake.head food)
-  |> textJoin "\n"
+type AdjacentPairState -> Cell -> AdjacentPairState
+func adjacentPairStep = state current => state.previous
+ ||> Some previous -> { previous: Some current, pairs: append state.pairs [(previous, current)] }
+ ||> None          -> { previous: Some current, pairs: state.pairs }
+
+type MiddleWindowState -> (Cell, Cell) -> MiddleWindowState
+func middleWindowStep = state pair => state.previous
+ ||> Some previous -> { previous: Some pair, windows: append state.windows [(previous, pair)] }
+ ||> None          -> { previous: Some pair, windows: state.windows }
+
+type Text -> (Option Text)
+func someTextAsset = asset =>
+    Some asset
+
+type (Option Text) -> (Option Text) -> (Option Text)
+func preferAsset = first second => first
+ ||> Some asset -> someTextAsset asset
+ ||> None       -> second
+
+type Cell -> Cell -> Text -> (Option Text)
+func assetWhen = target cell asset => sameCell target cell
+ ||> True  -> someTextAsset asset
+ ||> False -> noTextAsset
+
+type Cell -> ((Cell, Cell), (Cell, Cell)) -> (Option Text)
+func middleAssetAtTarget = target arg1 => arg1
+ ||> ((previous, current), (_, next)) -> assetWhen target current (middleAssetFor (directionFromTo current previous) (directionFromTo current next))
+
+type Cell -> MiddleAssetState -> ((Cell, Cell), (Cell, Cell)) -> MiddleAssetState
+func middleAssetStep = target state window => state.found
+ ||> Some asset -> { found: someTextAsset asset }
+ ||> None       -> { found: middleAssetAtTarget target window }
+
+type Cell -> Snake -> (Option Text)
+func middleAssetAt = target snake =>
+    (reduce (middleAssetStep target) { found: noTextAsset } (middleWindows snake.cells)).found
+
+type Option (Cell, Cell) -> (Cell, Cell) -> (Option (Cell, Cell))
+func keepLastCellPair = ignored pair =>
+    Some pair
+
+type List (Cell, Cell) -> (Option (Cell, Cell))
+func lastCellPair = pairs =>
+    reduce keepLastCellPair noCellPair pairs
+
+type Cell -> (Cell, Cell) -> (Option Text)
+func tailAssetAtPair = target arg1 => arg1
+ ||> (previous, tail) -> assetWhen target tail (tailAssetFor (directionFromTo previous tail))
+
+type Cell -> Snake -> (Option Text)
+func tailAssetAt = target snake => lastCellPair (adjacentPairs snake.cells)
+ ||> Some pair -> tailAssetAtPair target pair
+ ||> None      -> noTextAsset
+
+type Cell -> Direction -> Snake -> (Option Text)
+func snakeAssetAt = target dir snake =>
+    preferAsset (assetWhen target snake.head (headAssetFor dir)) (preferAsset (middleAssetAt target snake) (tailAssetAt target snake))
+
+type Cell -> Cell -> Text
+func foodOrEmptyAsset = target food => target == food
+ ||> True  -> foodTileAsset
+ ||> False -> emptyTileAsset
+
+type Direction -> Snake -> Cell -> Cell -> Text
+func tileAssetFor = dir snake food target => snakeAssetAt target dir snake
+ ||> Some asset -> asset
+ ||> None       -> foodOrEmptyAsset target food
 
 type Status -> Bool
 func isGameOver = arg1 => arg1
@@ -191,7 +320,7 @@ type Int -> Text
 func finalScoreLineFor = arg1 =>
     "Final score: {arg1}"
 
-@source timer.every 120ms with {
+@source timer.every 300ms with {
     immediate: False,
     coalesce: True
 }
@@ -222,11 +351,6 @@ from state = {
     status: .status
 }
 
-signal boardText : Signal Text =
- &|> snake
- &|> food
-  |> renderBoard
-
 from dir = {
     dirLine: dirLabel
 }
@@ -242,12 +366,22 @@ from score = {
 }
 
 value main =
-    <Window title="AIVI Snake">
-        <Box orientation="vertical" spacing={8}>
+    <Window title="AIVI Snake" defaultWidth={980} defaultHeight={760}>
+        <Box orientation="vertical" spacing={8} marginTop={12} marginBottom={12} marginStart={12} marginEnd={12}>
             <Label text={dirLine} />
             <Label text={scoreLine} />
             <Label text={statusLine} />
-            <Label text={boardText} monospace />
+            <ScrolledWindow hexpand={True} vexpand={True}>
+                <Box orientation="vertical" spacing={0}>
+                    <each of={indices boardH} as={y} key={y}>
+                        <Box orientation="horizontal" spacing={0}>
+                            <each of={indices boardW} as={x} key={y * boardW + x}>
+                                <Picture filename={tileAssetFor dir snake food (Cell x y)} contentFit="contain" canShrink={True} widthRequest={tileSize} heightRequest={tileSize} />
+                            </each>
+                        </Box>
+                    </each>
+                </Box>
+            </ScrolledWindow>
             <show when={gameOver}>
                 <Label text={finalScoreLine} />
             </show>
