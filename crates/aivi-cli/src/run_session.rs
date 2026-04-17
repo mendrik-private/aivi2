@@ -1641,70 +1641,6 @@ mod tests {
         predicate()
     }
 
-    fn pump_run_session_step(harness: &super::RunSessionHarness, context: &gtk::glib::MainContext) {
-        let control = harness.control();
-        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let error = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
-        let done = finished.clone();
-        let failure = error.clone();
-        control
-            .request_on_main_context(move |access| {
-                if let Err(err) = access.process_pending_work() {
-                    *failure.lock().expect("run-session failure lock") = Some(err);
-                }
-                done.store(true, std::sync::atomic::Ordering::SeqCst);
-            })
-            .expect("run-session test should queue a main-context work step");
-        let deadline = Instant::now() + Duration::from_millis(50);
-        while Instant::now() < deadline && !finished.load(std::sync::atomic::Ordering::SeqCst) {
-            while context.pending() {
-                context.iteration(false);
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        while context.pending() {
-            context.iteration(false);
-        }
-        assert!(
-            finished.load(std::sync::atomic::Ordering::SeqCst),
-            "run-session step should complete promptly"
-        );
-        if let Some(err) = error.lock().expect("run-session failure lock").take() {
-            panic!("run-session step should process cleanly: {err}");
-        }
-    }
-
-    fn pump_run_session_context(
-        harness: &super::RunSessionHarness,
-        context: &gtk::glib::MainContext,
-        duration: Duration,
-    ) {
-        let deadline = Instant::now() + duration;
-        while Instant::now() < deadline {
-            pump_run_session_step(harness, context);
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        pump_run_session_step(harness, context);
-    }
-
-    fn pump_run_session_until(
-        harness: &super::RunSessionHarness,
-        context: &gtk::glib::MainContext,
-        timeout: Duration,
-        mut predicate: impl FnMut() -> bool,
-    ) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            pump_run_session_step(harness, context);
-            if predicate() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        pump_run_session_step(harness, context);
-        predicate()
-    }
-
     fn required_signal_item(artifact: &crate::RunArtifact, name: &str) -> aivi_backend::ItemId {
         artifact
             .required_signal_globals
@@ -1752,51 +1688,163 @@ mod tests {
         })
     }
 
-    fn board_text_for(
+    fn named_signal_value_for(harness: &super::RunSessionHarness, name: &str) -> RuntimeValue {
+        harness.with_access(|access| {
+            let driver = access.driver();
+            let graph = driver.signal_graph();
+            let Some((handle, _)) = graph.signals().find(|(_, spec)| spec.name() == name) else {
+                panic!("expected live runtime signal `{name}`");
+            };
+            driver
+                .current_signal_value(handle)
+                .expect("signal value should be readable")
+                .unwrap_or_else(|| panic!("signal `{name}` should have a current value"))
+                .into_runtime()
+        })
+    }
+
+    fn runtime_signal_payload(value: &RuntimeValue) -> &RuntimeValue {
+        match value {
+            RuntimeValue::Signal(inner) => inner.as_ref(),
+            other => other,
+        }
+    }
+
+    fn runtime_record_fields<'a>(
+        value: &'a RuntimeValue,
+        context: &str,
+    ) -> &'a [aivi_backend::RuntimeRecordField] {
+        match runtime_signal_payload(value) {
+            RuntimeValue::Record(fields) => fields,
+            other => panic!("expected {context} to be a record, found {other:?}"),
+        }
+    }
+
+    fn runtime_record_field<'a>(
+        fields: &'a [aivi_backend::RuntimeRecordField],
+        label: &str,
+        context: &str,
+    ) -> &'a RuntimeValue {
+        fields
+            .iter()
+            .find_map(|field| (field.label.as_ref() == label).then_some(&field.value))
+            .unwrap_or_else(|| panic!("expected {context} to include field `{label}`"))
+    }
+
+    fn runtime_int(value: &RuntimeValue, context: &str) -> i64 {
+        match runtime_signal_payload(value) {
+            RuntimeValue::Int(value) => *value,
+            other => panic!("expected {context} to be an Int, found {other:?}"),
+        }
+    }
+
+    fn runtime_text(value: &RuntimeValue, context: &str) -> String {
+        match runtime_signal_payload(value) {
+            RuntimeValue::Text(value) => value.to_string(),
+            other => panic!("expected {context} to be Text, found {other:?}"),
+        }
+    }
+
+    fn runtime_sum_variant(value: &RuntimeValue, context: &str) -> String {
+        match runtime_signal_payload(value) {
+            RuntimeValue::Sum(value) => value.variant_name.to_string(),
+            other => panic!("expected {context} to be a sum value, found {other:?}"),
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct SnakeRenderTile {
+        column: i64,
+        row: i64,
+        asset: String,
+    }
+
+    fn board_tiles_for(
         harness: &super::RunSessionHarness,
         board_item: aivi_backend::ItemId,
-    ) -> String {
-        text_signal_for(harness, board_item)
+    ) -> Vec<SnakeRenderTile> {
+        harness.with_access(|access| {
+            let globals = access
+                .driver()
+                .current_signal_globals()
+                .expect("signal globals should be readable");
+            let value = globals
+                .get(&board_item)
+                .expect("required board tile signal should exist")
+                .as_runtime();
+            let RuntimeValue::List(items) = runtime_signal_payload(value) else {
+                panic!("expected board tile signal to be a List, found {value:?}");
+            };
+            items.iter()
+                .map(|tile| {
+                    let fields = runtime_record_fields(tile, "snake render tile");
+                    SnakeRenderTile {
+                        column: runtime_int(
+                            runtime_record_field(fields, "column", "snake render tile"),
+                            "snake render tile column",
+                        ),
+                        row: runtime_int(
+                            runtime_record_field(fields, "row", "snake render tile"),
+                            "snake render tile row",
+                        ),
+                        asset: runtime_text(
+                            runtime_record_field(fields, "asset", "snake render tile"),
+                            "snake render tile asset",
+                        ),
+                    }
+                })
+                .collect()
+        })
     }
 
-    fn head_x(board_text: &str) -> usize {
-        let row = board_text
-            .lines()
-            .find(|row| row.contains('@'))
-            .expect("board text should contain a snake head");
-        row.chars()
-            .position(|ch| ch == '@')
-            .expect("board row should expose the snake head column")
+    fn head_tile(tiles: &[SnakeRenderTile]) -> &SnakeRenderTile {
+        tiles.iter()
+            .find(|tile| {
+                Path::new(&tile.asset)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("head_"))
+            })
+            .expect("snake tiles should include a head sprite")
     }
 
-    fn head_y(board_text: &str) -> usize {
-        board_text
-            .lines()
-            .enumerate()
-            .find_map(|(index, row)| row.contains('@').then_some(index))
-            .expect("board text should contain a snake head row")
+    fn snake_direction_for(harness: &super::RunSessionHarness) -> String {
+        let state = named_signal_value_for(harness, "state");
+        let fields = runtime_record_fields(&state, "snake state");
+        runtime_sum_variant(
+            runtime_record_field(fields, "dir", "snake state"),
+            "snake direction",
+        )
     }
 
-    fn collect_label_texts(widget: &gtk::Widget, labels: &mut Vec<String>) {
-        if let Ok(label) = widget.clone().downcast::<gtk::Label>() {
-            labels.push(label.label().to_string());
+    fn snake_status_for(harness: &super::RunSessionHarness) -> String {
+        let state = named_signal_value_for(harness, "state");
+        let fields = runtime_record_fields(&state, "snake state");
+        runtime_sum_variant(
+            runtime_record_field(fields, "status", "snake state"),
+            "snake status",
+        )
+    }
+
+    fn collect_picture_files(widget: &gtk::Widget, files: &mut Vec<String>) {
+        if let Ok(picture) = widget.clone().downcast::<gtk::Picture>()
+            && let Some(path) = picture.file().and_then(|file| file.path())
+        {
+            files.push(path.to_string_lossy().into_owned());
         }
         let mut child = widget.first_child();
         while let Some(current) = child {
-            collect_label_texts(&current, labels);
+            collect_picture_files(&current, files);
             child = current.next_sibling();
         }
     }
 
-    fn gtk_board_text_for(harness: &super::RunSessionHarness) -> String {
-        let mut labels = Vec::new();
+    fn gtk_board_picture_files_for(harness: &super::RunSessionHarness) -> Vec<String> {
+        let mut files = Vec::new();
         for window in harness.root_windows() {
-            collect_label_texts(&window.clone().upcast::<gtk::Widget>(), &mut labels);
+            collect_picture_files(&window.clone().upcast::<gtk::Widget>(), &mut files);
         }
-        labels
-            .into_iter()
-            .find(|text| text.contains('@') && text.contains('\n'))
-            .expect("snake window should expose a board label")
+        files
     }
 
     fn find_button_by_label(widget: &gtk::Widget, label: &str) -> Option<gtk::Button> {
@@ -2058,30 +2106,25 @@ export main
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
     fn timer_sources_stay_paused_until_windows_present() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let board_item = artifact
-            .required_signal_globals
-            .iter()
-            .find_map(|(item, name)| (name.as_ref() == "boardText").then_some(*item))
-            .expect("snake demo should expose boardText for hydration");
+        let board_item = required_signal_item(&artifact, "boardTiles");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a paused run session");
         let context = harness.control().context();
-        let initial_board = board_text_for(&harness, board_item);
-        let initial_head_x = head_x(&initial_board);
+        let initial_board = board_tiles_for(&harness, board_item);
+        let initial_head = head_tile(&initial_board);
         let initial_hydration = harness.with_access(|access| access.latest_applied_hydration());
         assert_eq!(
-            initial_head_x, 6,
+            initial_head.column, 6,
             "shifted snake demo should start with runway"
         );
 
         pump_context(&context, Duration::from_millis(250));
         assert_eq!(
-            board_text_for(&harness, board_item),
+            board_tiles_for(&harness, board_item),
             initial_board,
             "timer-backed board should stay on the initial frame before windows are presented"
         );
@@ -2094,35 +2137,30 @@ export main
         harness
             .present_root_windows()
             .expect("presenting the run-session window should release startup timers");
-        pump_context(&context, Duration::from_millis(650));
-        let advanced_board = board_text_for(&harness, board_item);
         assert!(
-            head_x(&advanced_board) > initial_head_x,
+            pump_until(&context, Duration::from_secs(1), || {
+                head_tile(&board_tiles_for(&harness, board_item)).column > initial_head.column
+            }),
             "board should start advancing after presentation releases the startup-held timer source"
         );
+        let advanced_board = board_tiles_for(&harness, board_item);
         assert!(
-            harness.with_access(|access| access.latest_applied_hydration()) > initial_hydration,
-            "hydration should advance after timer release"
+            head_tile(&advanced_board).column > initial_head.column,
+            "board should keep advancing after presentation releases the startup-held timer source"
         );
-
         harness.shutdown();
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
     fn main_loop_run_advances_timer_driven_board_after_presentation() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let board_item = artifact
-            .required_signal_globals
-            .iter()
-            .find_map(|(item, name)| (name.as_ref() == "boardText").then_some(*item))
-            .expect("snake demo should expose boardText for hydration");
+        let board_item = required_signal_item(&artifact, "boardTiles");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a run session");
-        let initial_board = board_text_for(&harness, board_item);
-        let initial_head_x = head_x(&initial_board);
+        let initial_board = board_tiles_for(&harness, board_item);
+        let initial_head = head_tile(&initial_board);
         harness
             .present_root_windows()
             .expect("presenting the run-session window should release startup timers");
@@ -2132,9 +2170,9 @@ export main
             quit_loop.quit();
         });
         main_loop.run();
-        let advanced_board = board_text_for(&harness, board_item);
+        let advanced_board = board_tiles_for(&harness, board_item);
         assert!(
-            head_x(&advanced_board) > initial_head_x,
+            head_tile(&advanced_board).column > initial_head.column,
             "the plain run-session main loop should advance the snake after presentation"
         );
 
@@ -2142,14 +2180,13 @@ export main
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
-    fn main_loop_run_hydrates_board_label_after_timer_ticks() {
+    fn main_loop_run_hydrates_board_pictures_after_timer_ticks() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a run session");
-        let initial_board = gtk_board_text_for(&harness);
+        let initial_files = gtk_board_picture_files_for(&harness);
         harness
             .present_root_windows()
             .expect("presenting the run-session window should release startup timers");
@@ -2159,26 +2196,25 @@ export main
             quit_loop.quit();
         });
         main_loop.run();
-        let advanced_board = gtk_board_text_for(&harness);
+        let advanced_files = gtk_board_picture_files_for(&harness);
         assert_ne!(
-            advanced_board, initial_board,
-            "plain aivi run should hydrate the GTK board label after timer ticks"
+            advanced_files, initial_files,
+            "plain aivi run should hydrate the GTK picture grid after timer ticks"
         );
 
         harness.shutdown();
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
     fn harness_run_main_loop_advances_timer_driven_board_without_borrow_panics() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let board_item = required_signal_item(&artifact, "boardText");
+        let board_item = required_signal_item(&artifact, "boardTiles");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a run session");
-        let initial_board = board_text_for(&harness, board_item);
-        let initial_head_x = head_x(&initial_board);
+        let initial_board = board_tiles_for(&harness, board_item);
+        let initial_head = head_tile(&initial_board);
         harness
             .present_root_windows()
             .expect("presenting the run-session window should release startup timers");
@@ -2191,9 +2227,9 @@ export main
         harness
             .run_main_loop()
             .expect("plain aivi run should not panic while the session updates itself");
-        let advanced_board = board_text_for(&harness, board_item);
+        let advanced_board = board_tiles_for(&harness, board_item);
         assert!(
-            head_x(&advanced_board) > initial_head_x,
+            head_tile(&advanced_board).column > initial_head.column,
             "the real run_main_loop path should keep advancing the snake while the GTK main loop runs"
         );
 
@@ -2201,18 +2237,16 @@ export main
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
     fn process_pending_work_applies_queued_window_key_events_immediately() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let direction_item = required_signal_item(&artifact, "dirLine");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a run session");
         harness
             .present_root_windows()
             .expect("presenting the run-session window should release startup timers");
-        assert_eq!(text_signal_for(&harness, direction_item), "Right");
+        assert_eq!(snake_direction_for(&harness), "East");
 
         harness.with_access(|access| {
             access
@@ -2224,8 +2258,8 @@ export main
                 .expect("queued window key should process without waiting for another turn");
         });
         assert_eq!(
-            text_signal_for(&harness, direction_item),
-            "Up",
+            snake_direction_for(&harness),
+            "North",
             "queued window key events should update the direction signal in the same run-session work cycle"
         );
 
@@ -2852,7 +2886,6 @@ export main
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let direction_item = required_signal_item(&artifact, "dirLine");
         let shared = RunHydrationStaticState {
             view_name: artifact.view_name.clone(),
             patterns: artifact.patterns.clone(),
@@ -2897,7 +2930,7 @@ export main
         driver.dispatch_window_key_event("ArrowUp", false);
         assert!(
             pump_until(&context, Duration::from_millis(250), || {
-                text_signal_for(&harness, direction_item) == "Up"
+                snake_direction_for(&harness) == "North"
             }),
             "dispatching ArrowUp should update the snake direction before profiling hydration"
         );
@@ -2928,13 +2961,10 @@ export main
     }
 
     #[gtk::test]
-    #[ignore = "known pre-existing failure: recurrence signal kernel missing in snake demo backend"]
     fn space_restarts_snake_after_game_over() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
-        let board_item = required_signal_item(&artifact, "boardText");
-        let status_item = required_signal_item(&artifact, "statusLine");
-        let direction_item = required_signal_item(&artifact, "dirLine");
+        let board_item = required_signal_item(&artifact, "boardTiles");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("snake demo should start a run session");
@@ -2947,35 +2977,35 @@ export main
         driver.dispatch_window_key_event("ArrowUp", false);
         assert!(
             pump_until(&context, Duration::from_secs(1), || {
-                text_signal_for(&harness, direction_item) == "Up"
+                snake_direction_for(&harness) == "North"
             }),
             "dispatching ArrowUp should update the snake direction before waiting for a collision"
         );
-        pump_context(&context, Duration::from_secs(3));
-        assert_eq!(
-            text_signal_for(&harness, status_item),
-            "Game Over",
+        assert!(
+            pump_until(&context, Duration::from_secs(5), || {
+                snake_status_for(&harness) == "GameOver"
+            }),
             "steering upward should eventually collide with the wall and end the game"
         );
-        let game_over_board = board_text_for(&harness, board_item);
-        assert_eq!(text_signal_for(&harness, direction_item), "Up");
+        let game_over_board = board_tiles_for(&harness, board_item);
+        assert_eq!(snake_direction_for(&harness), "North");
 
         driver.dispatch_window_key_event("Space", false);
         assert!(
             pump_until(&context, Duration::from_millis(100), || {
-                text_signal_for(&harness, status_item) == "Running"
-                    && text_signal_for(&harness, direction_item) == "Right"
+                snake_status_for(&harness) == "Running" && snake_direction_for(&harness) == "East"
             }),
             "pressing Space should immediately reset the event-driven snake"
         );
-        let restarted_board = board_text_for(&harness, board_item);
+        let restarted_board = board_tiles_for(&harness, board_item);
+        let restarted_head = head_tile(&restarted_board);
         assert_eq!(
-            head_y(&restarted_board),
+            restarted_head.row,
             10,
             "restart should return the snake to its starting row"
         );
         assert!(
-            matches!(head_x(&restarted_board), 6 | 7),
+            matches!(restarted_head.column, 6 | 7),
             "restart should return the snake to its starting lane before or just after the first timer step"
         );
         assert_ne!(

@@ -42,6 +42,12 @@ impl Drop for TempDir {
     }
 }
 
+fn repo_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
+}
+
 #[test]
 fn build_writes_a_self_contained_runnable_bundle() {
     let workspace = TempDir::new("build-static-workspace");
@@ -208,4 +214,37 @@ export (Greeting)
         !bundle_path.join("app/shared/types.aivi").exists(),
         "source-free bundles should not copy imported workspace files"
     );
+}
+
+#[test]
+fn build_accepts_snake_and_reversi_demos() {
+    let output_root = TempDir::new("build-demo-output");
+    for demo in ["snake", "reversi"] {
+        let bundle_path = output_root.path().join(demo);
+        let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+            .arg("build")
+            .arg(repo_path(&format!("demos/{demo}.aivi")))
+            .arg("-o")
+            .arg(&bundle_path)
+            .output()
+            .expect("demo build command should run");
+
+        assert!(
+            output.status.success(),
+            "expected {demo} build to succeed, stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            bundle_path.join("run").is_file(),
+            "expected {demo} bundle launcher to exist"
+        );
+        assert!(
+            bundle_path.join("run-artifact.json").is_file(),
+            "expected {demo} run artifact to exist"
+        );
+        assert!(
+            bundle_path.join("payloads").is_dir(),
+            "expected {demo} payload directory to exist"
+        );
+    }
 }

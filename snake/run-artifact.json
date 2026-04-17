@@ -1,0 +1,5677 @@
+{
+  "format": "aivi.run-artifact",
+  "version": 2,
+  "view_name": "main",
+  "patterns": [],
+  "bridge": {
+    "assembly": {
+      "graph": {
+        "owners": [
+          {
+            "name": "widget:markup:5",
+            "parent": null,
+            "children": [
+              1
+            ],
+            "signals": [
+              0,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "widget:markup:4",
+            "parent": 0,
+            "children": [
+              2
+            ],
+            "signals": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          {
+            "name": "each:control:0",
+            "parent": 1,
+            "children": [
+              3
+            ],
+            "signals": [
+              9,
+              10
+            ]
+          },
+          {
+            "name": "widget:markup:2",
+            "parent": 2,
+            "children": [
+              4
+            ],
+            "signals": [
+              11,
+              12
+            ]
+          },
+          {
+            "name": "group:markup:1",
+            "parent": 3,
+            "children": [
+              5
+            ],
+            "signals": []
+          },
+          {
+            "name": "widget:markup:0",
+            "parent": 4,
+            "children": [],
+            "signals": [
+              13,
+              14,
+              15,
+              16
+            ]
+          }
+        ],
+        "signals": [
+          {
+            "name": "markup:5#setter:defaultWidth@1",
+            "owner": 0,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:5#setter:defaultHeight@2",
+            "owner": 0,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:5#setter:resizable@3",
+            "owner": 0,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:rowSpacing@0",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:columnSpacing@1",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:rowHomogeneous@2",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:columnHomogeneous@3",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:widthRequest@4",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:4#setter:heightRequest@5",
+            "owner": 1,
+            "kind": "Input"
+          },
+          {
+            "name": "control:0#control:collection",
+            "owner": 2,
+            "kind": "Input"
+          },
+          {
+            "name": "control:0#control:key",
+            "owner": 2,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:2#setter:column@0",
+            "owner": 3,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:2#setter:row@1",
+            "owner": 3,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:0#setter:filename@0",
+            "owner": 5,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:0#setter:canShrink@2",
+            "owner": 5,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:0#setter:widthRequest@3",
+            "owner": 5,
+            "kind": "Input"
+          },
+          {
+            "name": "markup:0#setter:heightRequest@4",
+            "owner": 5,
+            "kind": "Input"
+          }
+        ],
+        "batches": [],
+        "dependents": [
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          []
+        ],
+        "reactive_clauses": []
+      },
+      "root": 5,
+      "plan_to_owner": [
+        5,
+        4,
+        3,
+        2,
+        1,
+        0
+      ],
+      "owner_to_plan": [
+        5,
+        4,
+        3,
+        2,
+        1,
+        0
+      ],
+      "nodes": [
+        {
+          "plan": 0,
+          "stable_id": {
+            "Markup": 0
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13671,
+              "end": 13791
+            }
+          },
+          "owner": 5,
+          "parent": {
+            "plan": 1,
+            "owner": 4
+          },
+          "kind": {
+            "Widget": {
+              "widget": {
+                "segments": {
+                  "first": {
+                    "text": "Picture",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13672,
+                        "end": 13679
+                      }
+                    }
+                  },
+                  "rest": []
+                },
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13672,
+                    "end": 13679
+                  }
+                }
+              },
+              "properties": [
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 0
+                      },
+                      "index": 0,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13680,
+                          "end": 13700
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "filename",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13680,
+                          "end": 13688
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 779
+                    },
+                    "owner": 5,
+                    "input": 13,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Static": {
+                    "site": {
+                      "owner": {
+                        "Markup": 0
+                      },
+                      "index": 1,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13702,
+                          "end": 13722
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "contentFit",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13702,
+                          "end": 13712
+                        }
+                      }
+                    },
+                    "value": {
+                      "Text": {
+                        "segments": [
+                          {
+                            "Text": {
+                              "raw": "contain",
+                              "span": {
+                                "file": 0,
+                                "span": {
+                                  "start": 13714,
+                                  "end": 13721
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 0
+                      },
+                      "index": 2,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13723,
+                          "end": 13738
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "canShrink",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13723,
+                          "end": 13732
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 780
+                    },
+                    "owner": 5,
+                    "input": 14,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 0
+                      },
+                      "index": 3,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13740,
+                          "end": 13762
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "widthRequest",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13740,
+                          "end": 13752
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 781
+                    },
+                    "owner": 5,
+                    "input": 15,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 0
+                      },
+                      "index": 4,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13764,
+                          "end": 13787
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "heightRequest",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13764,
+                          "end": 13777
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 782
+                    },
+                    "owner": 5,
+                    "input": 16,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                }
+              ],
+              "event_hooks": [],
+              "children": []
+            }
+          }
+        },
+        {
+          "plan": 1,
+          "stable_id": {
+            "Markup": 1
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13627,
+              "end": 13832
+            }
+          },
+          "owner": 4,
+          "parent": {
+            "plan": 2,
+            "owner": 3
+          },
+          "kind": {
+            "Group": {
+              "widget": {
+                "segments": {
+                  "first": {
+                    "text": "GridChild",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13628,
+                        "end": 13637
+                      }
+                    }
+                  },
+                  "rest": []
+                },
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13628,
+                    "end": 13637
+                  }
+                }
+              },
+              "group": {
+                "text": "content",
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13638,
+                    "end": 13645
+                  }
+                }
+              },
+              "children": [
+                {
+                  "Append": {
+                    "plan": 0,
+                    "owner": 5
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "plan": 2,
+          "stable_id": {
+            "Markup": 2
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13559,
+              "end": 13861
+            }
+          },
+          "owner": 3,
+          "parent": {
+            "plan": 3,
+            "owner": 2
+          },
+          "kind": {
+            "Widget": {
+              "widget": {
+                "segments": {
+                  "first": {
+                    "text": "GridChild",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13560,
+                        "end": 13569
+                      }
+                    }
+                  },
+                  "rest": []
+                },
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13560,
+                    "end": 13569
+                  }
+                }
+              },
+              "properties": [
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 2
+                      },
+                      "index": 0,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13570,
+                          "end": 13589
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "column",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13570,
+                          "end": 13576
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 775
+                    },
+                    "owner": 3,
+                    "input": 11,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 2
+                      },
+                      "index": 1,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13591,
+                          "end": 13604
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "row",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13591,
+                          "end": 13594
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 777
+                    },
+                    "owner": 3,
+                    "input": 12,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                }
+              ],
+              "event_hooks": [],
+              "children": [
+                {
+                  "Append": {
+                    "plan": 1,
+                    "owner": 4
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "plan": 3,
+          "stable_id": {
+            "Control": 0
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13496,
+              "end": 13881
+            }
+          },
+          "owner": 2,
+          "parent": {
+            "plan": 4,
+            "owner": 1
+          },
+          "kind": {
+            "Each": {
+              "collection": {
+                "owner": 2,
+                "expr": 783,
+                "input": 9
+              },
+              "key_input": {
+                "owner": 2,
+                "expr": 785,
+                "input": 10
+              },
+              "binding": 156,
+              "child_policy": {
+                "Keyed": {
+                  "key": 785,
+                  "updates": "Localized"
+                }
+              },
+              "item_children": [
+                {
+                  "Append": {
+                    "plan": 2,
+                    "owner": 3
+                  }
+                }
+              ],
+              "empty_branch": null
+            }
+          }
+        },
+        {
+          "plan": 4,
+          "stable_id": {
+            "Markup": 4
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13336,
+              "end": 13897
+            }
+          },
+          "owner": 1,
+          "parent": {
+            "plan": 5,
+            "owner": 0
+          },
+          "kind": {
+            "Widget": {
+              "widget": {
+                "segments": {
+                  "first": {
+                    "text": "Grid",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13337,
+                        "end": 13341
+                      }
+                    }
+                  },
+                  "rest": []
+                },
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13337,
+                    "end": 13341
+                  }
+                }
+              },
+              "properties": [
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 0,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13342,
+                          "end": 13355
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "rowSpacing",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13342,
+                          "end": 13352
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 768
+                    },
+                    "owner": 1,
+                    "input": 3,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 1,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13357,
+                          "end": 13373
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "columnSpacing",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13357,
+                          "end": 13370
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 769
+                    },
+                    "owner": 1,
+                    "input": 4,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 2,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13375,
+                          "end": 13395
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "rowHomogeneous",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13375,
+                          "end": 13389
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 770
+                    },
+                    "owner": 1,
+                    "input": 5,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 3,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13397,
+                          "end": 13420
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "columnHomogeneous",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13397,
+                          "end": 13414
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 771
+                    },
+                    "owner": 1,
+                    "input": 6,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 4,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13422,
+                          "end": 13450
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "widthRequest",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13422,
+                          "end": 13434
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 772
+                    },
+                    "owner": 1,
+                    "input": 7,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 4
+                      },
+                      "index": 5,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13452,
+                          "end": 13481
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "heightRequest",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13452,
+                          "end": 13465
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 773
+                    },
+                    "owner": 1,
+                    "input": 8,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                }
+              ],
+              "event_hooks": [],
+              "children": [
+                {
+                  "Append": {
+                    "plan": 3,
+                    "owner": 2
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "plan": 5,
+          "stable_id": {
+            "Markup": 5
+          },
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 13221,
+              "end": 13911
+            }
+          },
+          "owner": 0,
+          "parent": null,
+          "kind": {
+            "Widget": {
+              "widget": {
+                "segments": {
+                  "first": {
+                    "text": "Window",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13222,
+                        "end": 13228
+                      }
+                    }
+                  },
+                  "rest": []
+                },
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 13222,
+                    "end": 13228
+                  }
+                }
+              },
+              "properties": [
+                {
+                  "Static": {
+                    "site": {
+                      "owner": {
+                        "Markup": 5
+                      },
+                      "index": 0,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13229,
+                          "end": 13247
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "title",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13229,
+                          "end": 13234
+                        }
+                      }
+                    },
+                    "value": {
+                      "Text": {
+                        "segments": [
+                          {
+                            "Text": {
+                              "raw": "AIVI Snake",
+                              "span": {
+                                "file": 0,
+                                "span": {
+                                  "start": 13236,
+                                  "end": 13246
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 5
+                      },
+                      "index": 1,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13248,
+                          "end": 13276
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "defaultWidth",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13248,
+                          "end": 13260
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 765
+                    },
+                    "owner": 0,
+                    "input": 0,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 5
+                      },
+                      "index": 2,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13278,
+                          "end": 13307
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "defaultHeight",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13278,
+                          "end": 13291
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 766
+                    },
+                    "owner": 0,
+                    "input": 1,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                },
+                {
+                  "Setter": {
+                    "site": {
+                      "owner": {
+                        "Markup": 5
+                      },
+                      "index": 3,
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13309,
+                          "end": 13325
+                        }
+                      }
+                    },
+                    "name": {
+                      "text": "resizable",
+                      "span": {
+                        "file": 0,
+                        "span": {
+                          "start": 13309,
+                          "end": 13318
+                        }
+                      }
+                    },
+                    "source": {
+                      "Expr": 767
+                    },
+                    "owner": 0,
+                    "input": 2,
+                    "update": "DirectSetter",
+                    "teardown": "CancelSubscription"
+                  }
+                }
+              ],
+              "event_hooks": [],
+              "children": [
+                {
+                  "Append": {
+                    "plan": 4,
+                    "owner": 1
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "root": {
+      "plan": 5,
+      "owner": 0
+    },
+    "nodes": [
+      {
+        "plan": 0,
+        "stable_id": {
+          "Markup": 0
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13671,
+            "end": 13791
+          }
+        },
+        "owner": 5,
+        "parent": {
+          "plan": 1,
+          "owner": 4
+        },
+        "kind": {
+          "Widget": {
+            "widget": {
+              "segments": {
+                "first": {
+                  "text": "Picture",
+                  "span": {
+                    "file": 0,
+                    "span": {
+                      "start": 13672,
+                      "end": 13679
+                    }
+                  }
+                },
+                "rest": []
+              },
+              "span": {
+                "file": 0,
+                "span": {
+                  "start": 13672,
+                  "end": 13679
+                }
+              }
+            },
+            "properties": [
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 0
+                    },
+                    "index": 0,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13680,
+                        "end": 13700
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "filename",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13680,
+                        "end": 13688
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 779
+                  },
+                  "owner": 5,
+                  "input": 13,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Static": {
+                  "site": {
+                    "owner": {
+                      "Markup": 0
+                    },
+                    "index": 1,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13702,
+                        "end": 13722
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "contentFit",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13702,
+                        "end": 13712
+                      }
+                    }
+                  },
+                  "value": {
+                    "Text": {
+                      "segments": [
+                        {
+                          "Text": {
+                            "raw": "contain",
+                            "span": {
+                              "file": 0,
+                              "span": {
+                                "start": 13714,
+                                "end": 13721
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 0
+                    },
+                    "index": 2,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13723,
+                        "end": 13738
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "canShrink",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13723,
+                        "end": 13732
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 780
+                  },
+                  "owner": 5,
+                  "input": 14,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 0
+                    },
+                    "index": 3,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13740,
+                        "end": 13762
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "widthRequest",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13740,
+                        "end": 13752
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 781
+                  },
+                  "owner": 5,
+                  "input": 15,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 0
+                    },
+                    "index": 4,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13764,
+                        "end": 13787
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "heightRequest",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13764,
+                        "end": 13777
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 782
+                  },
+                  "owner": 5,
+                  "input": 16,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              }
+            ],
+            "event_hooks": [],
+            "default_group_descriptor": null,
+            "default_children": {
+              "owner": {
+                "plan": 0,
+                "owner": 5
+              },
+              "kind": "WidgetDefault",
+              "roots": []
+            }
+          }
+        }
+      },
+      {
+        "plan": 1,
+        "stable_id": {
+          "Markup": 1
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13627,
+            "end": 13832
+          }
+        },
+        "owner": 4,
+        "parent": {
+          "plan": 2,
+          "owner": 3
+        },
+        "kind": {
+          "Group": {
+            "widget": {
+              "segments": {
+                "first": {
+                  "text": "GridChild",
+                  "span": {
+                    "file": 0,
+                    "span": {
+                      "start": 13628,
+                      "end": 13637
+                    }
+                  }
+                },
+                "rest": []
+              },
+              "span": {
+                "file": 0,
+                "span": {
+                  "start": 13628,
+                  "end": 13637
+                }
+              }
+            },
+            "descriptor": "content",
+            "body": {
+              "owner": {
+                "plan": 1,
+                "owner": 4
+              },
+              "kind": "WidgetNamed",
+              "roots": [
+                {
+                  "plan": 0,
+                  "owner": 5
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "plan": 2,
+        "stable_id": {
+          "Markup": 2
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13559,
+            "end": 13861
+          }
+        },
+        "owner": 3,
+        "parent": {
+          "plan": 3,
+          "owner": 2
+        },
+        "kind": {
+          "Widget": {
+            "widget": {
+              "segments": {
+                "first": {
+                  "text": "GridChild",
+                  "span": {
+                    "file": 0,
+                    "span": {
+                      "start": 13560,
+                      "end": 13569
+                    }
+                  }
+                },
+                "rest": []
+              },
+              "span": {
+                "file": 0,
+                "span": {
+                  "start": 13560,
+                  "end": 13569
+                }
+              }
+            },
+            "properties": [
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 2
+                    },
+                    "index": 0,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13570,
+                        "end": 13589
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "column",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13570,
+                        "end": 13576
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 775
+                  },
+                  "owner": 3,
+                  "input": 11,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 2
+                    },
+                    "index": 1,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13591,
+                        "end": 13604
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "row",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13591,
+                        "end": 13594
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 777
+                  },
+                  "owner": 3,
+                  "input": 12,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              }
+            ],
+            "event_hooks": [],
+            "default_group_descriptor": "content",
+            "default_children": {
+              "owner": {
+                "plan": 2,
+                "owner": 3
+              },
+              "kind": "WidgetDefault",
+              "roots": [
+                {
+                  "plan": 1,
+                  "owner": 4
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "plan": 3,
+        "stable_id": {
+          "Control": 0
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13496,
+            "end": 13881
+          }
+        },
+        "owner": 2,
+        "parent": {
+          "plan": 4,
+          "owner": 1
+        },
+        "kind": {
+          "Each": {
+            "collection": {
+              "owner": 2,
+              "expr": 783,
+              "input": 9
+            },
+            "key_input": {
+              "owner": 2,
+              "expr": 785,
+              "input": 10
+            },
+            "binding": 156,
+            "child_policy": {
+              "Keyed": {
+                "key": 785,
+                "updates": "Localized"
+              }
+            },
+            "item_template": {
+              "owner": {
+                "plan": 3,
+                "owner": 2
+              },
+              "kind": "EachItemTemplate",
+              "roots": [
+                {
+                  "plan": 2,
+                  "owner": 3
+                }
+              ]
+            },
+            "empty_branch": null
+          }
+        }
+      },
+      {
+        "plan": 4,
+        "stable_id": {
+          "Markup": 4
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13336,
+            "end": 13897
+          }
+        },
+        "owner": 1,
+        "parent": {
+          "plan": 5,
+          "owner": 0
+        },
+        "kind": {
+          "Widget": {
+            "widget": {
+              "segments": {
+                "first": {
+                  "text": "Grid",
+                  "span": {
+                    "file": 0,
+                    "span": {
+                      "start": 13337,
+                      "end": 13341
+                    }
+                  }
+                },
+                "rest": []
+              },
+              "span": {
+                "file": 0,
+                "span": {
+                  "start": 13337,
+                  "end": 13341
+                }
+              }
+            },
+            "properties": [
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 0,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13342,
+                        "end": 13355
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "rowSpacing",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13342,
+                        "end": 13352
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 768
+                  },
+                  "owner": 1,
+                  "input": 3,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 1,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13357,
+                        "end": 13373
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "columnSpacing",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13357,
+                        "end": 13370
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 769
+                  },
+                  "owner": 1,
+                  "input": 4,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 2,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13375,
+                        "end": 13395
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "rowHomogeneous",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13375,
+                        "end": 13389
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 770
+                  },
+                  "owner": 1,
+                  "input": 5,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 3,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13397,
+                        "end": 13420
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "columnHomogeneous",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13397,
+                        "end": 13414
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 771
+                  },
+                  "owner": 1,
+                  "input": 6,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 4,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13422,
+                        "end": 13450
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "widthRequest",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13422,
+                        "end": 13434
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 772
+                  },
+                  "owner": 1,
+                  "input": 7,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 4
+                    },
+                    "index": 5,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13452,
+                        "end": 13481
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "heightRequest",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13452,
+                        "end": 13465
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 773
+                  },
+                  "owner": 1,
+                  "input": 8,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              }
+            ],
+            "event_hooks": [],
+            "default_group_descriptor": "children",
+            "default_children": {
+              "owner": {
+                "plan": 4,
+                "owner": 1
+              },
+              "kind": "WidgetDefault",
+              "roots": [
+                {
+                  "plan": 3,
+                  "owner": 2
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "plan": 5,
+        "stable_id": {
+          "Markup": 5
+        },
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13221,
+            "end": 13911
+          }
+        },
+        "owner": 0,
+        "parent": null,
+        "kind": {
+          "Widget": {
+            "widget": {
+              "segments": {
+                "first": {
+                  "text": "Window",
+                  "span": {
+                    "file": 0,
+                    "span": {
+                      "start": 13222,
+                      "end": 13228
+                    }
+                  }
+                },
+                "rest": []
+              },
+              "span": {
+                "file": 0,
+                "span": {
+                  "start": 13222,
+                  "end": 13228
+                }
+              }
+            },
+            "properties": [
+              {
+                "Static": {
+                  "site": {
+                    "owner": {
+                      "Markup": 5
+                    },
+                    "index": 0,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13229,
+                        "end": 13247
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "title",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13229,
+                        "end": 13234
+                      }
+                    }
+                  },
+                  "value": {
+                    "Text": {
+                      "segments": [
+                        {
+                          "Text": {
+                            "raw": "AIVI Snake",
+                            "span": {
+                              "file": 0,
+                              "span": {
+                                "start": 13236,
+                                "end": 13246
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 5
+                    },
+                    "index": 1,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13248,
+                        "end": 13276
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "defaultWidth",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13248,
+                        "end": 13260
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 765
+                  },
+                  "owner": 0,
+                  "input": 0,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 5
+                    },
+                    "index": 2,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13278,
+                        "end": 13307
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "defaultHeight",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13278,
+                        "end": 13291
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 766
+                  },
+                  "owner": 0,
+                  "input": 1,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              },
+              {
+                "Setter": {
+                  "site": {
+                    "owner": {
+                      "Markup": 5
+                    },
+                    "index": 3,
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13309,
+                        "end": 13325
+                      }
+                    }
+                  },
+                  "name": {
+                    "text": "resizable",
+                    "span": {
+                      "file": 0,
+                      "span": {
+                        "start": 13309,
+                        "end": 13318
+                      }
+                    }
+                  },
+                  "source": {
+                    "Expr": 767
+                  },
+                  "owner": 0,
+                  "input": 2,
+                  "update": "DirectSetter",
+                  "teardown": "CancelSubscription"
+                }
+              }
+            ],
+            "event_hooks": [],
+            "default_group_descriptor": "content",
+            "default_children": {
+              "owner": {
+                "plan": 5,
+                "owner": 0
+              },
+              "kind": "WidgetDefault",
+              "roots": [
+                {
+                  "plan": 4,
+                  "owner": 1
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "hydration_inputs": [
+    {
+      "input": 0,
+      "compiled": {
+        "Expr": {
+          "expr": 765,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-3a4d342729e4bd24.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-3a4d342729e4bd24-00000000-74b5e6fa6bd8e6f6.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-3a4d342729e4bd24-00000001-07714de96ea39d06.bin"
+              },
+              {
+                "kernel": 2,
+                "artifact_path": "payloads/native-3a4d342729e4bd24-00000002-8523d215c6568376.bin"
+              },
+              {
+                "kernel": 3,
+                "artifact_path": "payloads/native-3a4d342729e4bd24-00000003-3a54e477bd0d6495.bin"
+              }
+            ]
+          },
+          "item": 3,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 1,
+      "compiled": {
+        "Expr": {
+          "expr": 766,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-13e12a9b09a6d9f7.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-13e12a9b09a6d9f7-00000000-74b5e6fa6bd8e6f6.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-13e12a9b09a6d9f7-00000001-07714de96ea39d06.bin"
+              },
+              {
+                "kernel": 2,
+                "artifact_path": "payloads/native-13e12a9b09a6d9f7-00000002-8523d215c6568376.bin"
+              },
+              {
+                "kernel": 3,
+                "artifact_path": "payloads/native-13e12a9b09a6d9f7-00000003-549ae2b3f2b1c519.bin"
+              }
+            ]
+          },
+          "item": 3,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 2,
+      "compiled": {
+        "Expr": {
+          "expr": 767,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-ee95ca48d4d83c1e.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-ee95ca48d4d83c1e-00000000-5642c773830788f2.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 3,
+      "compiled": {
+        "Expr": {
+          "expr": 768,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-ec451f58b504b29b.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-ec451f58b504b29b-00000000-5d2cac22597a78e1.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 4,
+      "compiled": {
+        "Expr": {
+          "expr": 769,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-48390dea92e341d3.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-48390dea92e341d3-00000000-051fd704bab4ce45.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 5,
+      "compiled": {
+        "Expr": {
+          "expr": 770,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-199c9e95d71ce3bc.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-199c9e95d71ce3bc-00000000-943aed9b6b6b7f69.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 6,
+      "compiled": {
+        "Expr": {
+          "expr": 771,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-ec345d44658cbab8.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-ec345d44658cbab8-00000000-4145accf288a721a.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 7,
+      "compiled": {
+        "Expr": {
+          "expr": 772,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-27fce6cf69ea9fbd.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-27fce6cf69ea9fbd-00000000-74b5e6fa6bd8e6f6.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-27fce6cf69ea9fbd-00000001-07714de96ea39d06.bin"
+              },
+              {
+                "kernel": 2,
+                "artifact_path": "payloads/native-27fce6cf69ea9fbd-00000002-8523d215c6568376.bin"
+              },
+              {
+                "kernel": 3,
+                "artifact_path": "payloads/native-27fce6cf69ea9fbd-00000003-2455ad7e4140bf4f.bin"
+              }
+            ]
+          },
+          "item": 3,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 8,
+      "compiled": {
+        "Expr": {
+          "expr": 773,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-4897549f830c2269.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-4897549f830c2269-00000000-74b5e6fa6bd8e6f6.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-4897549f830c2269-00000001-07714de96ea39d06.bin"
+              },
+              {
+                "kernel": 2,
+                "artifact_path": "payloads/native-4897549f830c2269-00000002-8523d215c6568376.bin"
+              },
+              {
+                "kernel": 3,
+                "artifact_path": "payloads/native-4897549f830c2269-00000003-1eb14859d0fa7ac6.bin"
+              }
+            ]
+          },
+          "item": 3,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 9,
+      "compiled": {
+        "Expr": {
+          "expr": 783,
+          "parameters": [],
+          "execution": {
+            "program_path": "payloads/backend-96fae691b51a75f8.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-96fae691b51a75f8-00000000-1ba5286a5f85456b.bin"
+              }
+            ]
+          },
+          "item": 1,
+          "required_signal_globals": [
+            {
+              "fragment_item": 0,
+              "runtime_item": 73,
+              "name": "boardTiles"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "input": 10,
+      "compiled": {
+        "Expr": {
+          "expr": 785,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-aae73755abb197eb.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-aae73755abb197eb-00000000-4c4670ff8884174c.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 11,
+      "compiled": {
+        "Expr": {
+          "expr": 775,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-b87896731502f1b2.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-b87896731502f1b2-00000000-4b4912c6c0a24b1b.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 12,
+      "compiled": {
+        "Expr": {
+          "expr": 777,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-0da7d7d4af6c14e9.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-0da7d7d4af6c14e9-00000000-faa87576c07e3d58.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 13,
+      "compiled": {
+        "Expr": {
+          "expr": 779,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-3d35fa28b3bc80de.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-3d35fa28b3bc80de-00000000-437c18b5c7e2bf41.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 14,
+      "compiled": {
+        "Expr": {
+          "expr": 780,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-830a793f1c747b63.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-830a793f1c747b63-00000000-814cb9424239e58c.bin"
+              }
+            ]
+          },
+          "item": 0,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 15,
+      "compiled": {
+        "Expr": {
+          "expr": 781,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-94663a96989884ef.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-94663a96989884ef-00000000-27b83a84ecee5173.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-94663a96989884ef-00000001-6ecc833031a11738.bin"
+              }
+            ]
+          },
+          "item": 1,
+          "required_signal_globals": []
+        }
+      }
+    },
+    {
+      "input": 16,
+      "compiled": {
+        "Expr": {
+          "expr": 782,
+          "parameters": [
+            {
+              "binding": 156,
+              "name": "tile"
+            }
+          ],
+          "execution": {
+            "program_path": "payloads/backend-2f09e46ec1b99d6b.json",
+            "native_kernels": [
+              {
+                "kernel": 0,
+                "artifact_path": "payloads/native-2f09e46ec1b99d6b-00000000-27b83a84ecee5173.bin"
+              },
+              {
+                "kernel": 1,
+                "artifact_path": "payloads/native-2f09e46ec1b99d6b-00000001-2de1a161152b18bf.bin"
+              }
+            ]
+          },
+          "item": 1,
+          "required_signal_globals": []
+        }
+      }
+    }
+  ],
+  "required_signal_globals": [
+    {
+      "item": 73,
+      "name": "boardTiles"
+    }
+  ],
+  "runtime_assembly": {
+    "graph": {
+      "owners": [
+        {
+          "name": "tick",
+          "parent": null,
+          "children": [],
+          "signals": [
+            0
+          ]
+        },
+        {
+          "name": "cwd",
+          "parent": null,
+          "children": [],
+          "signals": [
+            1
+          ]
+        },
+        {
+          "name": "keyDown",
+          "parent": null,
+          "children": [],
+          "signals": [
+            2
+          ]
+        },
+        {
+          "name": "event",
+          "parent": null,
+          "children": [],
+          "signals": [
+            3
+          ]
+        },
+        {
+          "name": "state",
+          "parent": null,
+          "children": [],
+          "signals": [
+            4
+          ]
+        },
+        {
+          "name": "assetRoot",
+          "parent": null,
+          "children": [],
+          "signals": [
+            5
+          ]
+        },
+        {
+          "name": "boardTiles",
+          "parent": null,
+          "children": [],
+          "signals": [
+            6
+          ]
+        }
+      ],
+      "signals": [
+        {
+          "name": "tick",
+          "owner": 0,
+          "kind": "Input"
+        },
+        {
+          "name": "cwd",
+          "owner": 1,
+          "kind": "Input"
+        },
+        {
+          "name": "keyDown",
+          "owner": 2,
+          "kind": "Input"
+        },
+        {
+          "name": "event",
+          "owner": 3,
+          "kind": {
+            "Reactive": {
+              "dependencies": [
+                0,
+                2
+              ],
+              "seed_dependencies": [],
+              "clauses": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "batch": 0
+            }
+          }
+        },
+        {
+          "name": "state",
+          "owner": 4,
+          "kind": {
+            "Derived": {
+              "dependencies": [
+                3
+              ],
+              "batch": 1
+            }
+          }
+        },
+        {
+          "name": "assetRoot",
+          "owner": 5,
+          "kind": {
+            "Derived": {
+              "dependencies": [
+                1
+              ],
+              "batch": 0
+            }
+          }
+        },
+        {
+          "name": "boardTiles",
+          "owner": 6,
+          "kind": {
+            "Derived": {
+              "dependencies": [
+                4,
+                5
+              ],
+              "batch": 2
+            }
+          }
+        }
+      ],
+      "batches": [
+        {
+          "index": 0,
+          "signals": [
+            3,
+            5
+          ]
+        },
+        {
+          "index": 1,
+          "signals": [
+            4
+          ]
+        },
+        {
+          "index": 2,
+          "signals": [
+            6
+          ]
+        }
+      ],
+      "dependents": [
+        [
+          3
+        ],
+        [
+          5
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          6
+        ],
+        [
+          6
+        ],
+        []
+      ],
+      "reactive_clauses": [
+        {
+          "target": 3,
+          "source_order": 0,
+          "guard_dependencies": [
+            0
+          ],
+          "body_dependencies": [
+            0
+          ],
+          "trigger_signal": 0
+        },
+        {
+          "target": 3,
+          "source_order": 1,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ],
+          "trigger_signal": 2
+        },
+        {
+          "target": 3,
+          "source_order": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ],
+          "trigger_signal": 2
+        },
+        {
+          "target": 3,
+          "source_order": 3,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ],
+          "trigger_signal": 2
+        },
+        {
+          "target": 3,
+          "source_order": 4,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ],
+          "trigger_signal": 2
+        },
+        {
+          "target": 3,
+          "source_order": 5,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ],
+          "trigger_signal": 2
+        }
+      ]
+    },
+    "reactive_program": {
+      "signals": [
+        {
+          "handle": 0,
+          "name": "tick",
+          "owner": 0,
+          "item": 79,
+          "kind": {
+            "Input": {
+              "source_owner": 79,
+              "source_instance": 0,
+              "task_owner": null,
+              "task_instance": null,
+              "temporal_owner": null
+            }
+          },
+          "dependencies": [],
+          "dependents": [
+            3
+          ],
+          "root_signals": [
+            0
+          ],
+          "topo_index": 0,
+          "partition": 0
+        },
+        {
+          "handle": 1,
+          "name": "cwd",
+          "owner": 1,
+          "item": 80,
+          "kind": {
+            "Input": {
+              "source_owner": 80,
+              "source_instance": 1,
+              "task_owner": null,
+              "task_instance": null,
+              "temporal_owner": null
+            }
+          },
+          "dependencies": [],
+          "dependents": [
+            5
+          ],
+          "root_signals": [
+            1
+          ],
+          "topo_index": 1,
+          "partition": 1
+        },
+        {
+          "handle": 2,
+          "name": "keyDown",
+          "owner": 2,
+          "item": 81,
+          "kind": {
+            "Input": {
+              "source_owner": 81,
+              "source_instance": 2,
+              "task_owner": null,
+              "task_instance": null,
+              "temporal_owner": null
+            }
+          },
+          "dependencies": [],
+          "dependents": [
+            3
+          ],
+          "root_signals": [
+            2
+          ],
+          "topo_index": 2,
+          "partition": 2
+        },
+        {
+          "handle": 3,
+          "name": "event",
+          "owner": 3,
+          "item": 82,
+          "kind": {
+            "Reactive": {
+              "source_input": null,
+              "seed_dependencies": [],
+              "clauses": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            }
+          },
+          "dependencies": [
+            0,
+            2
+          ],
+          "dependents": [
+            4
+          ],
+          "root_signals": [
+            0,
+            2
+          ],
+          "topo_index": 3,
+          "partition": 3
+        },
+        {
+          "handle": 4,
+          "name": "state",
+          "owner": 4,
+          "item": 83,
+          "kind": {
+            "Derived": {
+              "source_input": null,
+              "temporal_helpers": [],
+              "has_recurrence": true
+            }
+          },
+          "dependencies": [
+            3
+          ],
+          "dependents": [
+            6
+          ],
+          "root_signals": [
+            0,
+            2
+          ],
+          "topo_index": 5,
+          "partition": 5
+        },
+        {
+          "handle": 5,
+          "name": "assetRoot",
+          "owner": 5,
+          "item": 84,
+          "kind": {
+            "Derived": {
+              "source_input": null,
+              "temporal_helpers": [],
+              "has_recurrence": false
+            }
+          },
+          "dependencies": [
+            1
+          ],
+          "dependents": [
+            6
+          ],
+          "root_signals": [
+            1
+          ],
+          "topo_index": 4,
+          "partition": 4
+        },
+        {
+          "handle": 6,
+          "name": "boardTiles",
+          "owner": 6,
+          "item": 85,
+          "kind": {
+            "Derived": {
+              "source_input": null,
+              "temporal_helpers": [],
+              "has_recurrence": false
+            }
+          },
+          "dependencies": [
+            4,
+            5
+          ],
+          "dependents": [],
+          "root_signals": [
+            0,
+            2,
+            1
+          ],
+          "topo_index": 6,
+          "partition": 6
+        }
+      ],
+      "clauses": [
+        {
+          "handle": 0,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 0,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12747,
+              "end": 12765
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12747,
+              "end": 12765
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12747,
+              "end": 12765
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 0,
+          "guard_dependencies": [
+            0
+          ],
+          "body_dependencies": [
+            0
+          ]
+        },
+        {
+          "handle": 1,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 1,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12768,
+              "end": 12810
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12768,
+              "end": 12810
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12768,
+              "end": 12810
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ]
+        },
+        {
+          "handle": 2,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 2,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12813,
+              "end": 12856
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12813,
+              "end": 12856
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12813,
+              "end": 12856
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ]
+        },
+        {
+          "handle": 3,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 3,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12859,
+              "end": 12900
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12859,
+              "end": 12900
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12859,
+              "end": 12900
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ]
+        },
+        {
+          "handle": 4,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 4,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12903,
+              "end": 12946
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12903,
+              "end": 12946
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12903,
+              "end": 12946
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ]
+        },
+        {
+          "handle": 5,
+          "owner_signal": 3,
+          "owner_item": 82,
+          "source_order": 5,
+          "span": {
+            "file": 0,
+            "span": {
+              "start": 12949,
+              "end": 12985
+            }
+          },
+          "keyword_span": {
+            "file": 0,
+            "span": {
+              "start": 12949,
+              "end": 12985
+            }
+          },
+          "target_span": {
+            "file": 0,
+            "span": {
+              "start": 12949,
+              "end": 12985
+            }
+          },
+          "body_mode": "OptionalPayload",
+          "trigger_signal": 2,
+          "guard_dependencies": [
+            2
+          ],
+          "body_dependencies": [
+            2
+          ]
+        }
+      ],
+      "partitions": [
+        {
+          "id": 0,
+          "batch_index": 0,
+          "topo_range": {
+            "start": 0,
+            "end": 1
+          },
+          "root_signals": [
+            0
+          ],
+          "signals": [
+            0
+          ]
+        },
+        {
+          "id": 1,
+          "batch_index": 0,
+          "topo_range": {
+            "start": 1,
+            "end": 2
+          },
+          "root_signals": [
+            1
+          ],
+          "signals": [
+            1
+          ]
+        },
+        {
+          "id": 2,
+          "batch_index": 0,
+          "topo_range": {
+            "start": 2,
+            "end": 3
+          },
+          "root_signals": [
+            2
+          ],
+          "signals": [
+            2
+          ]
+        },
+        {
+          "id": 3,
+          "batch_index": 1,
+          "topo_range": {
+            "start": 3,
+            "end": 4
+          },
+          "root_signals": [
+            0,
+            2
+          ],
+          "signals": [
+            3
+          ]
+        },
+        {
+          "id": 4,
+          "batch_index": 1,
+          "topo_range": {
+            "start": 4,
+            "end": 5
+          },
+          "root_signals": [
+            1
+          ],
+          "signals": [
+            5
+          ]
+        },
+        {
+          "id": 5,
+          "batch_index": 2,
+          "topo_range": {
+            "start": 5,
+            "end": 6
+          },
+          "root_signals": [
+            0,
+            2
+          ],
+          "signals": [
+            4
+          ]
+        },
+        {
+          "id": 6,
+          "batch_index": 3,
+          "topo_range": {
+            "start": 6,
+            "end": 7
+          },
+          "root_signals": [
+            0,
+            2,
+            1
+          ],
+          "signals": [
+            6
+          ]
+        }
+      ],
+      "topo_order": [
+        0,
+        1,
+        2,
+        3,
+        5,
+        4,
+        6
+      ]
+    },
+    "owners": [
+      {
+        "item": 79,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12451,
+            "end": 12552
+          }
+        },
+        "name": "tick",
+        "handle": 0
+      },
+      {
+        "item": 80,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12554,
+            "end": 12598
+          }
+        },
+        "name": "cwd",
+        "handle": 1
+      },
+      {
+        "item": 81,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12600,
+            "end": 12698
+          }
+        },
+        "name": "keyDown",
+        "handle": 2
+      },
+      {
+        "item": 82,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12700,
+            "end": 12985
+          }
+        },
+        "name": "event",
+        "handle": 3
+      },
+      {
+        "item": 83,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12987,
+            "end": 13044
+          }
+        },
+        "name": "state",
+        "handle": 4
+      },
+      {
+        "item": 84,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13046,
+            "end": 13104
+          }
+        },
+        "name": "assetRoot",
+        "handle": 5
+      },
+      {
+        "item": 85,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13106,
+            "end": 13202
+          }
+        },
+        "name": "boardTiles",
+        "handle": 6
+      }
+    ],
+    "signals": [
+      {
+        "item": 79,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12451,
+            "end": 12552
+          }
+        },
+        "name": "tick",
+        "owner": 0,
+        "kind": {
+          "Input": {
+            "signal": 0
+          }
+        },
+        "source_input": 0
+      },
+      {
+        "item": 80,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12554,
+            "end": 12598
+          }
+        },
+        "name": "cwd",
+        "owner": 1,
+        "kind": {
+          "Input": {
+            "signal": 1
+          }
+        },
+        "source_input": 1
+      },
+      {
+        "item": 81,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12600,
+            "end": 12698
+          }
+        },
+        "name": "keyDown",
+        "owner": 2,
+        "kind": {
+          "Input": {
+            "signal": 2
+          }
+        },
+        "source_input": 2
+      },
+      {
+        "item": 82,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12700,
+            "end": 12985
+          }
+        },
+        "name": "event",
+        "owner": 3,
+        "kind": {
+          "Reactive": {
+            "signal": 3,
+            "dependencies": [
+              0,
+              2
+            ],
+            "seed_dependencies": [],
+            "clauses": [
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12747,
+                    "end": 12765
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12747,
+                    "end": 12765
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12747,
+                    "end": 12765
+                  }
+                },
+                "guard": 695,
+                "body": 700,
+                "body_mode": "OptionalPayload",
+                "clause": 0,
+                "trigger_signal": 0,
+                "guard_dependencies": [
+                  0
+                ],
+                "body_dependencies": [
+                  0
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-f0a99f531212d363.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 0,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-90337763bfee277d.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 0,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              },
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12768,
+                    "end": 12810
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12768,
+                    "end": 12810
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12768,
+                    "end": 12810
+                  }
+                },
+                "guard": 704,
+                "body": 711,
+                "body_mode": "OptionalPayload",
+                "clause": 1,
+                "trigger_signal": 2,
+                "guard_dependencies": [
+                  2
+                ],
+                "body_dependencies": [
+                  2
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-6cc8f91460ac2b31.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-c498140c39f36a56.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              },
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12813,
+                    "end": 12856
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12813,
+                    "end": 12856
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12813,
+                    "end": 12856
+                  }
+                },
+                "guard": 715,
+                "body": 722,
+                "body_mode": "OptionalPayload",
+                "clause": 2,
+                "trigger_signal": 2,
+                "guard_dependencies": [
+                  2
+                ],
+                "body_dependencies": [
+                  2
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-aeaa3f7b563cae36.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-077ad46c3d50a39b.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              },
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12859,
+                    "end": 12900
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12859,
+                    "end": 12900
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12859,
+                    "end": 12900
+                  }
+                },
+                "guard": 726,
+                "body": 733,
+                "body_mode": "OptionalPayload",
+                "clause": 3,
+                "trigger_signal": 2,
+                "guard_dependencies": [
+                  2
+                ],
+                "body_dependencies": [
+                  2
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-b7a189f0bb72e26f.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-00267c4c7c434fa3.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              },
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12903,
+                    "end": 12946
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12903,
+                    "end": 12946
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12903,
+                    "end": 12946
+                  }
+                },
+                "guard": 737,
+                "body": 744,
+                "body_mode": "OptionalPayload",
+                "clause": 4,
+                "trigger_signal": 2,
+                "guard_dependencies": [
+                  2
+                ],
+                "body_dependencies": [
+                  2
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-0a42fb724e2c19a9.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-da7fecb8249faa42.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              },
+              {
+                "span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12949,
+                    "end": 12985
+                  }
+                },
+                "keyword_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12949,
+                    "end": 12985
+                  }
+                },
+                "target_span": {
+                  "file": 0,
+                  "span": {
+                    "start": 12949,
+                    "end": 12985
+                  }
+                },
+                "guard": 748,
+                "body": 753,
+                "body_mode": "OptionalPayload",
+                "clause": 5,
+                "trigger_signal": 2,
+                "guard_dependencies": [
+                  2
+                ],
+                "body_dependencies": [
+                  2
+                ],
+                "compiled_guard": {
+                  "backend": {
+                    "program_path": "payloads/backend-413ccf80b00354a5.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                },
+                "compiled_body": {
+                  "backend": {
+                    "program_path": "payloads/backend-a90b99da5d0a2694.json",
+                    "native_kernels": []
+                  },
+                  "entry_item": 1,
+                  "required_signals": [
+                    {
+                      "signal": 2,
+                      "backend_item": 0
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "source_input": null
+      },
+      {
+        "item": 83,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 12987,
+            "end": 13044
+          }
+        },
+        "name": "state",
+        "owner": 4,
+        "kind": {
+          "Derived": {
+            "signal": 4,
+            "dependencies": [
+              3
+            ],
+            "temporal_trigger_dependencies": [],
+            "temporal_helpers": []
+          }
+        },
+        "source_input": null
+      },
+      {
+        "item": 84,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13046,
+            "end": 13104
+          }
+        },
+        "name": "assetRoot",
+        "owner": 5,
+        "kind": {
+          "Derived": {
+            "signal": 5,
+            "dependencies": [
+              1
+            ],
+            "temporal_trigger_dependencies": [],
+            "temporal_helpers": []
+          }
+        },
+        "source_input": null
+      },
+      {
+        "item": 85,
+        "span": {
+          "file": 0,
+          "span": {
+            "start": 13106,
+            "end": 13202
+          }
+        },
+        "name": "boardTiles",
+        "owner": 6,
+        "kind": {
+          "Derived": {
+            "signal": 6,
+            "dependencies": [
+              4,
+              5
+            ],
+            "temporal_trigger_dependencies": [],
+            "temporal_helpers": []
+          }
+        },
+        "source_input": null
+      }
+    ],
+    "sources": [
+      {
+        "owner": 79,
+        "source_instance": {
+          "decorator": 0
+        },
+        "source_span": {
+          "file": 0,
+          "span": {
+            "start": 12451,
+            "end": 12526
+          }
+        },
+        "teardown": "DisposeOnOwnerTeardown",
+        "signal": 0,
+        "input": 0,
+        "spec": {
+          "instance": 0,
+          "input": 0,
+          "provider": {
+            "Builtin": "TimerEvery"
+          },
+          "reconfiguration_dependencies": [],
+          "explicit_triggers": [],
+          "active_when": null,
+          "cancellation": "ProviderManaged",
+          "replacement": "DisposeSupersededBeforePublish",
+          "stale_work": "DropStalePublications",
+          "wakeup": null,
+          "decode": {
+            "mode": "Strict",
+            "payload_annotation": 548,
+            "root": 0,
+            "steps": [
+              {
+                "Scalar": {
+                  "scalar": "Unit"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "owner": 80,
+        "source_instance": {
+          "decorator": 1
+        },
+        "source_span": {
+          "file": 0,
+          "span": {
+            "start": 12554,
+            "end": 12573
+          }
+        },
+        "teardown": "DisposeOnOwnerTeardown",
+        "signal": 1,
+        "input": 1,
+        "spec": {
+          "instance": 1,
+          "input": 1,
+          "provider": {
+            "Builtin": "ProcessCwd"
+          },
+          "reconfiguration_dependencies": [],
+          "explicit_triggers": [],
+          "active_when": null,
+          "cancellation": "ProviderManaged",
+          "replacement": "DisposeSupersededBeforePublish",
+          "stale_work": "DropStalePublications",
+          "wakeup": null,
+          "decode": {
+            "mode": "Strict",
+            "payload_annotation": 551,
+            "root": 0,
+            "steps": [
+              {
+                "Scalar": {
+                  "scalar": "Text"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "owner": 81,
+        "source_instance": {
+          "decorator": 2
+        },
+        "source_span": {
+          "file": 0,
+          "span": {
+            "start": 12600,
+            "end": 12670
+          }
+        },
+        "teardown": "DisposeOnOwnerTeardown",
+        "signal": 2,
+        "input": 2,
+        "spec": {
+          "instance": 2,
+          "input": 2,
+          "provider": {
+            "Builtin": "WindowKeyDown"
+          },
+          "reconfiguration_dependencies": [],
+          "explicit_triggers": [],
+          "active_when": null,
+          "cancellation": "ProviderManaged",
+          "replacement": "DisposeSupersededBeforePublish",
+          "stale_work": "DropStalePublications",
+          "wakeup": null,
+          "decode": {
+            "mode": "Strict",
+            "payload_annotation": 554,
+            "root": 1,
+            "steps": [
+              {
+                "Scalar": {
+                  "scalar": "Text"
+                }
+              },
+              {
+                "Sum": {
+                  "variants": [
+                    {
+                      "constructor": {
+                        "item": 6,
+                        "type_name": "Key",
+                        "variant_name": "Key",
+                        "field_count": 1
+                      },
+                      "name": "Key",
+                      "payload": 0
+                    }
+                  ],
+                  "strategy": "Explicit"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "tasks": [],
+    "gates": [],
+    "recurrences": [
+      {
+        "site": {
+          "owner": 83,
+          "pipe_expr": 757,
+          "start_stage_index": 0
+        },
+        "start_stage_span": {
+          "file": 0,
+          "span": {
+            "start": 13028,
+            "end": 13044
+          }
+        },
+        "owner_signal": 4,
+        "wakeup_signal": 82
+      }
+    ],
+    "db_changed_bindings": []
+  },
+  "runtime_link": {
+    "hir_to_backend": [
+      [
+        10,
+        0
+      ],
+      [
+        11,
+        1
+      ],
+      [
+        12,
+        2
+      ],
+      [
+        13,
+        3
+      ],
+      [
+        14,
+        4
+      ],
+      [
+        15,
+        5
+      ],
+      [
+        16,
+        6
+      ],
+      [
+        17,
+        7
+      ],
+      [
+        18,
+        8
+      ],
+      [
+        19,
+        9
+      ],
+      [
+        20,
+        10
+      ],
+      [
+        21,
+        11
+      ],
+      [
+        22,
+        12
+      ],
+      [
+        23,
+        13
+      ],
+      [
+        24,
+        14
+      ],
+      [
+        25,
+        15
+      ],
+      [
+        26,
+        16
+      ],
+      [
+        27,
+        17
+      ],
+      [
+        28,
+        18
+      ],
+      [
+        29,
+        19
+      ],
+      [
+        30,
+        20
+      ],
+      [
+        31,
+        21
+      ],
+      [
+        32,
+        22
+      ],
+      [
+        35,
+        23
+      ],
+      [
+        36,
+        24
+      ],
+      [
+        37,
+        25
+      ],
+      [
+        38,
+        26
+      ],
+      [
+        39,
+        27
+      ],
+      [
+        40,
+        28
+      ],
+      [
+        41,
+        29
+      ],
+      [
+        42,
+        30
+      ],
+      [
+        43,
+        31
+      ],
+      [
+        44,
+        32
+      ],
+      [
+        45,
+        33
+      ],
+      [
+        46,
+        34
+      ],
+      [
+        47,
+        35
+      ],
+      [
+        48,
+        36
+      ],
+      [
+        49,
+        37
+      ],
+      [
+        50,
+        38
+      ],
+      [
+        51,
+        39
+      ],
+      [
+        52,
+        40
+      ],
+      [
+        53,
+        41
+      ],
+      [
+        54,
+        42
+      ],
+      [
+        55,
+        43
+      ],
+      [
+        56,
+        44
+      ],
+      [
+        57,
+        45
+      ],
+      [
+        58,
+        46
+      ],
+      [
+        59,
+        47
+      ],
+      [
+        60,
+        48
+      ],
+      [
+        61,
+        49
+      ],
+      [
+        62,
+        50
+      ],
+      [
+        63,
+        51
+      ],
+      [
+        64,
+        52
+      ],
+      [
+        65,
+        53
+      ],
+      [
+        66,
+        54
+      ],
+      [
+        67,
+        55
+      ],
+      [
+        68,
+        56
+      ],
+      [
+        69,
+        57
+      ],
+      [
+        70,
+        58
+      ],
+      [
+        71,
+        59
+      ],
+      [
+        72,
+        60
+      ],
+      [
+        73,
+        61
+      ],
+      [
+        74,
+        62
+      ],
+      [
+        75,
+        63
+      ],
+      [
+        76,
+        64
+      ],
+      [
+        77,
+        65
+      ],
+      [
+        78,
+        66
+      ],
+      [
+        79,
+        67
+      ],
+      [
+        80,
+        68
+      ],
+      [
+        81,
+        69
+      ],
+      [
+        82,
+        70
+      ],
+      [
+        83,
+        71
+      ],
+      [
+        84,
+        72
+      ],
+      [
+        85,
+        73
+      ],
+      [
+        116,
+        74
+      ],
+      [
+        117,
+        75
+      ],
+      [
+        118,
+        76
+      ],
+      [
+        119,
+        77
+      ],
+      [
+        120,
+        78
+      ],
+      [
+        121,
+        79
+      ],
+      [
+        122,
+        80
+      ],
+      [
+        123,
+        81
+      ],
+      [
+        124,
+        82
+      ],
+      [
+        125,
+        83
+      ],
+      [
+        126,
+        84
+      ],
+      [
+        127,
+        85
+      ],
+      [
+        128,
+        86
+      ],
+      [
+        129,
+        87
+      ],
+      [
+        130,
+        88
+      ],
+      [
+        131,
+        89
+      ],
+      [
+        132,
+        90
+      ],
+      [
+        133,
+        91
+      ],
+      [
+        134,
+        92
+      ],
+      [
+        135,
+        93
+      ],
+      [
+        136,
+        94
+      ],
+      [
+        137,
+        95
+      ],
+      [
+        138,
+        96
+      ],
+      [
+        139,
+        97
+      ],
+      [
+        140,
+        98
+      ],
+      [
+        141,
+        99
+      ],
+      [
+        142,
+        100
+      ],
+      [
+        143,
+        101
+      ],
+      [
+        144,
+        102
+      ],
+      [
+        145,
+        103
+      ],
+      [
+        146,
+        104
+      ],
+      [
+        147,
+        105
+      ],
+      [
+        148,
+        106
+      ],
+      [
+        150,
+        107
+      ],
+      [
+        151,
+        108
+      ],
+      [
+        152,
+        109
+      ],
+      [
+        153,
+        110
+      ],
+      [
+        154,
+        111
+      ],
+      [
+        155,
+        112
+      ],
+      [
+        156,
+        113
+      ],
+      [
+        157,
+        114
+      ],
+      [
+        158,
+        115
+      ],
+      [
+        159,
+        116
+      ],
+      [
+        160,
+        117
+      ],
+      [
+        161,
+        118
+      ],
+      [
+        162,
+        119
+      ],
+      [
+        163,
+        120
+      ],
+      [
+        164,
+        121
+      ],
+      [
+        165,
+        122
+      ],
+      [
+        166,
+        123
+      ],
+      [
+        167,
+        124
+      ],
+      [
+        168,
+        125
+      ],
+      [
+        169,
+        126
+      ],
+      [
+        170,
+        127
+      ],
+      [
+        171,
+        128
+      ],
+      [
+        172,
+        129
+      ],
+      [
+        173,
+        130
+      ],
+      [
+        174,
+        131
+      ],
+      [
+        175,
+        132
+      ],
+      [
+        176,
+        133
+      ],
+      [
+        177,
+        134
+      ],
+      [
+        178,
+        135
+      ],
+      [
+        179,
+        136
+      ],
+      [
+        180,
+        137
+      ],
+      [
+        181,
+        138
+      ],
+      [
+        182,
+        139
+      ],
+      [
+        183,
+        140
+      ],
+      [
+        184,
+        141
+      ],
+      [
+        185,
+        142
+      ],
+      [
+        186,
+        143
+      ],
+      [
+        187,
+        144
+      ],
+      [
+        188,
+        145
+      ],
+      [
+        189,
+        146
+      ],
+      [
+        190,
+        147
+      ],
+      [
+        191,
+        148
+      ],
+      [
+        192,
+        149
+      ],
+      [
+        193,
+        150
+      ],
+      [
+        194,
+        151
+      ],
+      [
+        195,
+        152
+      ],
+      [
+        196,
+        153
+      ],
+      [
+        197,
+        154
+      ],
+      [
+        198,
+        155
+      ],
+      [
+        199,
+        156
+      ],
+      [
+        200,
+        157
+      ],
+      [
+        201,
+        158
+      ],
+      [
+        202,
+        159
+      ],
+      [
+        203,
+        160
+      ],
+      [
+        204,
+        161
+      ],
+      [
+        205,
+        162
+      ],
+      [
+        206,
+        163
+      ],
+      [
+        207,
+        164
+      ],
+      [
+        210,
+        165
+      ],
+      [
+        211,
+        166
+      ],
+      [
+        212,
+        167
+      ],
+      [
+        213,
+        168
+      ],
+      [
+        214,
+        169
+      ],
+      [
+        215,
+        170
+      ],
+      [
+        216,
+        171
+      ],
+      [
+        217,
+        172
+      ],
+      [
+        218,
+        173
+      ],
+      [
+        219,
+        174
+      ],
+      [
+        220,
+        175
+      ],
+      [
+        221,
+        176
+      ],
+      [
+        222,
+        177
+      ],
+      [
+        223,
+        178
+      ],
+      [
+        224,
+        179
+      ],
+      [
+        225,
+        180
+      ],
+      [
+        226,
+        181
+      ],
+      [
+        227,
+        182
+      ],
+      [
+        228,
+        183
+      ],
+      [
+        229,
+        184
+      ],
+      [
+        230,
+        185
+      ],
+      [
+        231,
+        186
+      ],
+      [
+        232,
+        187
+      ],
+      [
+        233,
+        188
+      ],
+      [
+        234,
+        189
+      ],
+      [
+        235,
+        190
+      ],
+      [
+        236,
+        191
+      ],
+      [
+        237,
+        192
+      ],
+      [
+        238,
+        193
+      ],
+      [
+        239,
+        194
+      ],
+      [
+        240,
+        195
+      ],
+      [
+        241,
+        196
+      ],
+      [
+        242,
+        197
+      ],
+      [
+        243,
+        198
+      ],
+      [
+        244,
+        199
+      ],
+      [
+        245,
+        200
+      ],
+      [
+        246,
+        201
+      ],
+      [
+        247,
+        202
+      ],
+      [
+        248,
+        203
+      ],
+      [
+        249,
+        204
+      ],
+      [
+        250,
+        205
+      ],
+      [
+        251,
+        206
+      ],
+      [
+        252,
+        207
+      ],
+      [
+        253,
+        208
+      ],
+      [
+        254,
+        209
+      ],
+      [
+        255,
+        210
+      ],
+      [
+        256,
+        211
+      ],
+      [
+        257,
+        212
+      ],
+      [
+        258,
+        213
+      ],
+      [
+        259,
+        214
+      ],
+      [
+        260,
+        215
+      ],
+      [
+        261,
+        216
+      ],
+      [
+        262,
+        217
+      ],
+      [
+        263,
+        218
+      ],
+      [
+        264,
+        219
+      ],
+      [
+        265,
+        220
+      ],
+      [
+        266,
+        221
+      ],
+      [
+        267,
+        222
+      ],
+      [
+        268,
+        223
+      ],
+      [
+        269,
+        224
+      ],
+      [
+        270,
+        225
+      ],
+      [
+        271,
+        226
+      ],
+      [
+        272,
+        227
+      ],
+      [
+        273,
+        228
+      ],
+      [
+        536,
+        229
+      ],
+      [
+        537,
+        230
+      ],
+      [
+        538,
+        231
+      ],
+      [
+        539,
+        232
+      ],
+      [
+        540,
+        233
+      ],
+      [
+        541,
+        234
+      ],
+      [
+        542,
+        235
+      ],
+      [
+        543,
+        236
+      ],
+      [
+        544,
+        237
+      ],
+      [
+        545,
+        238
+      ],
+      [
+        546,
+        239
+      ],
+      [
+        547,
+        240
+      ],
+      [
+        548,
+        241
+      ],
+      [
+        549,
+        242
+      ],
+      [
+        550,
+        243
+      ],
+      [
+        551,
+        244
+      ],
+      [
+        552,
+        245
+      ],
+      [
+        553,
+        246
+      ],
+      [
+        554,
+        247
+      ],
+      [
+        555,
+        248
+      ],
+      [
+        556,
+        249
+      ],
+      [
+        557,
+        250
+      ],
+      [
+        558,
+        251
+      ],
+      [
+        559,
+        252
+      ],
+      [
+        560,
+        253
+      ],
+      [
+        561,
+        254
+      ],
+      [
+        562,
+        255
+      ],
+      [
+        563,
+        256
+      ],
+      [
+        564,
+        257
+      ],
+      [
+        565,
+        258
+      ],
+      [
+        566,
+        259
+      ],
+      [
+        567,
+        260
+      ],
+      [
+        568,
+        261
+      ],
+      [
+        569,
+        262
+      ],
+      [
+        570,
+        263
+      ],
+      [
+        571,
+        264
+      ],
+      [
+        572,
+        265
+      ],
+      [
+        573,
+        266
+      ],
+      [
+        574,
+        267
+      ],
+      [
+        575,
+        268
+      ],
+      [
+        576,
+        269
+      ],
+      [
+        577,
+        270
+      ],
+      [
+        578,
+        271
+      ],
+      [
+        579,
+        272
+      ],
+      [
+        580,
+        273
+      ],
+      [
+        581,
+        274
+      ],
+      [
+        582,
+        275
+      ],
+      [
+        583,
+        276
+      ],
+      [
+        584,
+        277
+      ],
+      [
+        585,
+        278
+      ],
+      [
+        586,
+        279
+      ],
+      [
+        587,
+        280
+      ],
+      [
+        588,
+        281
+      ],
+      [
+        589,
+        282
+      ],
+      [
+        590,
+        283
+      ],
+      [
+        591,
+        284
+      ],
+      [
+        592,
+        285
+      ],
+      [
+        593,
+        286
+      ],
+      [
+        594,
+        287
+      ],
+      [
+        595,
+        288
+      ],
+      [
+        596,
+        289
+      ],
+      [
+        597,
+        290
+      ],
+      [
+        598,
+        291
+      ],
+      [
+        599,
+        292
+      ],
+      [
+        600,
+        293
+      ],
+      [
+        601,
+        294
+      ],
+      [
+        602,
+        295
+      ],
+      [
+        603,
+        296
+      ],
+      [
+        604,
+        297
+      ],
+      [
+        605,
+        298
+      ],
+      [
+        606,
+        299
+      ],
+      [
+        607,
+        300
+      ],
+      [
+        608,
+        301
+      ],
+      [
+        609,
+        302
+      ],
+      [
+        610,
+        303
+      ],
+      [
+        611,
+        304
+      ],
+      [
+        612,
+        305
+      ],
+      [
+        613,
+        306
+      ],
+      [
+        614,
+        307
+      ],
+      [
+        615,
+        308
+      ],
+      [
+        616,
+        309
+      ],
+      [
+        617,
+        310
+      ],
+      [
+        618,
+        311
+      ],
+      [
+        619,
+        312
+      ],
+      [
+        620,
+        313
+      ]
+    ]
+  },
+  "backend": {
+    "program_path": "payloads/backend-bfa4964942234f43.json",
+    "native_kernels": [
+      {
+        "kernel": 0,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000000-c35565f97959dadd.bin"
+      },
+      {
+        "kernel": 1,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000001-cee13ded5a889dac.bin"
+      },
+      {
+        "kernel": 2,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000002-5ec937f70f214c24.bin"
+      },
+      {
+        "kernel": 3,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000003-c47469920f67fa12.bin"
+      },
+      {
+        "kernel": 4,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000004-29af32e3e9518c48.bin"
+      },
+      {
+        "kernel": 5,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000005-f63de46b50c2eef6.bin"
+      },
+      {
+        "kernel": 6,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000006-aa8d3cd33eb576d0.bin"
+      },
+      {
+        "kernel": 7,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000007-97b84b05779883df.bin"
+      },
+      {
+        "kernel": 8,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000008-9fad30a40252443c.bin"
+      },
+      {
+        "kernel": 9,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000009-e03f8f07f7a90dcd.bin"
+      },
+      {
+        "kernel": 10,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000000a-f0ad511d1f7e842b.bin"
+      },
+      {
+        "kernel": 11,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000000b-fa1da63a9390172c.bin"
+      },
+      {
+        "kernel": 12,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000000c-0bd14134a62aa1ba.bin"
+      },
+      {
+        "kernel": 19,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000013-2dcdd29120835832.bin"
+      },
+      {
+        "kernel": 20,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000014-ac1fab3c89f8636d.bin"
+      },
+      {
+        "kernel": 21,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000015-02a695e801ca20b9.bin"
+      },
+      {
+        "kernel": 23,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000017-2ff5502ae8b09179.bin"
+      },
+      {
+        "kernel": 24,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000018-d9316c828f515550.bin"
+      },
+      {
+        "kernel": 25,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000019-f7842e21d27e13b1.bin"
+      },
+      {
+        "kernel": 26,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000001a-ea5e3d5d64bec7af.bin"
+      },
+      {
+        "kernel": 33,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000021-334c636b60e2b47c.bin"
+      },
+      {
+        "kernel": 34,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000022-467365ebbebdea5a.bin"
+      },
+      {
+        "kernel": 45,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000002d-9285626b7ff6f0e4.bin"
+      },
+      {
+        "kernel": 46,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000002e-772511d59e39cef3.bin"
+      },
+      {
+        "kernel": 47,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000002f-374720483283f088.bin"
+      },
+      {
+        "kernel": 48,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000030-e31e165b2271aced.bin"
+      },
+      {
+        "kernel": 60,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000003c-fc9f87d9e717857a.bin"
+      },
+      {
+        "kernel": 69,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000045-90633602b6191cae.bin"
+      },
+      {
+        "kernel": 70,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000046-10d43aeb212017d7.bin"
+      },
+      {
+        "kernel": 71,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000047-edcd646be473fe86.bin"
+      },
+      {
+        "kernel": 72,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000048-ed0405160e14b72f.bin"
+      },
+      {
+        "kernel": 73,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000049-64c48e2924c05664.bin"
+      },
+      {
+        "kernel": 74,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000004a-9e8ff8be2c1185e8.bin"
+      },
+      {
+        "kernel": 75,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000004b-bd1153a73f801447.bin"
+      },
+      {
+        "kernel": 78,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000004e-8960bd5e74fc4a6f.bin"
+      },
+      {
+        "kernel": 79,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000004f-2e7a000791fc29be.bin"
+      },
+      {
+        "kernel": 82,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000052-32161b77871dddf5.bin"
+      },
+      {
+        "kernel": 98,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000062-a88b926af964ce91.bin"
+      },
+      {
+        "kernel": 100,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000064-61356b2da6ae0419.bin"
+      },
+      {
+        "kernel": 101,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000065-b14fa76ab4d30d33.bin"
+      },
+      {
+        "kernel": 103,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000067-d97c5fb15369732b.bin"
+      },
+      {
+        "kernel": 104,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000068-635050825d25c71a.bin"
+      },
+      {
+        "kernel": 105,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000069-7cd1ea26aaa2751f.bin"
+      },
+      {
+        "kernel": 106,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000006a-d58e39980a849c11.bin"
+      },
+      {
+        "kernel": 112,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000070-10994a71e14c30f5.bin"
+      },
+      {
+        "kernel": 133,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000085-88cda4825ced3a27.bin"
+      },
+      {
+        "kernel": 134,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000086-69c87b0a4bc09508.bin"
+      },
+      {
+        "kernel": 150,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000096-e5fd75a5039c5b7f.bin"
+      },
+      {
+        "kernel": 154,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000009a-739a2808e55e14f0.bin"
+      },
+      {
+        "kernel": 156,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000009c-6cfd1dc2a4685484.bin"
+      },
+      {
+        "kernel": 157,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000009d-d627d34ae5f6947c.bin"
+      },
+      {
+        "kernel": 158,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000009e-8c69458b9c92b241.bin"
+      },
+      {
+        "kernel": 159,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000009f-8ad689e1796f2adc.bin"
+      },
+      {
+        "kernel": 160,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a0-aa0d3b28e5d1cffe.bin"
+      },
+      {
+        "kernel": 161,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a1-0a8bacff93f4aee7.bin"
+      },
+      {
+        "kernel": 162,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a2-dad1a8b6aaf9948a.bin"
+      },
+      {
+        "kernel": 163,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a3-5ac44a9e19fdd378.bin"
+      },
+      {
+        "kernel": 164,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a4-8ba5db9d2c4772d1.bin"
+      },
+      {
+        "kernel": 169,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000a9-852b08da85863c87.bin"
+      },
+      {
+        "kernel": 181,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000b5-e64fd021a5d980db.bin"
+      },
+      {
+        "kernel": 182,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000b6-48f798668494ae05.bin"
+      },
+      {
+        "kernel": 183,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000b7-f8109b6f9abbd516.bin"
+      },
+      {
+        "kernel": 184,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000b8-ac8d148771b2440a.bin"
+      },
+      {
+        "kernel": 185,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000b9-b0b3465958f1d0e7.bin"
+      },
+      {
+        "kernel": 186,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000ba-a096ad2d98f0dc57.bin"
+      },
+      {
+        "kernel": 187,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000bb-57efd0d4d2005631.bin"
+      },
+      {
+        "kernel": 188,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000bc-1da286da6cfc6eb9.bin"
+      },
+      {
+        "kernel": 194,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000c2-ed61826bb2c1882c.bin"
+      },
+      {
+        "kernel": 204,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000cc-aa8d67ef451921ff.bin"
+      },
+      {
+        "kernel": 218,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000da-af23d8e6d7582c8a.bin"
+      },
+      {
+        "kernel": 219,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000db-0bc1e662c5ca98bb.bin"
+      },
+      {
+        "kernel": 220,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000dc-6e37d7d5bf241b75.bin"
+      },
+      {
+        "kernel": 221,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000dd-4285cfe90ed8bbf0.bin"
+      },
+      {
+        "kernel": 223,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000df-9120d3acfd37a778.bin"
+      },
+      {
+        "kernel": 224,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e0-a465f4d5fd8ca25f.bin"
+      },
+      {
+        "kernel": 227,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e3-1919cce967c54ff9.bin"
+      },
+      {
+        "kernel": 228,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e4-6e00a0702e5bcaa8.bin"
+      },
+      {
+        "kernel": 229,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e5-60ad9222a6eb873d.bin"
+      },
+      {
+        "kernel": 230,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e6-9fc1b2ce68247f1b.bin"
+      },
+      {
+        "kernel": 231,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e7-2037681a04f95486.bin"
+      },
+      {
+        "kernel": 232,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e8-bb254d14f436272d.bin"
+      },
+      {
+        "kernel": 233,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000e9-b815a7909f41b586.bin"
+      },
+      {
+        "kernel": 234,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000ea-1c5d185dd8e1a590.bin"
+      },
+      {
+        "kernel": 236,
+        "artifact_path": "payloads/native-bfa4964942234f43-000000ec-9c39863dbb58f8b9.bin"
+      },
+      {
+        "kernel": 283,
+        "artifact_path": "payloads/native-bfa4964942234f43-0000011b-b069fc78bb2bdcd3.bin"
+      },
+      {
+        "kernel": 304,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000130-e049cad4b0304c5a.bin"
+      },
+      {
+        "kernel": 309,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000135-374eaf3fc093ae50.bin"
+      },
+      {
+        "kernel": 310,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000136-c975b121f9d2f099.bin"
+      },
+      {
+        "kernel": 311,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000137-3298b58ca203673c.bin"
+      },
+      {
+        "kernel": 312,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000138-dad97062e9c9c090.bin"
+      },
+      {
+        "kernel": 313,
+        "artifact_path": "payloads/native-bfa4964942234f43-00000139-bc102f7d9a6a6d3d.bin"
+      }
+    ]
+  },
+  "event_handlers": [],
+  "stub_signal_defaults": []
+}

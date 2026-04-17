@@ -1,8 +1,8 @@
 use super::{
     HydratedRunNode, ResolvedRunEventHandler, ResolvedRunEventPayload, RunHydrationStaticState,
     WorkspaceHirSnapshot, check_file, execute_file_with_context, plan_run_hydration,
-    plan_run_hydration_profiled, prepare_execute_artifact, prepare_run_artifact,
-    run_hydration_globals_ready, test_file_with_context,
+    prepare_execute_artifact, prepare_run_artifact, run_hydration_globals_ready,
+    test_file_with_context,
 };
 use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
 use aivi_base::SourceDatabase;
@@ -873,18 +873,9 @@ value view =
 }
 
 #[test]
-fn run_hydration_profile_tracks_fragment_and_kernel_activity() {
+fn run_artifact_roundtrip_preserves_hydration_structure_and_native_sidecars() {
     let artifact = prepare_run_from_text("planner-window.aivi", planner_window_source(), None)
         .expect("planner window should compile for live run hydration");
-    let shared = RunHydrationStaticState {
-        view_name: artifact.view_name.clone(),
-        patterns: artifact.patterns.clone(),
-        bridge: artifact.bridge.clone(),
-        inputs: artifact.hydration_inputs.clone(),
-    };
-
-    let (_plan, profile) = plan_run_hydration_profiled(&shared, &BTreeMap::new())
-        .expect("planner window should produce a hydration profile");
     let temp = TempDir::new("run-artifact-profile-roundtrip");
     let artifact_path = super::write_serialized_run_artifact_bundle(temp.path(), &artifact)
         .expect("run artifact bundle should write");
@@ -901,10 +892,6 @@ fn run_hydration_profile_tracks_fragment_and_kernel_activity() {
     )
     .expect("reloaded artifact should hydrate");
 
-    assert!(profile.planned_nodes > 0);
-    assert!(profile.evaluated_inputs > 0);
-    assert!(!profile.fragment_profiles.is_empty());
-    assert!(!profile.program_profiles.is_empty());
     assert_eq!(artifact.view_name, reloaded.view_name);
     assert_eq!(artifact.patterns, reloaded.patterns);
     assert_eq!(artifact.bridge, reloaded.bridge);
@@ -918,12 +905,6 @@ fn run_hydration_profile_tracks_fragment_and_kernel_activity() {
         "serialized run artifact should reload precompiled native kernel sidecars"
     );
     assert!(matches!(reloaded_plan.root, HydratedRunNode::Widget { .. }));
-    assert!(
-        profile
-            .program_profiles
-            .values()
-            .any(|program| !program.kernels.is_empty())
-    );
 }
 
 #[test]

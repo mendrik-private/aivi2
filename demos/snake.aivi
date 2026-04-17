@@ -385,7 +385,7 @@ type GameState -> Text -> (List RenderTile)
 func boardTilesForState = st assetRoot =>
     renderBoardTiles assetRoot st.dir st.snake st.food
 
-@source timer.every 300ms with {
+@source timer.every 200ms with {
     immediate: False,
     coalesce: True
 }
