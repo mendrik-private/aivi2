@@ -2112,18 +2112,34 @@ impl<'a> GeneralExprElaborator<'a> {
         env: &GateExprEnv,
         ambient: Option<&GateType>,
     ) -> Option<GateType> {
-        if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind
-            && let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+        if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind {
+            if let ResolutionState::Resolved(TermResolution::Item(item_id)) =
                 reference.resolution.as_ref()
-            && !self.equality_evidence.requirements_for(*item_id).is_empty()
-        {
-            self.visible_callable_item_type(*item_id)
-        } else {
-            let inferred_callee = self.typing.infer_expr(callee, env, ambient);
-            inferred_callee
-                .actual_gate_type()
-                .or_else(|| inferred_callee.ty.clone())
+                && !self.equality_evidence.requirements_for(*item_id).is_empty()
+            {
+                return self.visible_callable_item_type(*item_id);
+            }
+            // For class members, `infer_expr` returns no type because the class parameter is
+            // unbound. Extract the open type from the class member annotation so that
+            // `lower_apply_expr` can substitute concrete argument types and propagate
+            // per-argument expected types to sub-expressions.
+            let resolution = match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TermResolution::ClassMember(r)) => Some(*r),
+                ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(candidates)) => {
+                    Some(*candidates.first())
+                }
+                _ => None,
+            };
+            if let Some(res) = resolution
+                && let Some((_, annotation, _)) = self.typing.class_member_signature(res)
+            {
+                return self.typing.lower_open_annotation(annotation);
+            }
         }
+        let inferred_callee = self.typing.infer_expr(callee, env, ambient);
+        inferred_callee
+            .actual_gate_type()
+            .or_else(|| inferred_callee.ty.clone())
     }
 
     fn inferred_apply_result_type(
@@ -4184,8 +4200,9 @@ impl<'a> GeneralExprElaborator<'a> {
                 expected.filter(|e| e.has_type_params()).cloned()
             })
             .ok_or_else(|| {
+                let sp = self.module.exprs()[expr_id].span;
                 vec![GeneralExprBlocker::UnknownExprType {
-                    span: self.module.exprs()[expr_id].span,
+                    span: sp,
                 }]
             })
     }

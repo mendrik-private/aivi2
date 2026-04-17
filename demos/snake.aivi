@@ -37,7 +37,6 @@ type MiddleWindowState = {
     windows: List ((Cell, Cell), (Cell, Cell))
 }
 
-
 type RenderTile = {
     id: Int,
     column: Int,
@@ -55,6 +54,8 @@ value noCell : Option Cell = None
 value emptyCellPairs : List (Cell, Cell) = []
 value noMiddleWindowPair : Option (Cell, Cell) = None
 value emptyMiddleWindows : List ((Cell, Cell), (Cell, Cell)) = []
+value noTextAsset : Option Text = None
+value emptyCellAssetPairs : List (Cell, Text) = []
 
 type Direction -> Direction
 func opposite = arg1 => arg1
@@ -112,18 +113,25 @@ func sameCell = target candidate =>
 domain Snake over NonEmptyList Cell = {
     type fromCells : NonEmptyList Cell -> Snake
     fromCells = cells => cells
+
     type head : Snake -> Cell
     head = snake => nelHead snake
+
     type contains : Snake -> Cell -> Bool
     contains = snake cell => any (sameCell cell) (toList snake)
+
     type length : Snake -> Int
     length = snake => nelLength snake
+
     type cells : Snake -> List Cell
     cells = snake => toList snake
+
     type grow : Snake -> Cell -> Snake
     grow = snake cell => cons cell snake
+
     type move : Snake -> Cell -> Snake
     move = snake cell => fromHeadTail cell (nelInit snake)
+
     type nextHead : Snake -> Direction -> Cell
     nextHead = snake dir => moveDir dir (nelHead snake)
 }
@@ -293,14 +301,13 @@ func headDirFromPairs = dir pairs => firstCellPair pairs
 // Extract (cell, asset) for one middle-window segment.
 type Text -> ((Cell, Cell), (Cell, Cell)) -> (Cell, Text)
 func windowCellAsset = assetRoot win => win
- ||> ((prev, cur), (_, next)) ->
-     (cur, middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next))
+ ||> ((prev, cur), (_, next)) -> (cur, middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next))
 
 // Tail entry as a singleton list (empty when snake has only one cell).
 type Text -> Option (Cell, Cell) -> List (Cell, Text)
 func tailCellEntries = assetRoot tailPair => tailPair
- ||> Some (prev, tail) -> cons (tail, tailAssetFor assetRoot (directionFromTo prev tail)) []
- ||> None              -> []
+ ||> Some (prev, tail) -> cons (tail, tailAssetFor assetRoot (directionFromTo prev tail)) emptyCellAssetPairs
+ ||> None              -> emptyCellAssetPairs
 
 // Build [(cell, asset)] for all snake cells from precomputed pairs — called ONCE per tick.
 type Text -> Direction -> Snake -> List (Cell, Cell) -> List (Cell, Text)
@@ -315,11 +322,11 @@ func snakeCellAssetListFull = assetRoot snake headDir wins tailPair =>
 type Cell -> Cell -> Text -> Option Text
 func matchCellAsset = target cell asset => cell == target
  T|> Some asset
- F|> None
+ F|> noTextAsset
 
 // Extract asset from an entry if its cell matches target.
 type Cell -> (Cell, Text) -> Option Text
-func cellEntryAsset = target entry => entry
+func cellEntryAsset = target pair => pair
  ||> (cell, asset) -> matchCellAsset target cell asset
 
 // Accumulate first matching asset, keeping any already-found value.
@@ -331,7 +338,7 @@ func findAssetStep = target acc entry => acc
 // Scan the precomputed snake cell list for a target cell.
 type List (Cell, Text) -> Cell -> Option Text
 func findSnakeAsset = snakeCells target =>
-    reduce (findAssetStep target) None snakeCells
+    reduce (findAssetStep target) noTextAsset snakeCells
 
 type Text -> Cell -> Cell -> Text
 func foodOrEmptyAsset = assetRoot target food => target == food

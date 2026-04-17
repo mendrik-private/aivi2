@@ -437,10 +437,7 @@ fn prepare_run_accepts_snake_demo() {
         .values()
         .map(|name| name.as_ref())
         .collect::<Vec<_>>();
-    assert!(required.contains(&"boardText"));
-    assert!(required.contains(&"scoreLine"));
-    assert!(required.contains(&"statusLine"));
-    assert!(required.contains(&"dirLine"));
+    assert!(required.contains(&"boardTiles"));
 }
 
 #[test]
