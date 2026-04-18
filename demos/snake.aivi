@@ -18,12 +18,28 @@ type Status = Running | GameOver
 
 type Cell = Cell Int Int
 
+type TCell = (Cell, Text)
+
+type CPair = (Cell, Cell)
+
+type QPair = (CPair, CPair)
+
 type Event =
   | Tick
   | Turn Direction
   | Restart
 
 type Key = Key Text
+
+type AdjacentPairState = (
+    Cell,
+    List CPair
+)
+
+type MiddleWindowState = (
+    CPair,
+    List QPair
+)
 
 type RenderTile = {
     id: Int,
@@ -219,74 +235,104 @@ func resolveMoveStep = st h =>
         seed: nextSeed st.seed,
     }
 
-type List Cell -> (List (Cell, Cell))
+type List Cell -> (List CPair)
 func adjacentPairs = cells => cells
- ||> []                       -> []
- ||> [_]                      -> []
- ||> [first, second, ...rest] -> cons (first, second) (adjacentPairs (cons second rest))
+ ||> []               -> []
+ ||> [first, ...rest] -> adjacentPairsFromFirstCell first rest
 
 // Takes already-computed adjacent pairs — avoids recomputing adjacentPairs per window call.
-type List (Cell, Cell) -> List ((Cell, Cell), (Cell, Cell))
+type List CPair -> List QPair
 func middleWindowsFromPairs = pairs => pairs
- ||> []                       -> []
- ||> [_]                      -> []
- ||> [first, second, ...rest] -> cons (first, second) (middleWindowsFromPairs (cons second rest))
+ ||> []               -> []
+ ||> [first, ...rest] -> middleWindowsFromFirstPair first rest
 
-type List (Cell, Cell) -> (Option (Cell, Cell))
+type Cell -> List Cell -> List CPair
+func adjacentPairsFromFirstCell = first rest => rest
+  |> reduce adjacentPairStep (first, [])
+  |> adjacentPairStatePairs
+
+type AdjacentPairState -> List CPair
+func adjacentPairStatePairs = state => state
+ ||> (_, pairs) -> pairs
+
+type AdjacentPairState -> Cell -> AdjacentPairState
+func adjacentPairStep = state current => state
+ ||> (previous, pairs) -> (current, append pairs [(previous, current)])
+
+type MiddleWindowState -> List QPair
+func middleWindowStateWindows = state => state
+ ||> (_, windows) -> windows
+
+type MiddleWindowState -> CPair -> MiddleWindowState
+func middleWindowStep = state pair => state
+ ||> (previous, windows) -> (pair, append windows [(previous, pair)])
+
+type CPair -> List CPair -> List QPair
+func middleWindowsFromFirstPair = first rest => rest
+  |> reduce middleWindowStep (first, [])
+  |> middleWindowStateWindows
+
+type List CPair -> (Option CPair)
 func firstCellPair = pairs => pairs
  ||> [first, ..._] -> Some first
  ||> []            -> None
 
-type List (Cell, Cell) -> (Option (Cell, Cell))
+type CPair -> CPair -> CPair
+func keepLastCellPair = ignored pair =>
+    pair
+
+type List CPair -> (Option CPair)
 func lastCellPair = pairs => pairs
- ||> []           -> None
- ||> [pair]       -> Some pair
- ||> [_, ...rest] -> lastCellPair rest
+ ||> []               -> None
+ ||> [first, ...rest] -> lastCellPairFromFirst first rest
+
+type CPair -> List CPair -> CPair
+func lastCellPairValueFromFirst = first rest => rest
+  |> reduce keepLastCellPair first
+
+type CPair -> List CPair -> Option CPair
+func lastCellPairFromFirst = first rest =>
+    Some (lastCellPairValueFromFirst first rest)
 
 // Head direction from already-computed adjacent pairs (no redundant adjacentPairs call).
-type Direction -> List (Cell, Cell) -> Direction
+type Direction -> List CPair -> Direction
 func headDirFromPairs = dir pairs => firstCellPair pairs
  ||> Some (head, neck) -> directionFromTo neck head
  ||> None              -> dir
 
 // Extract (cell, asset) for one middle-window segment.
-type Text -> ((Cell, Cell), (Cell, Cell)) -> (Cell, Text)
+type Text -> QPair -> TCell
 func windowCellAsset = assetRoot win => win
  ||> ((prev, cur), (_, next)) -> (cur, middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next))
 
 // Tail entry as a singleton list (empty when snake has only one cell).
-type Text -> Option (Cell, Cell) -> List (Cell, Text)
+type Text -> Option CPair -> List TCell
 func tailCellEntries = assetRoot tailPair => tailPair
  ||> Some (prev, tail) -> cons (tail, tailAssetFor assetRoot (directionFromTo prev tail)) []
  ||> None              -> []
 
 // Build [(cell, asset)] for all snake cells from precomputed pairs — called ONCE per tick.
-type Text -> Direction -> Snake -> List (Cell, Cell) -> List (Cell, Text)
+type Text -> Direction -> Snake -> List CPair -> List TCell
 func snakeCellAssetList = assetRoot dir snake pairs =>
     snakeCellAssetListFull assetRoot snake (headDirFromPairs dir pairs) (middleWindowsFromPairs pairs) (lastCellPair pairs)
 
-type Text -> Snake -> Direction -> List ((Cell, Cell), (Cell, Cell)) -> Option (Cell, Cell) -> List (Cell, Text)
+type Text -> Snake -> Direction -> List QPair -> Option CPair -> List TCell
 func snakeCellAssetListFull = assetRoot snake headDir wins tailPair =>
     append (cons (snake.head, headAssetFor assetRoot headDir) (map (windowCellAsset assetRoot) wins)) (tailCellEntries assetRoot tailPair)
 
-// Asset if cell matches target, None otherwise.
-type Cell -> Cell -> Text -> Option Text
-func matchCellAsset = target cell asset => cell == target
- T|> Some asset
- F|> None
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
 
-// Extract asset from an entry if its cell matches target.
-type Cell -> (Cell, Text) -> Option Text
-func cellEntryAsset = target pair => pair
- ||> (cell, asset) -> matchCellAsset target cell asset
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells => snakeCells
+  |> find (cellEntryMatches target)
 
 // Scan the precomputed snake cell list for a target cell.
-type List (Cell, Text) -> Cell -> Option Text
-func findSnakeAsset = snakeCells target => snakeCells
- ||> []              -> None
- ||> [entry, ...rest] -> cellEntryAsset target entry
-  ||> Some asset -> Some asset
-  ||> None       -> findSnakeAsset rest
+type List TCell -> Cell -> Option Text
+func findSnakeAsset = snakeCells target => findSnakeAssetEntry target snakeCells
+ ||> Some (_, asset) -> Some asset
+ ||> None            -> None
 
 type Text -> Cell -> Cell -> Text
 func foodOrEmptyAsset = assetRoot target food => target == food
@@ -294,7 +340,7 @@ func foodOrEmptyAsset = assetRoot target food => target == food
  ||> False -> assetPath assetRoot "empty.png"
 
 // Per-tile asset lookup using the precomputed snake list (O(N) vs O(7N) before).
-type Text -> List (Cell, Text) -> Cell -> Cell -> Text
+type Text -> List TCell -> Cell -> Cell -> Text
 func tileAssetFor = assetRoot snakeCells food target => findSnakeAsset snakeCells target
  ||> Some asset -> asset
  ||> None       -> foodOrEmptyAsset assetRoot target food
@@ -308,20 +354,20 @@ func renderTile = x y asset =>
         asset: asset
     }
 
-type Text -> List (Cell, Text) -> Cell -> Int -> Int -> RenderTile
+type Text -> List TCell -> Cell -> Int -> Int -> RenderTile
 func renderBoardTileAt = assetRoot snakeCells food y x =>
     renderTile x y (tileAssetFor assetRoot snakeCells food (Cell x y))
 
-type Text -> List (Cell, Text) -> Cell -> Int -> (List RenderTile)
+type Text -> List TCell -> Cell -> Int -> (List RenderTile)
 func renderBoardRow = assetRoot snakeCells food y =>
     map (renderBoardTileAt assetRoot snakeCells food y) (indices boardW)
 
-type Text -> Cell -> List (Cell, Text) -> (List RenderTile)
+type Text -> Cell -> List TCell -> (List RenderTile)
 func renderBoardTilesWithList = assetRoot food snakeCells =>
     flatMap (renderBoardRow assetRoot snakeCells food) (indices boardH)
 
 // adjacentPairs computed ONCE here; all downstream functions reuse the result.
-type Text -> Direction -> Snake -> Cell -> List (Cell, Cell) -> (List RenderTile)
+type Text -> Direction -> Snake -> Cell -> List CPair -> (List RenderTile)
 func renderBoardTilesFromPairs = assetRoot dir snake food pairs =>
     renderBoardTilesWithList assetRoot food (snakeCellAssetList assetRoot dir snake pairs)
 
