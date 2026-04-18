@@ -186,20 +186,16 @@ value screenView =
     );
 
     let entries = read_embedded_bundle_entries(&executable_path);
-    let run_artifact = String::from_utf8(
-        entries
-            .get("run-artifact.json")
-            .expect("embedded executable should carry the serialized run artifact")
-            .clone(),
-    )
-    .expect("run artifact should stay valid UTF-8");
+    let run_artifact = entries
+        .get("run-artifact.bin")
+        .expect("embedded executable should carry the serialized run artifact");
     assert!(
-        run_artifact.contains("\"format\": \"aivi.run-artifact\""),
-        "expected run artifact header, got: {run_artifact}"
+        !run_artifact.is_empty(),
+        "expected non-empty binary run artifact payload"
     );
     assert!(
-        run_artifact.contains("\"view_name\": \"screenView\""),
-        "expected bundled view name in run artifact, got: {run_artifact}"
+        !entries.contains_key("run-artifact.json"),
+        "embedded executable should no longer carry a JSON run artifact"
     );
     let payload_entries = entries
         .keys()
@@ -207,8 +203,12 @@ value screenView =
         .cloned()
         .collect::<Vec<_>>();
     assert!(
-        payload_entries.iter().any(|entry| entry.ends_with(".json")),
-        "embedded executable should keep serialized backend payloads, got: {payload_entries:?}"
+        payload_entries.iter().all(|entry| !entry.ends_with(".json")),
+        "embedded executable should not keep JSON backend payloads, got: {payload_entries:?}"
+    );
+    assert!(
+        payload_entries.iter().any(|entry| entry.ends_with(".bin")),
+        "embedded executable should keep binary payloads, got: {payload_entries:?}"
     );
     assert!(
         payload_entries
@@ -269,7 +269,7 @@ export (Greeting)
     );
     let entries = read_embedded_bundle_entries(&executable_path);
     assert!(
-        entries.contains_key("run-artifact.json"),
+        entries.contains_key("run-artifact.bin"),
         "embedded executable should carry a serialized run artifact"
     );
     assert!(
@@ -306,7 +306,7 @@ fn build_accepts_snake_and_reversi_demos() {
         );
         let entries = read_embedded_bundle_entries(&executable_path);
         assert!(
-            entries.contains_key("run-artifact.json"),
+            entries.contains_key("run-artifact.bin"),
             "expected {demo} run artifact to exist"
         );
         assert!(

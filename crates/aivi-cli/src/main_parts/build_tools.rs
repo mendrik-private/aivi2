@@ -193,6 +193,12 @@ struct EmbeddedBundleEntry {
 }
 
 #[derive(Debug)]
+struct DecodedEmbeddedBundle {
+    extracted_root: tempfile::TempDir,
+    generated_entries: BTreeMap<PathBuf, Vec<u8>>,
+}
+
+#[derive(Debug)]
 struct WorkspaceEmbeddingLayout {
     source_root: PathBuf,
     embedded_prefix: PathBuf,
@@ -599,15 +605,16 @@ fn maybe_run_embedded_build_output(arguments: &[OsString]) -> Result<Option<Exit
     let Some(bundle) = read_embedded_bundle_descriptor(&executable)? else {
         return Ok(None);
     };
-    let extracted = extract_embedded_bundle(&executable, &bundle)?;
-    let artifact_path = extracted.path().join(RUN_ARTIFACT_FILE_NAME);
-    let artifact = load_serialized_run_artifact(&artifact_path, None)?;
-    let launch_cwd = read_embedded_launch_cwd(extracted.path())?
-        .map(|relative| extracted.path().join(relative))
-        .unwrap_or_else(|| extracted.path().to_path_buf());
+    let decoded = decode_embedded_bundle(&executable, &bundle)?;
+    let artifact = load_serialized_run_artifact_from_bundle_entries(&decoded.generated_entries, None)?;
+    let launch_cwd = read_embedded_launch_cwd_from_entries(&decoded.generated_entries)?
+        .map(|relative| decoded.extracted_root.path().join(relative))
+        .unwrap_or_else(|| decoded.extracted_root.path().to_path_buf());
+    fs::create_dir_all(&launch_cwd)
+        .map_err(|error| format!("failed to create embedded launch cwd {}: {error}", launch_cwd.display()))?;
     let _cwd_guard = CurrentDirGuard::enter(&launch_cwd)?;
     let exit = run_session::launch_run_with_config(
-        &artifact_path,
+        &executable,
         artifact,
         run_session::RunLaunchConfig::new(SourceProviderManager::with_context(
             SourceProviderContext::current().with_app_dir(launch_cwd.clone()),
@@ -616,6 +623,31 @@ fn maybe_run_embedded_build_output(arguments: &[OsString]) -> Result<Option<Exit
         |_| {},
     )?;
     Ok(Some(exit))
+}
+
+fn load_serialized_run_artifact_from_bundle_entries(
+    entries: &BTreeMap<PathBuf, Vec<u8>>,
+    requested_view: Option<&str>,
+) -> Result<RunArtifact, String> {
+    let artifact_key = PathBuf::from(RUN_ARTIFACT_FILE_NAME);
+    let artifact_bytes = entries
+        .get(&artifact_key)
+        .ok_or_else(|| format!("embedded bundle is missing {}", artifact_key.display()))?
+        .clone();
+    let entry_bytes = entries.clone();
+    load_serialized_run_artifact_from_bytes(
+        artifact_bytes.as_slice(),
+        requested_view,
+        Box::new(move |relative_path| {
+            let key = validate_embedded_bundle_relative_path(relative_path)?;
+            entry_bytes.get(&key).cloned().ok_or_else(|| {
+                format!(
+                    "embedded bundle is missing generated payload {}",
+                    key.display()
+                )
+            })
+        }),
+    )
 }
 
 fn copy_workspace_companion_files(
@@ -819,13 +851,18 @@ fn write_embedded_launch_cwd_file(bundle_root: &Path, launch_cwd: &Path) -> Resu
     })
 }
 
-fn read_embedded_launch_cwd(bundle_root: &Path) -> Result<Option<PathBuf>, String> {
-    let path = bundle_root.join(EMBEDDED_BUNDLE_LAUNCH_CWD_FILE);
-    if !path.is_file() {
+fn read_embedded_launch_cwd_from_entries(
+    entries: &BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(bytes) = entries.get(&PathBuf::from(EMBEDDED_BUNDLE_LAUNCH_CWD_FILE)) else {
         return Ok(None);
-    }
-    let text =
-        fs::read_to_string(&path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    };
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        format!(
+            "embedded launch cwd metadata {} is not valid UTF-8: {error}",
+            EMBEDDED_BUNDLE_LAUNCH_CWD_FILE
+        )
+    })?;
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -867,16 +904,17 @@ fn read_embedded_bundle_descriptor(path: &Path) -> Result<Option<EmbeddedBundleD
     }))
 }
 
-fn extract_embedded_bundle(
+fn decode_embedded_bundle(
     executable: &Path,
     descriptor: &EmbeddedBundleDescriptor,
-) -> Result<tempfile::TempDir, String> {
+) -> Result<DecodedEmbeddedBundle, String> {
     use std::io::{Read, Seek, SeekFrom};
 
-    let temp = tempfile::Builder::new()
+    let extracted_root = tempfile::Builder::new()
         .prefix(".aivi-embedded-run-")
         .tempdir()
         .map_err(|error| format!("failed to create embedded bundle tempdir: {error}"))?;
+    let mut generated_entries = BTreeMap::new();
     let mut input = fs::File::open(executable)
         .map_err(|error| format!("failed to open {}: {error}", executable.display()))?;
     input
@@ -917,31 +955,26 @@ fn extract_embedded_bundle(
             )
         })?;
         let relative = validate_embedded_bundle_relative_path(relative)?;
-        let destination = temp.path().join(&relative);
+        let mut bytes = vec![0u8; file_len as usize];
+        input.read_exact(&mut bytes).map_err(|error| {
+            format!(
+                "failed to read embedded bundle entry {} from {}: {error}",
+                relative.display(),
+                executable.display()
+            )
+        })?;
+        consumed += file_len;
+        if should_keep_embedded_entry_in_memory(&relative) {
+            generated_entries.insert(relative, bytes);
+            continue;
+        }
+        let destination = extracted_root.path().join(&relative);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
         }
-        let mut output = fs::File::create(&destination)
-            .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
-        let copied = std::io::copy(
-            &mut std::io::Read::by_ref(&mut input).take(file_len),
-            &mut output,
-        )
-        .map_err(|error| {
-            format!(
-                "failed to extract embedded bundle entry {}: {error}",
-                relative.display()
-            )
-        })?;
-        if copied != file_len {
-            return Err(format!(
-                "embedded bundle entry {} was truncated while extracting from {}",
-                relative.display(),
-                executable.display()
-            ));
-        }
-        consumed += copied;
+        fs::write(&destination, bytes)
+            .map_err(|error| format!("failed to write {}: {error}", destination.display()))?;
     }
 
     if consumed != descriptor.archive_len {
@@ -953,7 +986,23 @@ fn extract_embedded_bundle(
         ));
     }
 
-    Ok(temp)
+    Ok(DecodedEmbeddedBundle {
+        extracted_root,
+        generated_entries,
+    })
+}
+
+fn should_keep_embedded_entry_in_memory(relative: &Path) -> bool {
+    if relative == Path::new(RUN_ARTIFACT_FILE_NAME) {
+        return true;
+    }
+    if relative == Path::new(EMBEDDED_BUNDLE_LAUNCH_CWD_FILE) {
+        return true;
+    }
+    matches!(
+        relative.components().next(),
+        Some(std::path::Component::Normal(name)) if name == std::ffi::OsStr::new(RUN_ARTIFACT_PAYLOAD_DIR)
+    )
 }
 
 fn read_u32_le_from(reader: &mut fs::File, path: &Path) -> Result<u32, String> {

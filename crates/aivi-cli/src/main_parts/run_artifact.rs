@@ -1,6 +1,6 @@
 const RUN_ARTIFACT_FORMAT: &str = "aivi.run-artifact";
 const RUN_ARTIFACT_VERSION: u32 = 2;
-const RUN_ARTIFACT_FILE_NAME: &str = "run-artifact.json";
+const RUN_ARTIFACT_FILE_NAME: &str = "run-artifact.bin";
 const RUN_ARTIFACT_PAYLOAD_DIR: &str = "payloads";
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -232,7 +232,7 @@ impl ArtifactPayloadRegistry {
         program: Arc<BackendProgram>,
     ) -> Result<BackendPayloadWire, String> {
         let program_path =
-            format!("{RUN_ARTIFACT_PAYLOAD_DIR}/backend-{key:016x}.json").into_boxed_str();
+            format!("{RUN_ARTIFACT_PAYLOAD_DIR}/backend-{key:016x}.bin").into_boxed_str();
         let entry = match self.entries.entry(program_path.clone()) {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::btree_map::Entry::Vacant(entry) => {
@@ -265,9 +265,9 @@ impl ArtifactPayloadRegistry {
                     format!("failed to create {}: {error}", parent.display())
                 })?;
             }
-            let bytes = aivi_backend::encode_program_json(payload.program.as_ref()).map_err(|error| {
+            let bytes = aivi_backend::encode_program_binary(payload.program.as_ref()).map_err(|error| {
                 format!(
-                    "failed to encode backend payload {}: {error}",
+                    "failed to encode backend payload {} as binary: {error}",
                     relative_path.as_ref()
                 )
             })?;
@@ -290,40 +290,38 @@ impl ArtifactPayloadRegistry {
     }
 }
 
-#[derive(Default)]
 struct ArtifactPayloadLoader {
     entries: BTreeMap<Box<str>, LoadedBackendPayload>,
+    read_payload: Box<dyn FnMut(&str) -> Result<Vec<u8>, String>>,
 }
 
 impl ArtifactPayloadLoader {
-    fn load(
-        &mut self,
-        root: &Path,
-        payload: &BackendPayloadWire,
-    ) -> Result<LoadedBackendPayload, String> {
+    fn new(read_payload: Box<dyn FnMut(&str) -> Result<Vec<u8>, String>>) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            read_payload,
+        }
+    }
+
+    fn load(&mut self, payload: &BackendPayloadWire) -> Result<LoadedBackendPayload, String> {
         if let Some(program) = self.entries.get(&payload.program_path).cloned() {
             return Ok(program);
         }
-        let path = root.join(payload.program_path.as_ref());
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        let program = Arc::new(
-            aivi_backend::decode_program_json(&bytes).map_err(|error| {
-                format!("failed to decode backend payload {}: {error}", path.display())
-            })?,
-        );
+        let bytes = (self.read_payload)(payload.program_path.as_ref())?;
+        let program = Arc::new(decode_backend_payload_bytes(
+            &bytes,
+            payload.program_path.as_ref(),
+        )?);
         let mut native_kernels = aivi_backend::NativeKernelArtifactSet::default();
         for native in payload.native_kernels.iter() {
-            let path = root.join(native.artifact_path.as_ref());
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let bytes = (self.read_payload)(native.artifact_path.as_ref())?;
             let artifact = aivi_backend::decode_native_kernel_artifact_binary(&bytes).ok_or_else(
-                || format!("failed to decode native backend payload {}", path.display()),
+                || format!("failed to decode native backend payload {}", native.artifact_path),
             )?;
             if artifact.requested_kernel() != native.kernel {
                 return Err(format!(
                     "native backend payload {} targets kernel {} but manifest expects {}",
-                    path.display(),
+                    native.artifact_path,
                     artifact.requested_kernel().as_raw(),
                     native.kernel.as_raw()
                 ));
@@ -382,8 +380,8 @@ fn write_serialized_run_artifact_bundle(
     let serialized = serialize_run_artifact(artifact, &mut payloads)?;
     payloads.write_all(root)?;
     let artifact_path = root.join(RUN_ARTIFACT_FILE_NAME);
-    let bytes = serde_json::to_vec_pretty(&serialized)
-        .map_err(|error| format!("failed to encode run artifact: {error}"))?;
+    let bytes = bincode::serialize(&serialized)
+        .map_err(|error| format!("failed to encode run artifact as binary: {error}"))?;
     fs::write(&artifact_path, bytes)
         .map_err(|error| format!("failed to write {}: {error}", artifact_path.display()))?;
     Ok(artifact_path)
@@ -396,7 +394,7 @@ fn maybe_load_serialized_run_artifact(
     let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
         return Ok(None);
     };
-    if extension != "json" {
+    if extension != "json" && extension != "bin" {
         return Ok(None);
     }
     load_serialized_run_artifact(path, requested_view).map(Some)
@@ -407,18 +405,39 @@ fn load_serialized_run_artifact(
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
     let bytes = fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let serialized: SerializedRunArtifact = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("failed to decode run artifact {}: {error}", path.display()))?;
+    let root = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+    load_serialized_run_artifact_from_bytes(
+        &bytes,
+        requested_view,
+        Box::new(move |relative_path| {
+            let payload_path = root.join(relative_path);
+            fs::read(&payload_path)
+                .map_err(|error| format!("failed to read {}: {error}", payload_path.display()))
+        }),
+    )
+}
+
+fn load_serialized_run_artifact_from_bytes(
+    bytes: &[u8],
+    requested_view: Option<&str>,
+    payload_reader: Box<dyn FnMut(&str) -> Result<Vec<u8>, String>>,
+) -> Result<RunArtifact, String> {
+    let serialized: SerializedRunArtifact =
+        bincode::deserialize(bytes).or_else(|binary_error| {
+            serde_json::from_slice(bytes).map_err(|json_error| {
+                format!(
+                    "failed to decode run artifact as binary ({binary_error}) or JSON ({json_error})"
+                )
+            })
+        })?;
     if serialized.format.as_ref() != RUN_ARTIFACT_FORMAT {
         return Err(format!(
-            "{} is not an AIVI run artifact (expected format `{RUN_ARTIFACT_FORMAT}`)",
-            path.display()
+            "artifact is not an AIVI run artifact (expected format `{RUN_ARTIFACT_FORMAT}`)"
         ));
     }
     if serialized.version != RUN_ARTIFACT_VERSION {
         return Err(format!(
-            "{} uses run artifact format version {} but this runtime expects {}",
-            path.display(),
+            "artifact uses run artifact format version {} but this runtime expects {}",
             serialized.version,
             RUN_ARTIFACT_VERSION
         ));
@@ -431,8 +450,18 @@ fn load_serialized_run_artifact(
             serialized.view_name
         ));
     }
-    let root = path.parent().unwrap_or_else(|| Path::new("."));
-    deserialize_run_artifact(root, serialized)
+    deserialize_run_artifact(serialized, payload_reader)
+}
+
+fn decode_backend_payload_bytes(bytes: &[u8], payload_path: &str) -> Result<BackendProgram, String> {
+    aivi_backend::decode_program_binary(bytes)
+        .or_else(|binary_error| {
+            aivi_backend::decode_program_json(bytes).map_err(|json_error| {
+                format!(
+                    "failed to decode backend payload {payload_path} as binary ({binary_error}) or JSON ({json_error})"
+                )
+            })
+        })
 }
 
 fn serialize_run_artifact(
@@ -499,11 +528,11 @@ fn serialize_run_artifact(
 }
 
 fn deserialize_run_artifact(
-    root: &Path,
     serialized: SerializedRunArtifact,
+    payload_reader: Box<dyn FnMut(&str) -> Result<Vec<u8>, String>>,
 ) -> Result<RunArtifact, String> {
-    let mut payloads = ArtifactPayloadLoader::default();
-    let backend = payloads.load(root, &serialized.backend)?;
+    let mut payloads = ArtifactPayloadLoader::new(payload_reader);
+    let backend = payloads.load(&serialized.backend)?;
     Ok(RunArtifact {
         view_name: serialized.view_name,
         patterns: RunPatternTable {
@@ -520,7 +549,7 @@ fn deserialize_run_artifact(
             .into_vec()
             .into_iter()
             .map(|entry| {
-                compiled_run_input_from_wire(root, entry.compiled, &mut payloads)
+                compiled_run_input_from_wire(entry.compiled, &mut payloads)
                     .map(|compiled| (entry.input, compiled))
             })
             .collect::<Result<_, _>>()?,
@@ -530,7 +559,7 @@ fn deserialize_run_artifact(
             .into_iter()
             .map(|entry| (entry.item, entry.name))
             .collect(),
-        runtime_assembly: hir_runtime_assembly_from_wire(root, serialized.runtime_assembly, &mut payloads)?,
+        runtime_assembly: hir_runtime_assembly_from_wire(serialized.runtime_assembly, &mut payloads)?,
         runtime_link: serialized.runtime_link,
         backend: backend.program,
         backend_native_kernels: backend.native_kernels,
@@ -578,13 +607,12 @@ fn compiled_run_input_to_wire(
 }
 
 fn compiled_run_input_from_wire(
-    root: &Path,
     wire: CompiledRunInputWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<CompiledRunInput, String> {
     match wire {
         CompiledRunInputWire::Expr(fragment) => {
-            compiled_run_fragment_from_wire(root, fragment, payloads).map(CompiledRunInput::Expr)
+            compiled_run_fragment_from_wire(fragment, payloads).map(CompiledRunInput::Expr)
         }
         CompiledRunInputWire::Text(text) => Ok(CompiledRunInput::Text(CompiledRunText {
             segments: text
@@ -594,7 +622,7 @@ fn compiled_run_input_from_wire(
                 .map(|segment| match segment {
                     CompiledRunTextSegmentWire::Text(text) => Ok(CompiledRunTextSegment::Text(text)),
                     CompiledRunTextSegmentWire::Interpolation(fragment) => {
-                        compiled_run_fragment_from_wire(root, fragment, payloads)
+                        compiled_run_fragment_from_wire(fragment, payloads)
                             .map(CompiledRunTextSegment::Interpolation)
                     }
                 })
@@ -622,11 +650,10 @@ fn compiled_run_fragment_to_wire(
 }
 
 fn compiled_run_fragment_from_wire(
-    root: &Path,
     wire: CompiledRunFragmentWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<CompiledRunFragment, String> {
-    let payload = payloads.load(root, &wire.execution)?;
+    let payload = payloads.load(&wire.execution)?;
     let cache_key = compute_program_fingerprint(payload.program.as_ref());
     Ok(CompiledRunFragment {
         expr: wire.expr,
@@ -666,7 +693,6 @@ fn hir_runtime_assembly_to_wire(
 }
 
 fn hir_runtime_assembly_from_wire(
-    root: &Path,
     wire: HirRuntimeAssemblyWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<HirRuntimeAssembly, String> {
@@ -678,7 +704,7 @@ fn hir_runtime_assembly_from_wire(
             .signals
             .into_vec()
             .into_iter()
-            .map(|signal| hir_signal_binding_from_wire(root, signal, payloads))
+            .map(|signal| hir_signal_binding_from_wire(signal, payloads))
             .collect::<Result<Vec<_>, _>>()?
             .into_boxed_slice(),
         sources: wire.sources,
@@ -736,7 +762,6 @@ fn hir_signal_binding_to_wire(
 }
 
 fn hir_signal_binding_from_wire(
-    root: &Path,
     wire: HirSignalBindingWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<aivi_runtime::HirSignalBinding, String> {
@@ -767,7 +792,7 @@ fn hir_signal_binding_from_wire(
             clauses: clauses
                 .into_vec()
                 .into_iter()
-                .map(|clause| hir_reactive_update_binding_from_wire(root, clause, payloads))
+                .map(|clause| hir_reactive_update_binding_from_wire(clause, payloads))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_boxed_slice(),
         },
@@ -803,7 +828,6 @@ fn hir_reactive_update_binding_to_wire(
 }
 
 fn hir_reactive_update_binding_from_wire(
-    root: &Path,
     wire: HirReactiveUpdateBindingWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<aivi_runtime::HirReactiveUpdateBinding, String> {
@@ -818,8 +842,8 @@ fn hir_reactive_update_binding_from_wire(
         trigger_signal: wire.trigger_signal,
         guard_dependencies: wire.guard_dependencies,
         body_dependencies: wire.body_dependencies,
-        compiled_guard: hir_compiled_runtime_expr_from_wire(root, wire.compiled_guard, payloads)?,
-        compiled_body: hir_compiled_runtime_expr_from_wire(root, wire.compiled_body, payloads)?,
+        compiled_guard: hir_compiled_runtime_expr_from_wire(wire.compiled_guard, payloads)?,
+        compiled_body: hir_compiled_runtime_expr_from_wire(wire.compiled_body, payloads)?,
     })
 }
 
@@ -835,11 +859,10 @@ fn hir_compiled_runtime_expr_to_wire(
 }
 
 fn hir_compiled_runtime_expr_from_wire(
-    root: &Path,
     wire: HirCompiledRuntimeExprWire,
     payloads: &mut ArtifactPayloadLoader,
 ) -> Result<aivi_runtime::hir_adapter::HirCompiledRuntimeExpr, String> {
-    let payload = payloads.load(root, &wire.backend)?;
+    let payload = payloads.load(&wire.backend)?;
     Ok(aivi_runtime::hir_adapter::HirCompiledRuntimeExpr {
         backend: payload.program,
         native_kernels: payload.native_kernels,

@@ -40,6 +40,14 @@ pub fn decode_program_json(bytes: &[u8]) -> Result<Program, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
+pub fn encode_program_binary(program: &Program) -> Result<Vec<u8>, bincode::Error> {
+    bincode::serialize(program)
+}
+
+pub fn decode_program_binary(bytes: &[u8]) -> Result<Program, bincode::Error> {
+    bincode::deserialize(bytes)
+}
+
 pub fn encode_compiled_program_binary(compiled: &CompiledProgram) -> Vec<u8> {
     serialize_program(compiled)
 }
