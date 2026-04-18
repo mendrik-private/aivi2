@@ -2805,7 +2805,11 @@ mod tests {
         let parent_path = parent_path.iter().map(String::as_str).collect::<Vec<_>>();
         let parent = widget_snapshot_by_path(roots, &parent_path)?;
         parent.children.iter().find(|child| {
-            child.path.last().and_then(|segment| widget_path_child_index(segment)) == Some(child_index)
+            child
+                .path
+                .last()
+                .and_then(|segment| widget_path_child_index(segment))
+                == Some(child_index)
         })
     }
 
@@ -3083,7 +3087,9 @@ mod tests {
         );
 
         let clicked_cell = widget_snapshot_in_same_slot(&result.gtk, &opening_move_path)
-            .or_else(|| widget_snapshot_by_trailing_child_indexes(&result.gtk, &opening_move_path, 2))
+            .or_else(|| {
+                widget_snapshot_by_trailing_child_indexes(&result.gtk, &opening_move_path, 2)
+            })
             .expect("the clicked board cell should still exist at the same board position");
         assert_eq!(
             clicked_cell.text.as_deref(),

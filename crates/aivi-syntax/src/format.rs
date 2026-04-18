@@ -3,15 +3,15 @@ use std::fmt::Write;
 use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FromEntry, FromItem,
-    FunctionParam, FunctionSurfaceForm, Identifier, InstanceItem, InstanceMember, Item,
-    LambdaExpr, LambdaSurfaceForm,
-    MapExpr, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, PatchBlock,
-    PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector, PatchSelectorSegment,
-    Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName,
-    RecordExpr, RecordField, RecordPatternField, ResultBinding, ResultBlockExpr, SignalMergeBody,
-    SignalReactiveArm, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
-    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
-    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+    FunctionParam, FunctionSurfaceForm, Identifier, InstanceItem, InstanceMember, Item, LambdaExpr,
+    LambdaSurfaceForm, MapExpr, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module,
+    NamedItem, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
+    PatchSelectorSegment, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionPath,
+    QualifiedName, RecordExpr, RecordField, RecordPatternField, ResultBinding, ResultBlockExpr,
+    SignalMergeBody, SignalReactiveArm, SourceDecorator, SourceProviderContractItem,
+    SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
+    TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant,
+    UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -401,8 +401,10 @@ impl Formatter {
 
     /// Format a `func` declaration using the canonical `=` head separator.
     fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
-        if matches!(item.function_form, FunctionSurfaceForm::SelectedSubjectSugar)
-            && item.parameters.iter().any(|p| p.is_selected)
+        if matches!(
+            item.function_form,
+            FunctionSurfaceForm::SelectedSubjectSugar
+        ) && item.parameters.iter().any(|p| p.is_selected)
         {
             return self.format_selected_subject_fun_item(item);
         }

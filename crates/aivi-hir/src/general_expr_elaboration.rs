@@ -4201,9 +4201,7 @@ impl<'a> GeneralExprElaborator<'a> {
             })
             .ok_or_else(|| {
                 let sp = self.module.exprs()[expr_id].span;
-                vec![GeneralExprBlocker::UnknownExprType {
-                    span: sp,
-                }]
+                vec![GeneralExprBlocker::UnknownExprType { span: sp }]
             })
     }
 

@@ -155,6 +155,10 @@ value screenView =
         stdout.contains(&executable_path.display().to_string()),
         "expected executable path in stdout, got stdout: {stdout}"
     );
+    assert!(
+        stdout.contains("launcher size:"),
+        "expected launcher size summary, got stdout: {stdout}"
+    );
 
     let runtime_metadata =
         fs::metadata(&executable_path).expect("build should write the executable output");
@@ -162,6 +166,17 @@ value screenView =
         runtime_metadata.len() > 0,
         "built executable should not be empty"
     );
+    let current_launcher_bytes = fs::metadata(env!("CARGO_BIN_EXE_aivi"))
+        .expect("current aivi launcher metadata should exist")
+        .len();
+    if current_launcher_bytes > 100 * 1024 * 1024 {
+        assert!(
+            runtime_metadata.len() * 2 < current_launcher_bytes,
+            "debug-profile executable builds should strip the staged launcher aggressively; launcher was {} bytes, built executable was {} bytes",
+            current_launcher_bytes,
+            runtime_metadata.len()
+        );
+    }
 
     #[cfg(unix)]
     assert_ne!(

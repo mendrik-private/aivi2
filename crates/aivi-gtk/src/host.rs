@@ -3023,11 +3023,7 @@ where
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumn) => {
                 let key = widget.as_ptr() as usize;
-                let prev = self
-                    .grid_child_meta
-                    .borrow()
-                    .get(&key)
-                    .map(|m| m.column);
+                let prev = self.grid_child_meta.borrow().get(&key).map(|m| m.column);
                 let new_val = value as i32;
                 self.grid_child_meta
                     .borrow_mut()
@@ -3041,11 +3037,7 @@ where
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRow) => {
                 let key = widget.as_ptr() as usize;
-                let prev = self
-                    .grid_child_meta
-                    .borrow()
-                    .get(&key)
-                    .map(|m| m.row);
+                let prev = self.grid_child_meta.borrow().get(&key).map(|m| m.row);
                 let new_val = value as i32;
                 self.grid_child_meta
                     .borrow_mut()
@@ -3077,11 +3069,7 @@ where
             }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildRowSpan) => {
                 let key = widget.as_ptr() as usize;
-                let prev = self
-                    .grid_child_meta
-                    .borrow()
-                    .get(&key)
-                    .map(|m| m.row_span);
+                let prev = self.grid_child_meta.borrow().get(&key).map(|m| m.row_span);
                 let new_val = value.max(1) as i32;
                 self.grid_child_meta
                     .borrow_mut()

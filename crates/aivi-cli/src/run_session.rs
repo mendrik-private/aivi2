@@ -1775,7 +1775,8 @@ mod tests {
             let RuntimeValue::List(items) = runtime_signal_payload(value) else {
                 panic!("expected board tile signal to be a List, found {value:?}");
             };
-            items.iter()
+            items
+                .iter()
                 .map(|tile| {
                     let fields = runtime_record_fields(tile, "snake render tile");
                     SnakeRenderTile {
@@ -1798,7 +1799,8 @@ mod tests {
     }
 
     fn head_tile(tiles: &[SnakeRenderTile]) -> &SnakeRenderTile {
-        tiles.iter()
+        tiles
+            .iter()
             .find(|tile| {
                 Path::new(&tile.asset)
                     .file_name()
@@ -3008,8 +3010,7 @@ export main
         let restarted_board = board_tiles_for(&harness, board_item);
         let restarted_head = head_tile(&restarted_board);
         assert_eq!(
-            restarted_head.row,
-            10,
+            restarted_head.row, 10,
             "restart should return the snake to its starting row"
         );
         assert!(

@@ -163,6 +163,16 @@ struct BuildExecutableSummary {
     executable_path: PathBuf,
     embedded_file_count: usize,
     companion_file_count: usize,
+    launcher_size_before_bytes: u64,
+    launcher_size_after_bytes: u64,
+    shrink_tool: Option<&'static str>,
+}
+
+#[derive(Debug)]
+struct ExecutableShrinkSummary {
+    size_before_bytes: u64,
+    size_after_bytes: u64,
+    tool: Option<&'static str>,
 }
 
 const EMBEDDED_BUNDLE_ARCHIVE_MAGIC: [u8; 16] = *b"AIVI_ARCHIVE_V1_";
@@ -254,6 +264,16 @@ fn build_markup_bundle(
     println!("build executable passed: {}", path.display());
     println!("  view: {}", artifact.view_name);
     println!("  executable: {}", summary.executable_path.display());
+    let shrink_suffix = summary
+        .shrink_tool
+        .map(|tool| format!(" via {tool}"))
+        .unwrap_or_else(|| " (no strip tool found)".to_owned());
+    println!(
+        "  launcher size: {} -> {}{}",
+        format_byte_size(summary.launcher_size_before_bytes),
+        format_byte_size(summary.launcher_size_after_bytes),
+        shrink_suffix
+    );
     println!("  embedded files: {}", summary.embedded_file_count);
     println!("  companion files: {}", summary.companion_file_count);
     println!(
@@ -313,11 +333,16 @@ fn write_run_executable(
             .map_err(|error| format!("failed to locate current AIVI executable: {error}"))?;
         copy_file_with_permissions(&current_exe, &staged_executable)?;
         ensure_executable(&staged_executable)?;
+        let shrink_summary = shrink_staged_executable(&staged_executable)?;
+        ensure_executable(&staged_executable)?;
         let embedded_file_count = append_embedded_bundle(&staged_executable, &bundle_root)?;
         Ok(BuildExecutableSummary {
             executable_path: staged_executable,
             embedded_file_count,
             companion_file_count,
+            launcher_size_before_bytes: shrink_summary.size_before_bytes,
+            launcher_size_after_bytes: shrink_summary.size_after_bytes,
+            shrink_tool: shrink_summary.tool,
         })
     })();
 
@@ -347,6 +372,77 @@ fn discover_workspace_root(path: &Path) -> PathBuf {
         }
     }
     start.to_path_buf()
+}
+
+fn shrink_staged_executable(path: &Path) -> Result<ExecutableShrinkSummary, String> {
+    let size_before_bytes = fs::metadata(path)
+        .map_err(|error| format!("failed to stat staged executable {}: {error}", path.display()))?
+        .len();
+    for tool in ["llvm-strip", "strip"] {
+        match std::process::Command::new(tool).arg(path).output() {
+            Ok(output) => {
+                if !output.status.success() {
+                    return Err(format!(
+                        "failed to shrink staged executable {} with {tool}: {}",
+                        path.display(),
+                        render_process_failure(&output)
+                    ));
+                }
+                let size_after_bytes = fs::metadata(path)
+                    .map_err(|error| {
+                        format!("failed to stat stripped executable {}: {error}", path.display())
+                    })?
+                    .len();
+                return Ok(ExecutableShrinkSummary {
+                    size_before_bytes,
+                    size_after_bytes,
+                    tool: Some(tool),
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "failed to launch {tool} while shrinking staged executable {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(ExecutableShrinkSummary {
+        size_before_bytes,
+        size_after_bytes: size_before_bytes,
+        tool: None,
+    })
+}
+
+fn render_process_failure(output: &std::process::Output) -> String {
+    let status = output
+        .status
+        .code()
+        .map_or_else(|| "terminated by signal".to_owned(), |code| code.to_string());
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    match (stderr.is_empty(), stdout.is_empty()) {
+        (true, true) => format!("exit status {status}"),
+        (false, true) => format!("exit status {status}; stderr: {stderr}"),
+        (true, false) => format!("exit status {status}; stdout: {stdout}"),
+        (false, false) => format!("exit status {status}; stderr: {stderr}; stdout: {stdout}"),
+    }
+}
+
+fn format_byte_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 fn discover_workspace_embedding_layout(path: &Path) -> WorkspaceEmbeddingLayout {
