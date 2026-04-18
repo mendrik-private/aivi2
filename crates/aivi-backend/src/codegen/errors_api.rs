@@ -383,8 +383,13 @@ enum BuiltinCallPlan {
         greater_tag: i64,
     },
     OptionSome(OptionCodegenContract),
+    SignalPure,
+    SignalApply(SignalApplyPlan),
     ListAppend { element_layout: LayoutId },
     ListMap(ListMapPlan),
+    ListAny(ListPredicatePlan),
+    ListFind(ListFindPlan),
+    ListFlatMap(ListFlatMapPlan),
     ListReduce(ListReducePlan),
 }
 
@@ -398,6 +403,44 @@ struct ListMapPlan {
     step_element_layout: LayoutId,
     output_element_layout: LayoutId,
     step_result_layout: LayoutId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ListPredicatePlan {
+    step_body: KernelId,
+    step_prefix_exprs: Box<[KernelExprId]>,
+    subject_layout: LayoutId,
+    element_layout: LayoutId,
+    step_prefix_layouts: Box<[(LayoutId, LayoutId)]>,
+    step_element_layout: LayoutId,
+    step_result_layout: LayoutId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ListFindPlan {
+    predicate: ListPredicatePlan,
+    option_contract: OptionCodegenContract,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ListFlatMapPlan {
+    step_body: KernelId,
+    step_prefix_exprs: Box<[KernelExprId]>,
+    subject_layout: LayoutId,
+    input_element_layout: LayoutId,
+    step_prefix_layouts: Box<[(LayoutId, LayoutId)]>,
+    step_element_layout: LayoutId,
+    output_list_layout: LayoutId,
+    output_element_layout: LayoutId,
+    step_result_layout: LayoutId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SignalApplyPlan {
+    body: KernelId,
+    argument_exprs: Box<[KernelExprId]>,
+    argument_layouts: Box<[(LayoutId, LayoutId)]>,
+    result: (LayoutId, LayoutId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,3 +1,23 @@
+#[derive(Clone, Debug)]
+struct ResolvedItemPartialCall {
+    item_name: Box<str>,
+    body: KernelId,
+    prefix_exprs: Box<[KernelExprId]>,
+    prefix_layouts: Box<[(LayoutId, LayoutId)]>,
+    visible_parameter_layouts: Box<[LayoutId]>,
+    result_layout: LayoutId,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedSignalCallable {
+    item_name: Box<str>,
+    body: KernelId,
+    argument_exprs: Vec<KernelExprId>,
+    argument_layouts: Vec<(LayoutId, LayoutId)>,
+    remaining_parameter_layouts: Vec<LayoutId>,
+    result_layout: LayoutId,
+}
+
 impl<'a, M: Module> CraneliftCompiler<'a, M> {
     fn with_module(
         program: &'a Program,
@@ -412,6 +432,52 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                     KernelExprKind::Apply { callee, arguments } => {
                         match self.resolve_direct_apply_plan(kernel_id, expr_id, *callee, arguments)
                         {
+                            Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::ListMap(plan))) => {
+                                for argument in plan
+                                    .step_prefix_exprs
+                                    .iter()
+                                    .copied()
+                                    .chain(arguments.iter().copied().skip(1))
+                                {
+                                    work.push(argument);
+                                }
+                            }
+                            Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::ListAny(plan))) => {
+                                for argument in plan
+                                    .step_prefix_exprs
+                                    .iter()
+                                    .copied()
+                                    .chain(arguments.iter().copied().skip(1))
+                                {
+                                    work.push(argument);
+                                }
+                            }
+                            Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::ListFind(plan))) => {
+                                for argument in plan
+                                    .predicate
+                                    .step_prefix_exprs
+                                    .iter()
+                                    .copied()
+                                    .chain(arguments.iter().copied().skip(1))
+                                {
+                                    work.push(argument);
+                                }
+                            }
+                            Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::ListFlatMap(plan))) => {
+                                for argument in plan
+                                    .step_prefix_exprs
+                                    .iter()
+                                    .copied()
+                                    .chain(arguments.iter().copied().skip(1))
+                                {
+                                    work.push(argument);
+                                }
+                            }
+                            Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::SignalApply(plan))) => {
+                                for argument in plan.argument_exprs.iter().copied() {
+                                    work.push(argument);
+                                }
+                            }
                             Ok(DirectApplyPlan::Builtin(BuiltinCallPlan::ListReduce(plan))) => {
                                 for argument in plan
                                     .step_prefix_exprs
@@ -1237,6 +1303,31 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                     materialized.extend(plan.step_prefix_exprs.iter().copied());
                                     materialized.push(arguments[1]);
                                     materialized
+                                }
+                                DirectApplyPlan::Builtin(BuiltinCallPlan::ListAny(plan)) => {
+                                    let mut materialized =
+                                        Vec::with_capacity(plan.step_prefix_exprs.len() + 1);
+                                    materialized.extend(plan.step_prefix_exprs.iter().copied());
+                                    materialized.push(arguments[1]);
+                                    materialized
+                                }
+                                DirectApplyPlan::Builtin(BuiltinCallPlan::ListFind(plan)) => {
+                                    let mut materialized =
+                                        Vec::with_capacity(plan.predicate.step_prefix_exprs.len() + 1);
+                                    materialized
+                                        .extend(plan.predicate.step_prefix_exprs.iter().copied());
+                                    materialized.push(arguments[1]);
+                                    materialized
+                                }
+                                DirectApplyPlan::Builtin(BuiltinCallPlan::ListFlatMap(plan)) => {
+                                    let mut materialized =
+                                        Vec::with_capacity(plan.step_prefix_exprs.len() + 1);
+                                    materialized.extend(plan.step_prefix_exprs.iter().copied());
+                                    materialized.push(arguments[1]);
+                                    materialized
+                                }
+                                DirectApplyPlan::Builtin(BuiltinCallPlan::SignalApply(plan)) => {
+                                    plan.argument_exprs.to_vec()
                                 }
                                 DirectApplyPlan::Builtin(BuiltinCallPlan::ListReduce(plan)) => {
                                     let mut materialized =
@@ -2414,16 +2505,36 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
 
                     let elem_abi = {
                         let layout = kernel.exprs()[expr_id].layout;
-                        let LayoutKind::List { element } =
-                            &self.program.layouts()[layout].kind.clone()
-                        else {
+                        let Some(element) = self.list_literal_element_layout(layout, count) else {
+                            let detail = match &self.program.layouts()[layout].kind {
+                                LayoutKind::Tuple(fields) => {
+                                    let fields = fields
+                                        .iter()
+                                        .map(|field| {
+                                            format!(
+                                                "layout{field}=`{}`",
+                                                self.program.layouts()[*field]
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    format!(
+                                        "BuildRuntimeList requires List layout, found layout{layout}=`{}` with fields [{fields}]",
+                                        self.program.layouts()[layout]
+                                    )
+                                }
+                                _ => format!(
+                                    "BuildRuntimeList requires List layout, found layout{layout}=`{}`",
+                                    self.program.layouts()[layout]
+                                ),
+                            };
                             return Err(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "BuildRuntimeList requires List layout",
+                                &detail,
                             ));
                         };
-                        self.field_abi_shape(kernel_id, *element, "list element")?
+                        self.field_abi_shape(kernel_id, element, "list element")?
                     };
                     let stride = elem_abi.size.max(1);
                     let array_size = (count as u32) * stride;
@@ -2820,13 +2931,22 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 let body_kernel = self.program.kernels().get(body).expect(
                     "validated backend programs keep signal item body kernels aligned with codegen",
                 );
-                self.require_layout_match(
-                    kernel_id,
-                    expr_id,
-                    expr_layout,
-                    body_kernel.result_layout,
-                    &format!("signal item `{}` current-value slot", item_decl.name),
-                )?;
+                match &self.program.layouts()[expr_layout].kind {
+                    LayoutKind::Signal { element } => self.require_layout_match(
+                        kernel_id,
+                        expr_id,
+                        *element,
+                        body_kernel.result_layout,
+                        &format!("signal item `{}` current-value slot", item_decl.name),
+                    )?,
+                    _ => self.require_layout_match(
+                        kernel_id,
+                        expr_id,
+                        expr_layout,
+                        body_kernel.result_layout,
+                        &format!("signal item `{}` current-value slot", item_decl.name),
+                    )?,
+                }
             }
             return Ok(ItemReferencePlan::SignalSlot { item });
         }
@@ -2920,6 +3040,11 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 )
                 .map(DirectApplyPlan::Builtin);
         }
+        if let Some(plan) =
+            self.require_compilable_list_wrapper_item_call(kernel_id, expr_id, item, arguments)?
+        {
+            return Ok(plan);
+        }
         if arguments.is_empty() {
             if !item_decl.parameters.is_empty() {
                 // Unsaturated reference: emit function address of the body kernel.
@@ -3011,6 +3136,110 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         })
     }
 
+    fn require_compilable_list_wrapper_item_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        item: ItemId,
+        arguments: &[KernelExprId],
+    ) -> Result<Option<DirectApplyPlan>, CodegenError> {
+        if arguments.len() != 2 {
+            return Ok(None);
+        }
+        let item_decl = self
+            .program
+            .items()
+            .get(item)
+            .expect("validated backend kernels keep item references aligned with codegen");
+        if item_decl.parameters.len() != 2 {
+            return Ok(None);
+        }
+        let [function, subject] = arguments else {
+            unreachable!("checked two direct list-wrapper arguments above");
+        };
+        let result_layout = self.program.kernels()[kernel_id].exprs()[expr_id].layout;
+        let plan = match item_decl.name.as_ref() {
+            "map" | "__aivi_list_map" => DirectApplyPlan::Builtin(BuiltinCallPlan::ListMap(
+                self.plan_list_map_from_callable(
+                    kernel_id,
+                    expr_id,
+                    *function,
+                    *subject,
+                    result_layout,
+                    "list wrapper `map`",
+                )?,
+            )),
+            "any" | "__aivi_list_any" => {
+                self.require_bool_expression(
+                    kernel_id,
+                    expr_id,
+                    result_layout,
+                    "list wrapper `any` result",
+                )?;
+                DirectApplyPlan::Builtin(BuiltinCallPlan::ListAny(
+                    self.plan_list_predicate_from_callable(
+                        kernel_id,
+                        *function,
+                        *subject,
+                        "list wrapper `any` predicate",
+                    )?,
+                ))
+            }
+            "find" | "__aivi_list_find" => {
+                let kernel = &self.program.kernels()[kernel_id];
+                let predicate = self.plan_list_predicate_from_callable(
+                    kernel_id,
+                    *function,
+                    *subject,
+                    "list wrapper `find` predicate",
+                )?;
+                let option_contract = self.require_option_codegen_contract(
+                    kernel_id,
+                    kernel,
+                    expr_id,
+                    None,
+                    result_layout,
+                    "list wrapper `find` result",
+                )?;
+                let LayoutKind::Option { element: found_element } =
+                    &self.program.layouts()[result_layout].kind
+                else {
+                    unreachable!("option contract validation keeps the result layout as Option");
+                };
+                if *found_element != predicate.element_layout {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "list wrapper `find` result expects Option over layout{}=`{}`, found Option over layout{}=`{}`",
+                            predicate.element_layout,
+                            self.program.layouts()[predicate.element_layout],
+                            found_element,
+                            self.program.layouts()[*found_element]
+                        ),
+                    ));
+                }
+                DirectApplyPlan::Builtin(BuiltinCallPlan::ListFind(ListFindPlan {
+                    predicate,
+                    option_contract,
+                }))
+            }
+            "flatMap" | "__aivi_list_flatMap" => DirectApplyPlan::Builtin(
+                BuiltinCallPlan::ListFlatMap(
+                self.plan_list_flat_map_from_callable(
+                    kernel_id,
+                    expr_id,
+                    *function,
+                    *subject,
+                    result_layout,
+                    "list wrapper `flatMap`",
+                )?,
+            )),
+            _ => return Ok(None),
+        };
+        Ok(Some(plan))
+    }
+
     fn declare_signal_item_slot(
         &mut self,
         item: ItemId,
@@ -3042,12 +3271,16 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
     ) -> Result<Value, CodegenError> {
         let item_name = self.program.item_name(item).to_owned();
         let expr_layout = self.program.kernels()[kernel_id].exprs()[expr_id].layout;
+        let slot_layout = match &self.program.layouts()[expr_layout].kind {
+            LayoutKind::Signal { element } => *element,
+            _ => expr_layout,
+        };
         let abi = self.field_abi_shape(
             kernel_id,
-            expr_layout,
+            slot_layout,
             &format!("signal item `{item_name}` current-value slot"),
         )?;
-        let data_id = self.declare_signal_item_slot(item, expr_layout)?;
+        let data_id = self.declare_signal_item_slot(item, slot_layout)?;
         let global = self.module.declare_data_in_func(data_id, builder.func);
         let slot = builder.ins().symbol_value(self.pointer_type(), global);
         Ok(builder.ins().load(abi.ty, MemFlags::new(), slot, 0))
@@ -3166,7 +3399,9 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         expr_id: KernelExprId,
     ) -> Option<(ItemId, Vec<KernelExprId>)> {
         match &kernel.exprs()[expr_id].kind {
-            KernelExprKind::Item(item) => Some((*item, Vec::new())),
+            KernelExprKind::Item(item) | KernelExprKind::ExecutableEvidence(item) => {
+                Some((*item, Vec::new()))
+            }
             KernelExprKind::Apply { callee, arguments } => {
                 let (item, mut prefix_arguments) =
                     self.resolve_item_partial_application(kernel, *callee)?;
@@ -3175,6 +3410,469 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
             }
             _ => None,
         }
+    }
+
+    fn resolve_item_partial_call(
+        &self,
+        kernel_id: KernelId,
+        function_expr: KernelExprId,
+        visible_arity: usize,
+        detail: &str,
+    ) -> Result<ResolvedItemPartialCall, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let Some((step_item, prefix_exprs)) =
+            self.resolve_item_partial_application(kernel, function_expr)
+        else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                function_expr,
+                &format!(
+                    "{detail} currently requires an item callable or an item callable with bound prefix arguments"
+                ),
+            ));
+        };
+        let item_decl = self
+            .program
+            .items()
+            .get(step_item)
+            .expect("validated backend kernels keep callable item references aligned");
+        let Some(step_body) = item_decl.body else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                function_expr,
+                &format!("{detail} currently requires a callable item body"),
+            ));
+        };
+        if item_decl.parameters.len() < prefix_exprs.len() + visible_arity {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                function_expr,
+                &format!(
+                    "{detail} `{}` binds {} prefix argument(s) but only declares {} parameter(s)",
+                    item_decl.name,
+                    prefix_exprs.len(),
+                    item_decl.parameters.len()
+                ),
+            ));
+        }
+        let remaining_arity = item_decl.parameters.len() - prefix_exprs.len();
+        if remaining_arity != visible_arity {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                function_expr,
+                &format!(
+                    "{detail} `{}` must leave exactly {visible_arity} visible parameter(s) after binding prefix arguments, found {}",
+                    item_decl.name, remaining_arity
+                ),
+            ));
+        }
+
+        let mut prefix_layouts = Vec::with_capacity(prefix_exprs.len());
+        for (index, (prefix_expr, expected_layout)) in prefix_exprs
+            .iter()
+            .zip(item_decl.parameters.iter())
+            .enumerate()
+        {
+            let found_layout = kernel.exprs()[*prefix_expr].layout;
+            self.require_layout_match(
+                kernel_id,
+                *prefix_expr,
+                *expected_layout,
+                found_layout,
+                &format!("{detail} bound argument {index} for `{}`", item_decl.name),
+            )?;
+            prefix_layouts.push((found_layout, *expected_layout));
+        }
+
+        let body_kernel = self
+            .program
+            .kernels()
+            .get(step_body)
+            .expect("validated backend programs keep callable body kernels aligned");
+        let prefix_len = prefix_exprs.len();
+        Ok(ResolvedItemPartialCall {
+            item_name: item_decl.name.clone(),
+            body: step_body,
+            prefix_exprs: prefix_exprs.into_boxed_slice(),
+            prefix_layouts: prefix_layouts.into_boxed_slice(),
+            visible_parameter_layouts: item_decl.parameters[prefix_len..].to_vec().into_boxed_slice(),
+            result_layout: body_kernel.result_layout,
+        })
+    }
+
+    fn signal_current_value_layout(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        detail: &str,
+    ) -> Result<LayoutId, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let layout = kernel.exprs()[expr_id].layout;
+        let LayoutKind::Signal { element } = &self.program.layouts()[layout].kind else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} expects a Signal layout, found `{}`",
+                    self.program.layouts()[layout]
+                ),
+            ));
+        };
+        Ok(*element)
+    }
+
+    fn is_list_like_layout(&self, layout: LayoutId) -> bool {
+        match &self.program.layouts()[layout].kind {
+            LayoutKind::List { .. } => true,
+            LayoutKind::Signal { element } => self.is_list_like_layout(*element),
+            LayoutKind::AnonymousDomain { carrier, .. } => self.is_list_like_layout(*carrier),
+            LayoutKind::Domain { name, arguments } if name.as_ref() == "NonEmptyList" => {
+                arguments.len() == 1
+            }
+            LayoutKind::Opaque { name, arguments, .. } if name.as_ref() == "NonEmptyList" => {
+                arguments.len() == 1
+            }
+            _ => false,
+        }
+    }
+
+    fn list_literal_element_layout(&self, mut layout: LayoutId, count: usize) -> Option<LayoutId> {
+        loop {
+            match &self.program.layouts()[layout].kind {
+                LayoutKind::List { element } => return Some(*element),
+                LayoutKind::Signal { element } => layout = *element,
+                LayoutKind::AnonymousDomain { carrier, .. } => layout = *carrier,
+                LayoutKind::Domain { name, arguments } if name.as_ref() == "NonEmptyList" => {
+                    return arguments.first().copied();
+                }
+                LayoutKind::Opaque { name, arguments, .. } if name.as_ref() == "NonEmptyList" => {
+                    return arguments.first().copied();
+                }
+                LayoutKind::Tuple(fields) if count == 0 => {
+                    let Some(next) =
+                        fields.iter().copied().find(|field| self.is_list_like_layout(*field))
+                    else {
+                        return None;
+                    };
+                    layout = next;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn resolve_signal_callable(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        detail: &str,
+    ) -> Result<ResolvedSignalCallable, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        match &kernel.exprs()[expr_id].kind {
+            KernelExprKind::Apply { callee, arguments } => {
+                let callee_intrinsic = match &kernel.exprs()[*callee].kind {
+                    KernelExprKind::BuiltinClassMember(intrinsic) => Some(*intrinsic),
+                    KernelExprKind::Item(item) | KernelExprKind::ExecutableEvidence(item) => self
+                        .program
+                        .items()
+                        .get(*item)
+                        .and_then(|item_decl| item_decl.body)
+                        .and_then(|body| self.program.kernels().get(body))
+                        .and_then(builtin_wrapper_intrinsic),
+                    _ => None,
+                };
+                if matches!(
+                    callee_intrinsic,
+                    Some(crate::BuiltinClassMemberIntrinsic::Pure(
+                        crate::BuiltinApplicativeCarrier::Signal,
+                    ))
+                ) {
+                    let [callable_expr] = arguments.as_slice() else {
+                        unreachable!("validated signal Pure call keeps exactly one argument");
+                    };
+                    let Some((item, prefix_exprs)) =
+                        self.resolve_item_partial_application(kernel, *callable_expr)
+                    else {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            *callable_expr,
+                            &format!(
+                                "{detail} currently requires `Pure(Signal)` over an item callable or item partial application"
+                            ),
+                        ));
+                    };
+                    let item_decl = self
+                        .program
+                        .items()
+                        .get(item)
+                        .expect("validated backend kernels keep signal callable items aligned");
+                    let Some(body) = item_decl.body else {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            *callable_expr,
+                            &format!("{detail} currently requires a callable item body"),
+                        ));
+                    };
+                    if item_decl.parameters.len() <= prefix_exprs.len() {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            *callable_expr,
+                            &format!(
+                                "{detail} `{}` must leave at least one visible parameter after binding prefix arguments",
+                                item_decl.name
+                            ),
+                        ));
+                    }
+                    let mut argument_layouts = Vec::with_capacity(prefix_exprs.len());
+                    for (index, (prefix_expr, expected_layout)) in prefix_exprs
+                        .iter()
+                        .zip(item_decl.parameters.iter())
+                        .enumerate()
+                    {
+                        let found_layout = kernel.exprs()[*prefix_expr].layout;
+                        self.require_layout_match(
+                            kernel_id,
+                            *prefix_expr,
+                            *expected_layout,
+                            found_layout,
+                            &format!("{detail} bound argument {index} for `{}`", item_decl.name),
+                        )?;
+                        argument_layouts.push((found_layout, *expected_layout));
+                    }
+                    let body_kernel = self
+                        .program
+                        .kernels()
+                        .get(body)
+                        .expect("validated backend programs keep signal callable bodies aligned");
+                    let prefix_len = prefix_exprs.len();
+                    return Ok(ResolvedSignalCallable {
+                        item_name: item_decl.name.clone(),
+                        body,
+                        argument_exprs: prefix_exprs,
+                        argument_layouts,
+                        remaining_parameter_layouts: item_decl.parameters[prefix_len..].to_vec(),
+                        result_layout: body_kernel.result_layout,
+                    });
+                }
+                if matches!(
+                    callee_intrinsic,
+                    Some(crate::BuiltinClassMemberIntrinsic::Apply(
+                        crate::BuiltinApplyCarrier::Signal,
+                    ))
+                ) {
+                    let [functions, signal_arg] = arguments.as_slice() else {
+                        unreachable!("validated signal Apply call keeps exactly two arguments");
+                    };
+                    let mut resolved =
+                        self.resolve_signal_callable(kernel_id, *functions, detail)?;
+                    let Some(expected_layout) = resolved.remaining_parameter_layouts.first().copied()
+                    else {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            &format!(
+                                "{detail} `{}` has no remaining parameter to consume with `Apply(Signal)`",
+                                resolved.item_name
+                            ),
+                        ));
+                    };
+                    let found_layout = self.signal_current_value_layout(
+                        kernel_id,
+                        *signal_arg,
+                        &format!("{detail} argument for `{}`", resolved.item_name),
+                    )?;
+                    self.require_layout_match(
+                        kernel_id,
+                        *signal_arg,
+                        expected_layout,
+                        found_layout,
+                        &format!("{detail} argument for `{}`", resolved.item_name),
+                    )?;
+                    resolved.argument_exprs.push(*signal_arg);
+                    resolved.argument_layouts.push((found_layout, expected_layout));
+                    resolved.remaining_parameter_layouts.remove(0);
+                    return Ok(resolved);
+                }
+                Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} currently requires nested `Pure(Signal)` / `Apply(Signal)` over direct item callables (callee: {})",
+                        describe_expr_kind(&kernel.exprs()[*callee].kind)
+                    ),
+                ))
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} currently requires nested `Pure(Signal)` / `Apply(Signal)` over direct item callables (expr: {})",
+                    describe_expr_kind(&kernel.exprs()[expr_id].kind)
+                ),
+            )),
+        }
+    }
+
+    fn plan_list_map_from_callable(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        function: KernelExprId,
+        subject: KernelExprId,
+        result_layout: LayoutId,
+        detail: &str,
+    ) -> Result<ListMapPlan, CodegenError> {
+        let resolved = self.resolve_item_partial_call(kernel_id, function, 1, detail)?;
+        let kernel = &self.program.kernels()[kernel_id];
+        let subject_layout = kernel.exprs()[subject].layout;
+        let LayoutKind::List {
+            element: input_element_layout,
+        } = &self.program.layouts()[subject_layout].kind
+        else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                subject,
+                &format!("{detail} currently requires a List subject"),
+            ));
+        };
+        let LayoutKind::List {
+            element: output_element_layout,
+        } = &self.program.layouts()[result_layout].kind
+        else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!("{detail} result must stay a List layout"),
+            ));
+        };
+        let step_element_layout = resolved.visible_parameter_layouts[0];
+        self.require_layout_match(
+            kernel_id,
+            subject,
+            step_element_layout,
+            *input_element_layout,
+            &format!("{detail} element for `{}`", resolved.item_name),
+        )?;
+        self.require_layout_match(
+            kernel_id,
+            expr_id,
+            *output_element_layout,
+            resolved.result_layout,
+            &format!("{detail} result for `{}`", resolved.item_name),
+        )?;
+
+        Ok(ListMapPlan {
+            step_body: resolved.body,
+            step_prefix_exprs: resolved.prefix_exprs,
+            subject_layout,
+            input_element_layout: *input_element_layout,
+            step_prefix_layouts: resolved.prefix_layouts,
+            step_element_layout,
+            output_element_layout: *output_element_layout,
+            step_result_layout: resolved.result_layout,
+        })
+    }
+
+    fn plan_list_predicate_from_callable(
+        &self,
+        kernel_id: KernelId,
+        function: KernelExprId,
+        subject: KernelExprId,
+        detail: &str,
+    ) -> Result<ListPredicatePlan, CodegenError> {
+        let resolved = self.resolve_item_partial_call(kernel_id, function, 1, detail)?;
+        let kernel = &self.program.kernels()[kernel_id];
+        let subject_layout = kernel.exprs()[subject].layout;
+        let LayoutKind::List { element } = &self.program.layouts()[subject_layout].kind else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                subject,
+                &format!("{detail} currently requires a List subject"),
+            ));
+        };
+        let step_element_layout = resolved.visible_parameter_layouts[0];
+        self.require_layout_match(
+            kernel_id,
+            subject,
+            step_element_layout,
+            *element,
+            &format!("{detail} element for `{}`", resolved.item_name),
+        )?;
+        self.require_bool_expression(
+            kernel_id,
+            function,
+            resolved.result_layout,
+            &format!("{detail} result for `{}`", resolved.item_name),
+        )?;
+        Ok(ListPredicatePlan {
+            step_body: resolved.body,
+            step_prefix_exprs: resolved.prefix_exprs,
+            subject_layout,
+            element_layout: *element,
+            step_prefix_layouts: resolved.prefix_layouts,
+            step_element_layout,
+            step_result_layout: resolved.result_layout,
+        })
+    }
+
+    fn plan_list_flat_map_from_callable(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        function: KernelExprId,
+        subject: KernelExprId,
+        result_layout: LayoutId,
+        detail: &str,
+    ) -> Result<ListFlatMapPlan, CodegenError> {
+        let resolved = self.resolve_item_partial_call(kernel_id, function, 1, detail)?;
+        let kernel = &self.program.kernels()[kernel_id];
+        let subject_layout = kernel.exprs()[subject].layout;
+        let LayoutKind::List {
+            element: input_element_layout,
+        } = &self.program.layouts()[subject_layout].kind
+        else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                subject,
+                &format!("{detail} currently requires a List subject"),
+            ));
+        };
+        let LayoutKind::List {
+            element: output_element_layout,
+        } = &self.program.layouts()[result_layout].kind
+        else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!("{detail} result must stay a List layout"),
+            ));
+        };
+        let step_element_layout = resolved.visible_parameter_layouts[0];
+        self.require_layout_match(
+            kernel_id,
+            subject,
+            step_element_layout,
+            *input_element_layout,
+            &format!("{detail} element for `{}`", resolved.item_name),
+        )?;
+        self.require_layout_match(
+            kernel_id,
+            function,
+            result_layout,
+            resolved.result_layout,
+            &format!("{detail} result for `{}`", resolved.item_name),
+        )?;
+        Ok(ListFlatMapPlan {
+            step_body: resolved.body,
+            step_prefix_exprs: resolved.prefix_exprs,
+            subject_layout,
+            input_element_layout: *input_element_layout,
+            step_prefix_layouts: resolved.prefix_layouts,
+            step_element_layout,
+            output_list_layout: result_layout,
+            output_element_layout: *output_element_layout,
+            step_result_layout: resolved.result_layout,
+        })
     }
 
     fn flatten_direct_apply_arguments(
@@ -3646,6 +4344,104 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         arguments: &[KernelExprId],
     ) -> Result<BuiltinCallPlan, CodegenError> {
         match intrinsic {
+            crate::BuiltinClassMemberIntrinsic::Pure(
+                crate::BuiltinApplicativeCarrier::Signal,
+            ) => {
+                let detail = format!("builtin class member `{intrinsic:?}`");
+                let (_parameters, result_layout) = self.require_saturated_callable_call(
+                    kernel_id, expr_id, callee, arguments, &detail,
+                )?;
+                let [value] = arguments else {
+                    unreachable!("saturated signal pure call should keep exactly one argument");
+                };
+                let kernel = &self.program.kernels()[kernel_id];
+                let value_layout = kernel.exprs()[*value].layout;
+                let LayoutKind::Signal { element } = &self.program.layouts()[result_layout].kind else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "signal pure result must stay a Signal layout",
+                    ));
+                };
+                self.require_layout_match(
+                    kernel_id,
+                    *value,
+                    *element,
+                    value_layout,
+                    "signal pure payload",
+                )?;
+                Ok(BuiltinCallPlan::SignalPure)
+            }
+            crate::BuiltinClassMemberIntrinsic::Apply(crate::BuiltinApplyCarrier::Signal) => {
+                let detail = format!("builtin class member `{intrinsic:?}`");
+                let (_parameters, result_layout) = self.require_saturated_callable_call(
+                    kernel_id, expr_id, callee, arguments, &detail,
+                )?;
+                let [functions, values] = arguments else {
+                    unreachable!("saturated signal apply call should keep exactly two arguments");
+                };
+                let mut resolved =
+                    self.resolve_signal_callable(kernel_id, *functions, "signal apply function")?;
+                let Some(expected_layout) = resolved.remaining_parameter_layouts.first().copied()
+                else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "signal apply function `{}` has no remaining parameter to consume",
+                            resolved.item_name
+                        ),
+                    ));
+                };
+                let found_layout = self.signal_current_value_layout(
+                    kernel_id,
+                    *values,
+                    &format!("signal apply argument for `{}`", resolved.item_name),
+                )?;
+                self.require_layout_match(
+                    kernel_id,
+                    *values,
+                    expected_layout,
+                    found_layout,
+                    &format!("signal apply argument for `{}`", resolved.item_name),
+                )?;
+                resolved.argument_exprs.push(*values);
+                resolved.argument_layouts.push((found_layout, expected_layout));
+                resolved.remaining_parameter_layouts.remove(0);
+                if !resolved.remaining_parameter_layouts.is_empty() {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "signal apply function `{}` still leaves {} unapplied parameter(s)",
+                            resolved.item_name,
+                            resolved.remaining_parameter_layouts.len()
+                        ),
+                    ));
+                }
+                let LayoutKind::Signal { element: result_element } =
+                    &self.program.layouts()[result_layout].kind
+                else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "signal apply result must stay a Signal layout",
+                    ));
+                };
+                self.require_layout_match(
+                    kernel_id,
+                    expr_id,
+                    *result_element,
+                    resolved.result_layout,
+                    &format!("signal apply result for `{}`", resolved.item_name),
+                )?;
+                Ok(BuiltinCallPlan::SignalApply(SignalApplyPlan {
+                    body: resolved.body,
+                    argument_exprs: resolved.argument_exprs.into_boxed_slice(),
+                    argument_layouts: resolved.argument_layouts.into_boxed_slice(),
+                    result: (resolved.result_layout, *result_element),
+                }))
+            }
             crate::BuiltinClassMemberIntrinsic::Compare { subject, .. } => {
                 let detail = format!("builtin class member `{intrinsic:?}`");
                 let (_parameters, result_layout) = self.require_saturated_callable_call(
@@ -5405,6 +6201,286 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         Ok(builder.inst_results(call)[0])
     }
 
+    fn emit_empty_list(
+        &mut self,
+        kernel_id: KernelId,
+        element_layout: LayoutId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let element_abi =
+            self.field_abi_shape(kernel_id, element_layout, "empty list element")?;
+        let dummy_slot =
+            builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                element_abi.size.max(8),
+                element_abi.align.max(1).ilog2() as u8,
+            ));
+        let dummy_ptr = builder.ins().stack_addr(self.pointer_type(), dummy_slot, 0);
+        let list_new = self.declare_list_new_func(kernel_id, builder)?;
+        let zero = builder.ins().iconst(types::I64, 0);
+        let stride = builder
+            .ins()
+            .iconst(types::I64, i64::from(element_abi.size.max(1)));
+        let call = builder.ins().call(list_new, &[zero, dummy_ptr, stride]);
+        Ok(builder.inst_results(call)[0])
+    }
+
+    fn lower_list_any(
+        &mut self,
+        kernel_id: KernelId,
+        plan: &ListPredicatePlan,
+        prefix_arguments: &[Value],
+        subject: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let list_len = self.declare_list_len_func(kernel_id, builder)?;
+        let list_get = self.declare_list_get_func(kernel_id, builder)?;
+        let len_call = builder.ins().call(list_len, &[subject]);
+        let len = builder.inst_results(len_call)[0];
+        let element_abi =
+            self.field_abi_shape(kernel_id, plan.element_layout, "list any element")?;
+
+        let mut prefix_arguments = prefix_arguments.to_vec();
+        for ((from, to), argument) in plan
+            .step_prefix_layouts
+            .iter()
+            .zip(prefix_arguments.iter_mut())
+        {
+            *argument = self.repack_value(kernel_id, *argument, *from, *to, builder)?;
+        }
+
+        let loop_block = builder.create_block();
+        let body_block = builder.create_block();
+        let done_block = builder.create_block();
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(done_block, types::I8);
+
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.ins().jump(loop_block, &[BlockArg::Value(zero)]);
+
+        builder.switch_to_block(loop_block);
+        let index = builder.block_params(loop_block)[0];
+        let at_end = builder.ins().icmp(IntCC::Equal, index, len);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        builder
+            .ins()
+            .brif(at_end, done_block, &[BlockArg::Value(false_value)], body_block, &[]);
+
+        builder.seal_block(body_block);
+        builder.switch_to_block(body_block);
+        let get_call = builder.ins().call(list_get, &[subject, index]);
+        let element_ptr = builder.inst_results(get_call)[0];
+        let element = builder
+            .ins()
+            .load(element_abi.ty, MemFlags::new(), element_ptr, 0);
+        let step_element = self.repack_value(
+            kernel_id,
+            element,
+            plan.element_layout,
+            plan.step_element_layout,
+            builder,
+        )?;
+        let mut step_arguments = Vec::with_capacity(prefix_arguments.len() + 1);
+        step_arguments.extend(prefix_arguments.iter().copied());
+        step_arguments.push(step_element);
+        let predicate =
+            self.lower_direct_item_call(kernel_id, plan.step_body, &step_arguments, builder)?;
+        let next_index = builder.ins().iadd_imm(index, 1);
+        let true_value = builder.ins().iconst(types::I8, 1);
+        builder.ins().brif(
+            predicate,
+            done_block,
+            &[BlockArg::Value(true_value)],
+            loop_block,
+            &[BlockArg::Value(next_index)],
+        );
+
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        Ok(builder.block_params(done_block)[0])
+    }
+
+    fn lower_list_find(
+        &mut self,
+        kernel_id: KernelId,
+        plan: &ListFindPlan,
+        prefix_arguments: &[Value],
+        subject: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let predicate = &plan.predicate;
+        let list_len = self.declare_list_len_func(kernel_id, builder)?;
+        let list_get = self.declare_list_get_func(kernel_id, builder)?;
+        let len_call = builder.ins().call(list_len, &[subject]);
+        let len = builder.inst_results(len_call)[0];
+        let element_abi =
+            self.field_abi_shape(kernel_id, predicate.element_layout, "list find element")?;
+
+        let mut prefix_arguments = prefix_arguments.to_vec();
+        for ((from, to), argument) in predicate
+            .step_prefix_layouts
+            .iter()
+            .zip(prefix_arguments.iter_mut())
+        {
+            *argument = self.repack_value(kernel_id, *argument, *from, *to, builder)?;
+        }
+
+        let loop_block = builder.create_block();
+        let body_block = builder.create_block();
+        let done_block = builder.create_block();
+        let result_ty = match plan.option_contract {
+            OptionCodegenContract::NicheReference => self.pointer_type(),
+            OptionCodegenContract::InlineScalar(_) => types::I128,
+        };
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(done_block, result_ty);
+
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.ins().jump(loop_block, &[BlockArg::Value(zero)]);
+
+        builder.switch_to_block(loop_block);
+        let index = builder.block_params(loop_block)[0];
+        let at_end = builder.ins().icmp(IntCC::Equal, index, len);
+        let none = match plan.option_contract {
+            OptionCodegenContract::NicheReference => {
+                builder.ins().iconst(self.pointer_type(), 0)
+            }
+            OptionCodegenContract::InlineScalar(_) => self.lower_inline_scalar_option_none(builder),
+        };
+        builder
+            .ins()
+            .brif(at_end, done_block, &[BlockArg::Value(none)], body_block, &[]);
+
+        builder.seal_block(body_block);
+        builder.switch_to_block(body_block);
+        let get_call = builder.ins().call(list_get, &[subject, index]);
+        let element_ptr = builder.inst_results(get_call)[0];
+        let element = builder
+            .ins()
+            .load(element_abi.ty, MemFlags::new(), element_ptr, 0);
+        let step_element = self.repack_value(
+            kernel_id,
+            element,
+            predicate.element_layout,
+            predicate.step_element_layout,
+            builder,
+        )?;
+        let mut step_arguments = Vec::with_capacity(prefix_arguments.len() + 1);
+        step_arguments.extend(prefix_arguments.iter().copied());
+        step_arguments.push(step_element);
+        let matched =
+            self.lower_direct_item_call(kernel_id, predicate.step_body, &step_arguments, builder)?;
+        let some = match plan.option_contract {
+            OptionCodegenContract::NicheReference => element,
+            OptionCodegenContract::InlineScalar(kind) => {
+                self.lower_inline_scalar_option_some(kind, element, builder)
+            }
+        };
+        let next_index = builder.ins().iadd_imm(index, 1);
+        builder.ins().brif(
+            matched,
+            done_block,
+            &[BlockArg::Value(some)],
+            loop_block,
+            &[BlockArg::Value(next_index)],
+        );
+
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        Ok(builder.block_params(done_block)[0])
+    }
+
+    fn lower_list_flat_map(
+        &mut self,
+        kernel_id: KernelId,
+        plan: &ListFlatMapPlan,
+        prefix_arguments: &[Value],
+        subject: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let list_len = self.declare_list_len_func(kernel_id, builder)?;
+        let list_get = self.declare_list_get_func(kernel_id, builder)?;
+        let list_append = self.declare_list_append_func(kernel_id, builder)?;
+        let len_call = builder.ins().call(list_len, &[subject]);
+        let len = builder.inst_results(len_call)[0];
+        let input_element_abi = self.field_abi_shape(
+            kernel_id,
+            plan.input_element_layout,
+            "list flatMap input element",
+        )?;
+        let element_size = self
+            .field_abi_shape(kernel_id, plan.output_element_layout, "list flatMap output element")?
+            .size
+            .max(1);
+        let element_size = builder.ins().iconst(types::I64, i64::from(element_size));
+
+        let mut prefix_arguments = prefix_arguments.to_vec();
+        for ((from, to), argument) in plan
+            .step_prefix_layouts
+            .iter()
+            .zip(prefix_arguments.iter_mut())
+        {
+            *argument = self.repack_value(kernel_id, *argument, *from, *to, builder)?;
+        }
+
+        let loop_block = builder.create_block();
+        let body_block = builder.create_block();
+        let done_block = builder.create_block();
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(loop_block, self.pointer_type());
+        builder.append_block_param(done_block, self.pointer_type());
+
+        let zero = builder.ins().iconst(types::I64, 0);
+        let empty = self.emit_empty_list(kernel_id, plan.output_element_layout, builder)?;
+        builder
+            .ins()
+            .jump(loop_block, &[BlockArg::Value(zero), BlockArg::Value(empty)]);
+
+        builder.switch_to_block(loop_block);
+        let index = builder.block_params(loop_block)[0];
+        let acc = builder.block_params(loop_block)[1];
+        let at_end = builder.ins().icmp(IntCC::Equal, index, len);
+        builder.ins().brif(at_end, done_block, &[BlockArg::Value(acc)], body_block, &[]);
+
+        builder.seal_block(body_block);
+        builder.switch_to_block(body_block);
+        let get_call = builder.ins().call(list_get, &[subject, index]);
+        let element_ptr = builder.inst_results(get_call)[0];
+        let element = builder
+            .ins()
+            .load(input_element_abi.ty, MemFlags::new(), element_ptr, 0);
+        let step_element = self.repack_value(
+            kernel_id,
+            element,
+            plan.input_element_layout,
+            plan.step_element_layout,
+            builder,
+        )?;
+        let mut step_arguments = Vec::with_capacity(prefix_arguments.len() + 1);
+        step_arguments.extend(prefix_arguments.iter().copied());
+        step_arguments.push(step_element);
+        let mapped =
+            self.lower_direct_item_call(kernel_id, plan.step_body, &step_arguments, builder)?;
+        let mapped = self.repack_value(
+            kernel_id,
+            mapped,
+            plan.step_result_layout,
+            plan.output_list_layout,
+            builder,
+        )?;
+        let append_call = builder.ins().call(list_append, &[acc, mapped, element_size]);
+        let next_acc = builder.inst_results(append_call)[0];
+        let next_index = builder.ins().iadd_imm(index, 1);
+        builder.ins().jump(
+            loop_block,
+            &[BlockArg::Value(next_index), BlockArg::Value(next_acc)],
+        );
+
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        Ok(builder.block_params(done_block)[0])
+    }
+
     fn lower_direct_apply(
         &mut self,
         kernel_id: KernelId,
@@ -5690,6 +6766,33 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 let call = builder.ins().call(func_ref, &[*left, *right, element_size]);
                 Ok(builder.inst_results(call)[0])
             }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::SignalPure) => {
+                let [value] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "signal pure lowering expected exactly one materialized argument",
+                    ));
+                };
+                Ok(*value)
+            }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::SignalApply(plan)) => {
+                if arguments.len() != plan.argument_layouts.len() {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "signal apply lowering expected materialized current-value arguments",
+                    ));
+                }
+                let mut adapted_arguments = Vec::with_capacity(arguments.len());
+                for ((from, to), argument) in plan.argument_layouts.iter().zip(arguments.iter()) {
+                    adapted_arguments
+                        .push(self.repack_value(kernel_id, *argument, *from, *to, builder)?);
+                }
+                let result =
+                    self.lower_direct_item_call(kernel_id, plan.body, &adapted_arguments, builder)?;
+                self.repack_value(kernel_id, result, plan.result.0, plan.result.1, builder)
+            }
             DirectApplyPlan::Builtin(BuiltinCallPlan::ListMap(plan)) => {
                 let prefix_count = plan.step_prefix_layouts.len();
                 if arguments.len() != prefix_count + 1 {
@@ -5704,6 +6807,51 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                     unreachable!("direct list map lowering keeps subject trailing");
                 };
                 self.lower_list_map(kernel_id, &plan, prefix_arguments, *subject, builder)
+            }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::ListAny(plan)) => {
+                let prefix_count = plan.step_prefix_layouts.len();
+                if arguments.len() != prefix_count + 1 {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct list any lowering expected prefix arguments followed by subject",
+                    ));
+                }
+                let (prefix_arguments, trailing_arguments) = arguments.split_at(prefix_count);
+                let [subject] = trailing_arguments else {
+                    unreachable!("direct list any lowering keeps subject trailing");
+                };
+                self.lower_list_any(kernel_id, &plan, prefix_arguments, *subject, builder)
+            }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::ListFind(plan)) => {
+                let prefix_count = plan.predicate.step_prefix_layouts.len();
+                if arguments.len() != prefix_count + 1 {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct list find lowering expected prefix arguments followed by subject",
+                    ));
+                }
+                let (prefix_arguments, trailing_arguments) = arguments.split_at(prefix_count);
+                let [subject] = trailing_arguments else {
+                    unreachable!("direct list find lowering keeps subject trailing");
+                };
+                self.lower_list_find(kernel_id, &plan, prefix_arguments, *subject, builder)
+            }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::ListFlatMap(plan)) => {
+                let prefix_count = plan.step_prefix_layouts.len();
+                if arguments.len() != prefix_count + 1 {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct list flatMap lowering expected prefix arguments followed by subject",
+                    ));
+                }
+                let (prefix_arguments, trailing_arguments) = arguments.split_at(prefix_count);
+                let [subject] = trailing_arguments else {
+                    unreachable!("direct list flatMap lowering keeps subject trailing");
+                };
+                self.lower_list_flat_map(kernel_id, &plan, prefix_arguments, *subject, builder)
             }
             DirectApplyPlan::Builtin(BuiltinCallPlan::ListReduce(plan)) => {
                 let prefix_count = plan.step_prefix_layouts.len();
@@ -8419,13 +9567,36 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                             crate::InlinePipePatternKind::Wildcard
                                                 | crate::InlinePipePatternKind::Binding { .. }
                                         ) => Ok(is_some),
-                                    [_] => Err(CodegenError::UnsupportedLayout {
-                                        kernel: kernel_id,
-                                        layout: input_layout,
-                                        detail:
-                                            "lazy JIT does not lower payload-sensitive Some patterns for reference-backed options yet"
-                                                .into(),
-                                    }),
+                                    [sub_pat] => {
+                                        let element_layout =
+                                            match &self.program.layouts()[input_layout].kind {
+                                                LayoutKind::Option { element } => *element,
+                                                _ => input_layout,
+                                            };
+                                        let sub_test = self.emit_pattern_test(
+                                            kernel_id,
+                                            current,
+                                            sub_pat,
+                                            element_layout,
+                                            inline_subjects,
+                                            builder,
+                                        )?;
+                                        let is_some = if builder.func.dfg.value_type(is_some)
+                                            == types::I8
+                                        {
+                                            is_some
+                                        } else {
+                                            builder.ins().ireduce(types::I8, is_some)
+                                        };
+                                        let sub_test = if builder.func.dfg.value_type(sub_test)
+                                            == types::I8
+                                        {
+                                            sub_test
+                                        } else {
+                                            builder.ins().ireduce(types::I8, sub_test)
+                                        };
+                                        Ok(builder.ins().band(is_some, sub_test))
+                                    }
                                     _ => Err(CodegenError::UnsupportedLayout {
                                         kernel: kernel_id,
                                         layout: input_layout,

@@ -875,3 +875,57 @@ fn compile_stops_at_hir_validation_for_invalid_result_blocks() {
         "expected compile to stop during HIR validation, got stderr: {stderr}"
     );
 }
+
+#[test]
+fn compile_supports_dynamic_list_wrappers_with_partial_item_callables() {
+    let input = TempFile::new(
+        "compile-list-wrapper-partials",
+        "aivi",
+        r#"
+type Int -> Int -> Int
+fun add = left right => left + right
+
+type Int -> Int -> Bool
+fun above = threshold value => value > threshold
+
+type Int -> Int -> (List Int)
+fun duplicateFrom = base value => [base, value]
+
+type Int -> (Option Int)
+fun positiveOption = value => value > 0
+ T|> Some value
+ F|> None
+
+type (List Int) -> (List Int)
+fun mapped = values => map (add 1) values
+
+type (List Int) -> Bool
+fun anyAboveOne = values => any (above 1) values
+
+type (List Int) -> (Option Int)
+fun foundAboveOne = values => find (above 1) values
+
+type (List Int) -> (List Int)
+fun flattened = values => flatMap (duplicateFrom 0) values
+"#,
+    );
+    let output_dir = TempDir::new("compile-list-wrapper-partials");
+    let output_path = output_dir.path().join("list-wrapper-partials.o");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("compile")
+        .arg(input.path())
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("compile command should run");
+
+    assert!(
+        output.status.success(),
+        "expected compile to succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::metadata(&output_path).is_ok(),
+        "expected compile to emit an object file"
+    );
+}
