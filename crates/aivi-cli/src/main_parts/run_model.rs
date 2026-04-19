@@ -61,6 +61,7 @@ struct RunArtifact {
     required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     runtime_assembly: HirRuntimeAssembly,
     runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
+    runtime_tables: Option<aivi_runtime::BackendLinkedRuntimeTables>,
     backend: aivi_runtime::hir_adapter::BackendRuntimePayload,
     backend_native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     /// Default values to publish into stub Input signal handles for cross-module

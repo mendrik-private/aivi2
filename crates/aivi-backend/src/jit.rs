@@ -16,9 +16,9 @@ use aivi_ffi_call::{
 
 use crate::{
     AbiPassMode, BackendExecutionEngine, BackendExecutionEngineKind, BackendExecutionOptions,
-    BackendRuntimeMeta, EvalFrame, EvaluationCallProfile, EvaluationError, ItemId,
-    KernelEvaluationProfile, KernelEvaluator, KernelExprId, KernelFingerprint, KernelId, LayoutId,
-    LayoutKind, NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program,
+    BackendRuntimeMeta, BackendRuntimeView, EvalFrame, EvaluationCallProfile, EvaluationError,
+    ItemId, KernelEvaluationProfile, KernelEvaluator, KernelExprId, KernelFingerprint, KernelId,
+    LayoutId, LayoutKind, NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program,
     RuntimeBigInt, RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
     RuntimeRecordField, RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
     cache::{
@@ -1115,7 +1115,12 @@ impl NativeKernelPlan {
         artifact: &NativeKernelArtifact,
     ) -> Option<Self> {
         let artifact = instantiate_native_kernel_artifact(program, kernel_id, artifact).ok()?;
-        Self::from_compiled_jit_with_options(program, kernel_id, artifact, false)
+        Self::from_compiled_jit_with_options(
+            BackendRuntimeView::Program(program),
+            kernel_id,
+            artifact,
+            false,
+        )
     }
 
     pub fn from_native_artifact_for_runtime_meta(
@@ -1123,10 +1128,14 @@ impl NativeKernelPlan {
         kernel_id: KernelId,
         artifact: &NativeKernelArtifact,
     ) -> Option<Self> {
-        let replay_program = meta.to_replay_program();
         let artifact =
             instantiate_native_kernel_artifact_for_runtime_meta(meta, kernel_id, artifact).ok()?;
-        Self::from_compiled_jit_with_options(&replay_program, kernel_id, artifact, true)
+        Self::from_compiled_jit_with_options(
+            BackendRuntimeView::Meta(meta),
+            kernel_id,
+            artifact,
+            true,
+        )
     }
 
     fn from_compiled_jit(
@@ -1134,19 +1143,24 @@ impl NativeKernelPlan {
         kernel_id: KernelId,
         artifact: CompiledJitKernel,
     ) -> Option<Self> {
-        Self::from_compiled_jit_with_options(program, kernel_id, artifact, false)
+        Self::from_compiled_jit_with_options(
+            BackendRuntimeView::Program(program),
+            kernel_id,
+            artifact,
+            false,
+        )
     }
 
     fn from_compiled_jit_with_options(
-        program: &Program,
+        backend: BackendRuntimeView<'_>,
         kernel_id: KernelId,
         artifact: CompiledJitKernel,
         decode_named_domain_as_int: bool,
     ) -> Option<Self> {
-        let kernel = &program.kernels()[kernel_id];
+        let kernel = backend.kernel(kernel_id)?;
         let input_plan = match kernel.input_subject {
             Some(layout) => Some(MarshalPlan::for_layout_with_options(
-                program,
+                backend,
                 layout,
                 decode_named_domain_as_int,
             )?),
@@ -1156,11 +1170,11 @@ impl NativeKernelPlan {
             .environment
             .iter()
             .map(|layout| {
-                MarshalPlan::for_layout_with_options(program, *layout, decode_named_domain_as_int)
+                MarshalPlan::for_layout_with_options(backend, *layout, decode_named_domain_as_int)
             })
             .collect::<Option<Vec<_>>>()?;
         let result_plan = MarshalPlan::for_layout_with_options(
-            program,
+            backend,
             kernel.result_layout,
             decode_named_domain_as_int,
         )?;
@@ -1169,7 +1183,7 @@ impl NativeKernelPlan {
             .iter()
             .map(|slot| {
                 MarshalPlan::for_layout_with_options(
-                    program,
+                    backend,
                     slot.layout,
                     decode_named_domain_as_int,
                 )
@@ -1180,7 +1194,7 @@ impl NativeKernelPlan {
             .iter()
             .map(|slot| {
                 MarshalPlan::for_layout_with_options(
-                    program,
+                    backend,
                     slot.layout,
                     decode_named_domain_as_int,
                 )
@@ -1189,7 +1203,7 @@ impl NativeKernelPlan {
         Some(Self {
             kernel_id,
             input_layout: kernel.input_subject,
-            environment_layouts: kernel.environment.clone(),
+            environment_layouts: kernel.environment.to_vec(),
             result_layout: kernel.result_layout,
             artifact,
             input_plan,
@@ -1350,16 +1364,16 @@ struct MarshalPlan {
 }
 
 impl MarshalPlan {
-    fn for_layout(program: &Program, layout: LayoutId) -> Option<Self> {
-        Self::for_layout_with_options(program, layout, false)
+    fn for_layout(backend: BackendRuntimeView<'_>, layout: LayoutId) -> Option<Self> {
+        Self::for_layout_with_options(backend, layout, false)
     }
 
     fn for_layout_with_options(
-        program: &Program,
+        backend: BackendRuntimeView<'_>,
         layout: LayoutId,
         decode_named_domain_as_int: bool,
     ) -> Option<Self> {
-        let layout_data = program.layouts().get(layout)?;
+        let layout_data = backend.layout(layout)?;
         let kind = match (&layout_data.abi, &layout_data.kind) {
             (AbiPassMode::ByValue, LayoutKind::Primitive(PrimitiveType::Unit)) => {
                 MarshalPlanKind::Unit
@@ -1387,13 +1401,13 @@ impl MarshalPlan {
             }
             (_, LayoutKind::Signal { element }) => MarshalPlanKind::Signal {
                 element: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *element,
                     decode_named_domain_as_int,
                 )?),
             },
             (AbiPassMode::ByValue, LayoutKind::Option { element }) => {
-                let payload = program.layouts().get(*element)?;
+                let payload = backend.layout(*element)?;
                 let kind = match (&payload.abi, &payload.kind) {
                     (AbiPassMode::ByValue, LayoutKind::Primitive(PrimitiveType::Int)) => {
                         ScalarOptionKind::Int
@@ -1409,13 +1423,13 @@ impl MarshalPlan {
                 MarshalPlanKind::InlineOption(kind)
             }
             (AbiPassMode::ByReference, LayoutKind::Option { element }) => {
-                let payload_layout = program.layouts().get(*element)?;
+                let payload_layout = backend.layout(*element)?;
                 if payload_layout.abi != AbiPassMode::ByReference {
                     return None;
                 }
                 MarshalPlanKind::NicheOption {
                     payload: Box::new(Self::for_layout_with_options(
-                        program,
+                        backend,
                         *element,
                         decode_named_domain_as_int,
                     )?),
@@ -1423,7 +1437,7 @@ impl MarshalPlan {
             }
             (AbiPassMode::ByReference, LayoutKind::Tuple(elements)) => {
                 let (fields, size, align) =
-                    build_tuple_fields_with_options(program, elements, decode_named_domain_as_int)?;
+                    build_tuple_fields_with_options(backend, elements, decode_named_domain_as_int)?;
                 MarshalPlanKind::Tuple {
                     fields,
                     size,
@@ -1432,7 +1446,7 @@ impl MarshalPlan {
             }
             (AbiPassMode::ByReference, LayoutKind::Record(fields)) => {
                 let (fields, size, align) =
-                    build_record_fields_with_options(program, fields, decode_named_domain_as_int)?;
+                    build_record_fields_with_options(backend, fields, decode_named_domain_as_int)?;
                 MarshalPlanKind::Record {
                     fields,
                     size,
@@ -1441,43 +1455,43 @@ impl MarshalPlan {
             }
             (AbiPassMode::ByReference, LayoutKind::List { element }) => MarshalPlanKind::List {
                 element: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *element,
                     decode_named_domain_as_int,
                 )?),
-                element_size: cell_size_for_layout(program, *element)?,
+                element_size: cell_size_for_layout(backend, *element)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Set { element }) => MarshalPlanKind::Set {
                 element: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *element,
                     decode_named_domain_as_int,
                 )?),
-                element_size: cell_size_for_layout(program, *element)?,
+                element_size: cell_size_for_layout(backend, *element)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Map { key, value }) => MarshalPlanKind::Map {
                 key: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *key,
                     decode_named_domain_as_int,
                 )?),
-                key_size: cell_size_for_layout(program, *key)?,
+                key_size: cell_size_for_layout(backend, *key)?,
                 value: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *value,
                     decode_named_domain_as_int,
                 )?),
-                value_size: cell_size_for_layout(program, *value)?,
+                value_size: cell_size_for_layout(backend, *value)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Result { error, value }) => {
                 MarshalPlanKind::Result {
                     ok: Box::new(Self::for_layout_with_options(
-                        program,
+                        backend,
                         *value,
                         decode_named_domain_as_int,
                     )?),
                     err: Box::new(Self::for_layout_with_options(
-                        program,
+                        backend,
                         *error,
                         decode_named_domain_as_int,
                     )?),
@@ -1486,12 +1500,12 @@ impl MarshalPlan {
             (AbiPassMode::ByReference, LayoutKind::Validation { error, value }) => {
                 MarshalPlanKind::Validation {
                     valid: Box::new(Self::for_layout_with_options(
-                        program,
+                        backend,
                         *value,
                         decode_named_domain_as_int,
                     )?),
                     invalid: Box::new(Self::for_layout_with_options(
-                        program,
+                        backend,
                         *error,
                         decode_named_domain_as_int,
                     )?),
@@ -1505,7 +1519,7 @@ impl MarshalPlan {
                 },
             ) => MarshalPlanKind::AnonymousDomain {
                 carrier: Box::new(Self::for_layout_with_options(
-                    program,
+                    backend,
                     *carrier,
                     decode_named_domain_as_int,
                 )?),
@@ -1531,7 +1545,7 @@ impl MarshalPlan {
                             field_count: variant.field_count,
                             payload: match variant.payload {
                                 Some(payload) => {
-                                    Some(Box::new(Self::for_layout(program, payload)?))
+                                    Some(Box::new(Self::for_layout(backend, payload)?))
                                 }
                                 None => None,
                             },
@@ -1546,10 +1560,10 @@ impl MarshalPlan {
         };
         let kind = match (&layout_data.abi, &layout_data.kind) {
             (AbiPassMode::ByReference, LayoutKind::Domain { .. }) => {
-                if let Some(carrier) = program.named_domain_carrier(layout) {
+                if let Some(carrier) = backend.named_domain_carrier(layout) {
                     MarshalPlanKind::RepresentationalDomain {
                         carrier: Box::new(Self::for_layout_with_options(
-                            program,
+                            backend,
                             carrier,
                             decode_named_domain_as_int,
                         )?),
@@ -2194,7 +2208,7 @@ enum RuntimeValueTag {
 }
 
 fn build_tuple_fields_with_options(
-    program: &Program,
+    backend: BackendRuntimeView<'_>,
     elements: &[LayoutId],
     decode_named_domain_as_int: bool,
 ) -> Option<(Vec<AggregateFieldPlan>, usize, usize)> {
@@ -2203,7 +2217,7 @@ fn build_tuple_fields_with_options(
     let mut max_align = 1usize;
     for layout in elements {
         let plan = Box::new(MarshalPlan::for_layout_with_options(
-            program,
+            backend,
             *layout,
             decode_named_domain_as_int,
         )?);
@@ -2218,7 +2232,7 @@ fn build_tuple_fields_with_options(
 }
 
 fn build_record_fields_with_options(
-    program: &Program,
+    backend: BackendRuntimeView<'_>,
     fields: &[crate::RecordFieldLayout],
     decode_named_domain_as_int: bool,
 ) -> Option<(Vec<RecordFieldPlan>, usize, usize)> {
@@ -2227,7 +2241,7 @@ fn build_record_fields_with_options(
     let mut max_align = 1usize;
     for field in fields {
         let plan = Box::new(MarshalPlan::for_layout_with_options(
-            program,
+            backend,
             field.layout,
             decode_named_domain_as_int,
         )?);
@@ -2246,8 +2260,8 @@ fn build_record_fields_with_options(
     Some((plans, offset, max_align))
 }
 
-fn cell_size_for_layout(program: &Program, layout: LayoutId) -> Option<usize> {
-    Some(MarshalPlan::for_layout(program, layout)?.cell_size())
+fn cell_size_for_layout(backend: BackendRuntimeView<'_>, layout: LayoutId) -> Option<usize> {
+    Some(MarshalPlan::for_layout(backend, layout)?.cell_size())
 }
 
 fn align_offset(offset: usize, align: usize) -> usize {

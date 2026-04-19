@@ -104,6 +104,9 @@ struct NativeKernelPayloadWire {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 struct FrozenBackendHandle(u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+struct FrozenEntryHandle(u32);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct FrozenBackendPayloadRefWire {
     handle: FrozenBackendHandle,
@@ -115,6 +118,7 @@ struct FrozenRunImage {
     version: u32,
     artifact: FrozenSerializedRunArtifact,
     backends: Box<[FrozenBackendPayloadWire]>,
+    entries: Box<[FrozenEntryWire]>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -130,6 +134,12 @@ struct FrozenNativeKernelPayloadWire {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct FrozenEntryWire {
+    backend: FrozenBackendHandle,
+    item: BackendItemId,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct FrozenSerializedRunArtifact {
     format: Box<str>,
     version: u32,
@@ -137,9 +147,43 @@ struct FrozenSerializedRunArtifact {
     kind: FrozenSerializedRunArtifactKind,
     required_signal_globals: Box<[RequiredSignalGlobalWire]>,
     runtime_assembly: FrozenHirRuntimeAssemblyWire,
-    runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
+    runtime_tables: FrozenLinkedRuntimeTablesWire,
     backend: FrozenBackendPayloadRefWire,
     stub_signal_defaults: Box<[StubSignalDefaultWire]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct FrozenLinkedRuntimeTablesWire {
+    signal_items_by_handle: Box<[(aivi_runtime::SignalHandle, BackendItemId)]>,
+    runtime_signal_by_item: Box<[(BackendItemId, aivi_runtime::SignalHandle)]>,
+    derived_signals: Box<[(aivi_runtime::DerivedHandle, aivi_runtime::LinkedDerivedSignal)]>,
+    reactive_signals: Box<[(aivi_runtime::SignalHandle, aivi_runtime::LinkedReactiveSignal)]>,
+    reactive_clauses: Box<[FrozenLinkedReactiveClauseEntryWire]>,
+    linked_recurrence_signals:
+        Box<[(aivi_runtime::DerivedHandle, aivi_runtime::LinkedRecurrenceSignal)]>,
+    source_bindings:
+        Box<[(aivi_runtime::SourceInstanceId, aivi_runtime::LinkedSourceBinding)]>,
+    task_bindings: Box<[(aivi_runtime::TaskInstanceId, aivi_runtime::LinkedTaskBinding)]>,
+    db_changed_routes: Box<[aivi_runtime::LinkedDbChangedRoute]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct FrozenLinkedReactiveClauseEntryWire {
+    handle: aivi_runtime::ReactiveClauseHandle,
+    clause: FrozenLinkedReactiveClauseWire,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct FrozenLinkedReactiveClauseWire {
+    owner: HirItemId,
+    target: aivi_runtime::SignalHandle,
+    clause: aivi_runtime::ReactiveClauseHandle,
+    pipeline_ids: Box<[aivi_backend::PipelineId]>,
+    body_mode: aivi_hir::ReactiveUpdateBodyMode,
+    guard_eval_lane: aivi_runtime::startup::LinkedEvalLane,
+    body_eval_lane: aivi_runtime::startup::LinkedEvalLane,
+    compiled_guard: FrozenHirCompiledRuntimeExprWire,
+    compiled_body: FrozenHirCompiledRuntimeExprWire,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -172,8 +216,7 @@ enum FrozenCompiledRunInputWire {
 struct FrozenCompiledRunFragmentWire {
     expr: HirExprId,
     parameters: Vec<RunFragmentParameter>,
-    execution: FrozenBackendPayloadRefWire,
-    item: BackendItemId,
+    entry: FrozenEntryHandle,
     required_signal_globals: Vec<CompiledRunSignalGlobal>,
 }
 
@@ -248,8 +291,7 @@ struct FrozenHirReactiveUpdateBindingWire {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct FrozenHirCompiledRuntimeExprWire {
-    backend: FrozenBackendPayloadRefWire,
-    entry_item: BackendItemId,
+    entry: FrozenEntryHandle,
     parameter_signals: Box<[aivi_runtime::SignalHandle]>,
     required_signals: Box<[aivi_runtime::hir_adapter::HirCompiledRuntimeExprSignal]>,
 }
@@ -403,10 +445,13 @@ struct FrozenPayloadRegistry {
     include_native_kernels: bool,
     handles_by_key: BTreeMap<u64, FrozenBackendHandle>,
     entries: Vec<FrozenRegisteredBackendPayload>,
+    entry_handles: BTreeMap<(FrozenBackendHandle, BackendItemId), FrozenEntryHandle>,
+    frozen_entries: Vec<FrozenEntryWire>,
 }
 
 struct FrozenPayloadLoader {
-    entries: Vec<LoadedBackendPayload>,
+    backends: Vec<LoadedBackendPayload>,
+    entries: Vec<FrozenEntryWire>,
 }
 
 impl ArtifactPayloadRegistry {
@@ -512,6 +557,8 @@ impl FrozenPayloadRegistry {
             include_native_kernels,
             handles_by_key: BTreeMap::new(),
             entries: Vec::new(),
+            entry_handles: BTreeMap::new(),
+            frozen_entries: Vec::new(),
         }
     }
 
@@ -548,6 +595,25 @@ impl FrozenPayloadRegistry {
         Ok(FrozenBackendPayloadRefWire { handle })
     }
 
+    fn register_entry(
+        &mut self,
+        backend: aivi_runtime::hir_adapter::BackendRuntimePayload,
+        native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
+        item: BackendItemId,
+    ) -> Result<FrozenEntryHandle, String> {
+        let backend = self.register_payload(backend, native_kernels)?.handle;
+        if let Some(&handle) = self.entry_handles.get(&(backend, item)) {
+            return Ok(handle);
+        }
+        let handle =
+            FrozenEntryHandle(self.frozen_entries.len().try_into().map_err(|_| {
+                "frozen entry table exceeded maximum entry count".to_owned()
+            })?);
+        self.frozen_entries.push(FrozenEntryWire { backend, item });
+        self.entry_handles.insert((backend, item), handle);
+        Ok(handle)
+    }
+
     fn collect_backends(&self) -> Result<Box<[FrozenBackendPayloadWire]>, String> {
         self.entries
             .iter()
@@ -569,6 +635,10 @@ impl FrozenPayloadRegistry {
             })
             .collect::<Result<Vec<_>, String>>()
             .map(Vec::into_boxed_slice)
+    }
+
+    fn collect_entries(&self) -> Box<[FrozenEntryWire]> {
+        self.frozen_entries.clone().into_boxed_slice()
     }
 }
 
@@ -638,8 +708,11 @@ impl ArtifactPayloadLoader {
 }
 
 impl FrozenPayloadLoader {
-    fn new(backends: Box<[FrozenBackendPayloadWire]>) -> Result<Self, String> {
-        let mut entries = Vec::with_capacity(backends.len());
+    fn new(
+        backends: Box<[FrozenBackendPayloadWire]>,
+        entries: Box<[FrozenEntryWire]>,
+    ) -> Result<Self, String> {
+        let mut loaded = Vec::with_capacity(backends.len());
         for payload in backends.into_vec() {
             let backend =
                 decode_backend_payload_bytes(&payload.runtime_meta, "frozen-image runtime meta")?;
@@ -676,16 +749,19 @@ impl FrozenPayloadLoader {
                 };
                 native_kernels.insert(fingerprint, artifact);
             }
-            entries.push(LoadedBackendPayload {
+            loaded.push(LoadedBackendPayload {
                 backend,
                 native_kernels: Arc::new(native_kernels),
             });
         }
-        Ok(Self { entries })
+        Ok(Self {
+            backends: loaded,
+            entries: entries.into_vec(),
+        })
     }
 
     fn load(&self, payload: FrozenBackendPayloadRefWire) -> Result<LoadedBackendPayload, String> {
-        self.entries
+        self.backends
             .get(payload.handle.0 as usize)
             .cloned()
             .ok_or_else(|| {
@@ -694,6 +770,22 @@ impl FrozenPayloadLoader {
                     payload.handle.0
                 )
             })
+    }
+
+    fn load_entry(
+        &self,
+        entry: FrozenEntryHandle,
+    ) -> Result<(LoadedBackendPayload, BackendItemId), String> {
+        let entry = self.entries.get(entry.0 as usize).ok_or_else(|| {
+            format!(
+                "frozen entry handle {} is out of range for image entry table",
+                entry.0
+            )
+        })?;
+        let payload = self.load(FrozenBackendPayloadRefWire {
+            handle: entry.backend,
+        })?;
+        Ok((payload, entry.item))
     }
 }
 
@@ -817,6 +909,7 @@ fn write_frozen_run_image_bundle_with_options(
         version: FROZEN_RUN_IMAGE_VERSION,
         artifact: serialized,
         backends: payloads.collect_backends()?,
+        entries: payloads.collect_entries(),
     };
     let bytes = bincode::serialize(&image)
         .map_err(|error| format!("failed to encode {} as binary: {error}", image_path.display()))?;
@@ -936,7 +1029,7 @@ fn load_frozen_run_image_from_bytes(
             FROZEN_RUN_IMAGE_VERSION
         ));
     }
-    let payloads = FrozenPayloadLoader::new(image.backends)?;
+    let payloads = FrozenPayloadLoader::new(image.backends, image.entries)?;
     deserialize_frozen_run_artifact(image.artifact, &payloads)
     .and_then(|artifact| {
         if let Some(requested_view) = requested_view
@@ -1051,6 +1144,22 @@ fn serialize_frozen_run_artifact(
     artifact: &RunArtifact,
     payloads: &mut FrozenPayloadRegistry,
 ) -> Result<FrozenSerializedRunArtifact, String> {
+    let runtime_tables =
+        aivi_runtime::derive_backend_linked_runtime_tables_with_seed_and_native_kernels_from_payload(
+            &artifact.runtime_assembly,
+            &artifact.backend,
+            &artifact.backend_native_kernels,
+            &artifact.runtime_link,
+        )
+        .map_err(|errors| {
+            let joined = errors
+                .errors()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("failed to prelink frozen runtime tables: {joined}")
+        })?;
     let kind = match &artifact.kind {
         RunArtifactKind::Gtk(surface) => {
             FrozenSerializedRunArtifactKind::Gtk(FrozenSerializedRunGtkArtifact {
@@ -1111,7 +1220,7 @@ fn serialize_frozen_run_artifact(
             artifact.runtime_assembly.clone(),
             payloads,
         )?,
-        runtime_link: artifact.runtime_link.clone(),
+        runtime_tables: frozen_linked_runtime_tables_to_wire(&runtime_tables, payloads)?,
         backend: payloads.register_payload(
             artifact.backend.clone(),
             artifact.backend_native_kernels.clone(),
@@ -1176,6 +1285,7 @@ fn deserialize_run_artifact(
             .collect(),
         runtime_assembly: hir_runtime_assembly_from_wire(serialized.runtime_assembly, &mut payloads)?,
         runtime_link: serialized.runtime_link,
+        runtime_tables: None,
         backend: backend.backend,
         backend_native_kernels: backend.native_kernels,
         stub_signal_defaults: serialized
@@ -1194,6 +1304,7 @@ fn deserialize_frozen_run_artifact(
     payloads: &FrozenPayloadLoader,
 ) -> Result<RunArtifact, String> {
     let backend = payloads.load(serialized.backend)?;
+    let runtime_tables = frozen_linked_runtime_tables_from_wire(serialized.runtime_tables, payloads)?;
     let kind = match serialized.kind {
         FrozenSerializedRunArtifactKind::Gtk(surface) => RunArtifactKind::Gtk(RunGtkArtifact {
             patterns: RunPatternTable {
@@ -1235,7 +1346,10 @@ fn deserialize_frozen_run_artifact(
             .map(|entry| (entry.item, entry.name))
             .collect(),
         runtime_assembly: frozen_hir_runtime_assembly_from_wire(serialized.runtime_assembly, payloads)?,
-        runtime_link: serialized.runtime_link,
+        runtime_link: aivi_runtime::BackendRuntimeLinkSeed {
+            hir_to_backend: Box::new([]),
+        },
+        runtime_tables: Some(runtime_tables),
         backend: backend.backend,
         backend_native_kernels: backend.native_kernels,
         stub_signal_defaults: serialized
@@ -1247,6 +1361,127 @@ fn deserialize_frozen_run_artifact(
     };
     backfill_fragment_opaque_layout_variants(&mut artifact);
     Ok(artifact)
+}
+
+fn frozen_linked_runtime_tables_to_wire(
+    tables: &aivi_runtime::BackendLinkedRuntimeTables,
+    payloads: &mut FrozenPayloadRegistry,
+) -> Result<FrozenLinkedRuntimeTablesWire, String> {
+    Ok(FrozenLinkedRuntimeTablesWire {
+        signal_items_by_handle: tables
+            .signal_items_by_handle
+            .iter()
+            .map(|(&signal, &item)| (signal, item))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        runtime_signal_by_item: tables
+            .runtime_signal_by_item
+            .iter()
+            .map(|(&item, &signal)| (item, signal))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        derived_signals: tables
+            .derived_signals
+            .iter()
+            .map(|(&handle, signal)| (handle, signal.clone()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        reactive_signals: tables
+            .reactive_signals
+            .iter()
+            .map(|(&handle, signal)| (handle, signal.clone()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        reactive_clauses: tables
+            .reactive_clauses
+            .iter()
+            .map(|(&handle, clause)| {
+                Ok::<_, String>(FrozenLinkedReactiveClauseEntryWire {
+                    handle,
+                    clause: frozen_linked_reactive_clause_to_wire(clause.clone(), payloads)?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_boxed_slice(),
+        linked_recurrence_signals: tables
+            .linked_recurrence_signals
+            .iter()
+            .map(|(&handle, signal)| (handle, signal.clone()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        source_bindings: tables
+            .source_bindings
+            .iter()
+            .map(|(&instance, binding)| (instance, binding.clone()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        task_bindings: tables
+            .task_bindings
+            .iter()
+            .map(|(&instance, binding)| (instance, binding.clone()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+        db_changed_routes: tables.db_changed_routes.clone(),
+    })
+}
+
+fn frozen_linked_runtime_tables_from_wire(
+    wire: FrozenLinkedRuntimeTablesWire,
+    payloads: &FrozenPayloadLoader,
+) -> Result<aivi_runtime::BackendLinkedRuntimeTables, String> {
+    Ok(aivi_runtime::BackendLinkedRuntimeTables {
+        signal_items_by_handle: wire.signal_items_by_handle.into_vec().into_iter().collect(),
+        runtime_signal_by_item: wire.runtime_signal_by_item.into_vec().into_iter().collect(),
+        derived_signals: wire.derived_signals.into_vec().into_iter().collect(),
+        reactive_signals: wire.reactive_signals.into_vec().into_iter().collect(),
+        reactive_clauses: wire
+            .reactive_clauses
+            .into_vec()
+            .into_iter()
+            .map(|entry| {
+                frozen_linked_reactive_clause_from_wire(entry.clause, payloads)
+                    .map(|clause| (entry.handle, clause))
+            })
+            .collect::<Result<_, _>>()?,
+        linked_recurrence_signals: wire.linked_recurrence_signals.into_vec().into_iter().collect(),
+        source_bindings: wire.source_bindings.into_vec().into_iter().collect(),
+        task_bindings: wire.task_bindings.into_vec().into_iter().collect(),
+        db_changed_routes: wire.db_changed_routes,
+    })
+}
+
+fn frozen_linked_reactive_clause_to_wire(
+    clause: aivi_runtime::startup::LinkedReactiveClause,
+    payloads: &mut FrozenPayloadRegistry,
+) -> Result<FrozenLinkedReactiveClauseWire, String> {
+    Ok(FrozenLinkedReactiveClauseWire {
+        owner: clause.owner,
+        target: clause.target,
+        clause: clause.clause,
+        pipeline_ids: clause.pipeline_ids,
+        body_mode: clause.body_mode,
+        guard_eval_lane: clause.guard_eval_lane,
+        body_eval_lane: clause.body_eval_lane,
+        compiled_guard: frozen_hir_compiled_runtime_expr_to_wire(clause.compiled_guard, payloads)?,
+        compiled_body: frozen_hir_compiled_runtime_expr_to_wire(clause.compiled_body, payloads)?,
+    })
+}
+
+fn frozen_linked_reactive_clause_from_wire(
+    wire: FrozenLinkedReactiveClauseWire,
+    payloads: &FrozenPayloadLoader,
+) -> Result<aivi_runtime::startup::LinkedReactiveClause, String> {
+    Ok(aivi_runtime::startup::LinkedReactiveClause {
+        owner: wire.owner,
+        target: wire.target,
+        clause: wire.clause,
+        pipeline_ids: wire.pipeline_ids,
+        body_mode: wire.body_mode,
+        guard_eval_lane: wire.guard_eval_lane,
+        body_eval_lane: wire.body_eval_lane,
+        compiled_guard: frozen_hir_compiled_runtime_expr_from_wire(wire.compiled_guard, payloads)?,
+        compiled_body: frozen_hir_compiled_runtime_expr_from_wire(wire.compiled_body, payloads)?,
+    })
 }
 
 fn backfill_fragment_opaque_layout_variants(artifact: &mut RunArtifact) {
@@ -1692,15 +1927,15 @@ fn frozen_compiled_run_fragment_to_wire(
     fragment: &CompiledRunFragment,
     payloads: &mut FrozenPayloadRegistry,
 ) -> Result<FrozenCompiledRunFragmentWire, String> {
-    let execution = payloads.register_payload(
+    let entry = payloads.register_entry(
         fragment.execution.backend.clone(),
         fragment.execution.native_kernels.clone(),
+        fragment.item,
     )?;
     Ok(FrozenCompiledRunFragmentWire {
         expr: fragment.expr,
         parameters: fragment.parameters.clone(),
-        execution,
-        item: fragment.item,
+        entry,
         required_signal_globals: fragment.required_signal_globals.clone(),
     })
 }
@@ -1709,7 +1944,7 @@ fn frozen_compiled_run_fragment_from_wire(
     wire: FrozenCompiledRunFragmentWire,
     payloads: &FrozenPayloadLoader,
 ) -> Result<CompiledRunFragment, String> {
-    let payload = payloads.load(wire.execution)?;
+    let (payload, item) = payloads.load_entry(wire.entry)?;
     Ok(CompiledRunFragment {
         expr: wire.expr,
         parameters: wire.parameters,
@@ -1717,7 +1952,7 @@ fn frozen_compiled_run_fragment_from_wire(
             payload.backend,
             payload.native_kernels,
         )),
-        item: wire.item,
+        item,
         required_signal_globals: wire.required_signal_globals,
     })
 }
@@ -2114,8 +2349,7 @@ fn frozen_hir_compiled_runtime_expr_to_wire(
     payloads: &mut FrozenPayloadRegistry,
 ) -> Result<FrozenHirCompiledRuntimeExprWire, String> {
     Ok(FrozenHirCompiledRuntimeExprWire {
-        backend: payloads.register_payload(expr.backend, expr.native_kernels.clone())?,
-        entry_item: expr.entry_item,
+        entry: payloads.register_entry(expr.backend, expr.native_kernels.clone(), expr.entry_item)?,
         parameter_signals: expr.parameter_signals,
         required_signals: expr.required_signals,
     })
@@ -2125,11 +2359,11 @@ fn frozen_hir_compiled_runtime_expr_from_wire(
     wire: FrozenHirCompiledRuntimeExprWire,
     payloads: &FrozenPayloadLoader,
 ) -> Result<aivi_runtime::hir_adapter::HirCompiledRuntimeExpr, String> {
-    let payload = payloads.load(wire.backend)?;
+    let (payload, entry_item) = payloads.load_entry(wire.entry)?;
     Ok(aivi_runtime::hir_adapter::HirCompiledRuntimeExpr {
         backend: payload.backend,
         native_kernels: payload.native_kernels,
-        entry_item: wire.entry_item,
+        entry_item,
         parameter_signals: wire.parameter_signals,
         required_signals: wire.required_signals,
     })

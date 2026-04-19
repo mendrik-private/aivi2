@@ -119,6 +119,12 @@ fn read_u64(reader: &mut fs::File) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
+fn bytes_contain(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
 #[test]
 fn build_writes_a_self_contained_runnable_executable() {
     let workspace = TempDir::new("build-static-workspace");
@@ -192,6 +198,14 @@ value screenView =
     assert!(
         !frozen_image.is_empty(),
         "expected non-empty frozen run image payload"
+    );
+    assert!(
+        !bytes_contain(frozen_image, b"payloads/"),
+        "frozen run image should use backend handles, not payload path strings"
+    );
+    assert!(
+        !bytes_contain(frozen_image, b"run-artifact.bin"),
+        "frozen run image should not embed legacy run-artifact file references"
     );
     assert!(
         !entries.contains_key("run-artifact.bin"),

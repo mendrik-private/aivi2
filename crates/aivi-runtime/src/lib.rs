@@ -63,14 +63,18 @@ pub use source_decode::{
 };
 pub use source_map::{RuntimeSignalInfo, RuntimeSignalKind, RuntimeSourceInfo, RuntimeSourceMap};
 pub use startup::{
-    BackendLinkedRuntime, BackendRuntimeError, BackendRuntimeLinkError, BackendRuntimeLinkErrors,
-    BackendRuntimeLinkSeed, EvaluatedSourceConfig, EvaluatedSourceOption, LinkedDerivedSignal,
-    LinkedSourceArgument, LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption,
-    LinkedSourceTickOutcome, LinkedTaskBinding, LinkedTaskExecutionBinding,
-    LinkedTaskExecutionBlocker, LinkedTaskWorkerError, LinkedTaskWorkerOutcome,
-    clear_native_kernel_plan_cache, derive_backend_runtime_link_seed, link_backend_runtime,
-    link_backend_runtime_with_seed, link_backend_runtime_with_seed_and_native_kernels,
+    BackendLinkedRuntime, BackendLinkedRuntimeTables, BackendRuntimeError, BackendRuntimeLinkError,
+    BackendRuntimeLinkErrors, BackendRuntimeLinkSeed, EvaluatedSourceConfig, EvaluatedSourceOption,
+    LinkedDbChangedRoute, LinkedDbChangedRouteTable, LinkedDerivedSignal, LinkedReactiveClause,
+    LinkedReactiveSignal, LinkedRecurrenceSignal, LinkedSourceArgument, LinkedSourceBinding,
+    LinkedSourceLifecycleAction, LinkedSourceOption, LinkedSourceTickOutcome, LinkedTaskBinding,
+    LinkedTaskExecutionBinding, LinkedTaskExecutionBlocker, LinkedTaskWorkerError,
+    LinkedTaskWorkerOutcome, clear_native_kernel_plan_cache,
+    derive_backend_linked_runtime_tables_with_seed_and_native_kernels_from_payload,
+    derive_backend_runtime_link_seed, link_backend_runtime, link_backend_runtime_with_seed,
+    link_backend_runtime_with_seed_and_native_kernels,
     link_backend_runtime_with_seed_and_native_kernels_from_payload,
+    link_backend_runtime_with_tables_and_native_kernels_from_payload,
     replace_native_kernel_plans_enabled, set_native_kernel_plans_enabled,
 };
 pub use task_executor::{

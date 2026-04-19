@@ -114,6 +114,13 @@ impl<'a> BackendRuntimeView<'a> {
         }
     }
 
+    pub fn named_domain_carrier(self, layout: LayoutId) -> Option<LayoutId> {
+        match self {
+            Self::Program(program) => program.named_domain_carrier(layout),
+            Self::Meta(meta) => meta.named_domain_carrier(layout),
+        }
+    }
+
     pub fn item_name(self, item: ItemId) -> Option<&'a str> {
         self.item(item).map(|item| item.name.as_ref())
     }

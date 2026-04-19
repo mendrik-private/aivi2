@@ -3,6 +3,19 @@ pub struct BackendRuntimeLinkSeed {
     pub hir_to_backend: Box<[(hir::ItemId, BackendItemId)]>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackendLinkedRuntimeTables {
+    pub signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
+    pub runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
+    pub derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    pub reactive_signals: BTreeMap<SignalHandle, LinkedReactiveSignal>,
+    pub reactive_clauses: BTreeMap<ReactiveClauseHandle, LinkedReactiveClause>,
+    pub linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
+    pub source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
+    pub task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
+    pub db_changed_routes: Box<[LinkedDbChangedRoute]>,
+}
+
 pub fn derive_backend_runtime_link_seed(
     core: &core::Module,
     backend: &BackendProgram,
@@ -92,6 +105,54 @@ pub fn link_backend_runtime_with_seed_and_native_kernels_from_payload(
         })?;
     let mut builder = LinkBuilder::new(&assembly, backend.runtime_view(), native_kernels.as_ref(), seed);
     let linked = builder.build()?;
+    Ok(link_backend_runtime_with_tables_from_parts(
+        assembly,
+        runtime,
+        backend,
+        native_kernels,
+        linked,
+    ))
+}
+
+pub fn derive_backend_linked_runtime_tables_with_seed_and_native_kernels_from_payload(
+    assembly: &HirRuntimeAssembly,
+    backend: &BackendRuntimePayload,
+    native_kernels: &std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
+    seed: &BackendRuntimeLinkSeed,
+) -> Result<BackendLinkedRuntimeTables, BackendRuntimeLinkErrors> {
+    let mut builder = LinkBuilder::new(assembly, backend.runtime_view(), native_kernels.as_ref(), seed);
+    builder.build()
+}
+
+pub fn link_backend_runtime_with_tables_and_native_kernels_from_payload(
+    assembly: HirRuntimeAssembly,
+    backend: BackendRuntimePayload,
+    native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
+    tables: BackendLinkedRuntimeTables,
+) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
+    let runtime = assembly
+        .instantiate_runtime_with_value_store::<RuntimeValue, _>(MovingRuntimeValueStore::default())
+        .map_err(|error| {
+            BackendRuntimeLinkErrors::new(vec![BackendRuntimeLinkError::InstantiateRuntime {
+                error,
+            }])
+        })?;
+    Ok(link_backend_runtime_with_tables_from_parts(
+        assembly,
+        runtime,
+        backend,
+        native_kernels,
+        tables,
+    ))
+}
+
+fn link_backend_runtime_with_tables_from_parts(
+    assembly: HirRuntimeAssembly,
+    runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram, MovingRuntimeValueStore>,
+    backend: BackendRuntimePayload,
+    native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
+    linked: BackendLinkedRuntimeTables,
+) -> BackendLinkedRuntime {
     let mut linked_runtime = BackendLinkedRuntime {
         assembly,
         runtime,
@@ -113,7 +174,7 @@ pub fn link_backend_runtime_with_seed_and_native_kernels_from_payload(
         execution_context: SourceProviderContext::current(),
     };
     linked_runtime.prime_db_changed_routes();
-    Ok(linked_runtime)
+    linked_runtime
 }
 
 /// A fully linked runtime pairing a compiled backend program with the

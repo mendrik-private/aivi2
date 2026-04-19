@@ -117,7 +117,7 @@ struct TemporalStageKey {
     stage_index: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedTemporalHelper {
     pub input: InputHandle,
     pub dependency_index: usize,
@@ -127,7 +127,7 @@ pub struct LinkedTemporalHelper {
     pub stage_offset: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LinkedEvalLane {
     Native(LinkedNativeKernelEval),
     Fallback,
@@ -142,14 +142,14 @@ impl LinkedEvalLane {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedNativeKernelEval {
     pub kernel: KernelId,
     pub dependency_layouts: Box<[aivi_backend::LayoutId]>,
     pub result_layout: aivi_backend::LayoutId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedDerivedSignal {
     pub item: hir::ItemId,
     pub signal: DerivedHandle,
@@ -231,7 +231,7 @@ struct PendingTemporalSchedule {
     kind: TemporalWorkerScheduleKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedRecurrenceSignal {
     pub item: hir::ItemId,
     pub signal: DerivedHandle,
@@ -243,7 +243,7 @@ pub struct LinkedRecurrenceSignal {
     pub pipeline_ids: Box<[BackendPipelineId]>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedReactiveSignal {
     pub item: hir::ItemId,
     pub signal: SignalHandle,
@@ -270,7 +270,7 @@ pub struct LinkedReactiveClause {
     pub compiled_body: HirCompiledRuntimeExpr,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedSourceBinding {
     pub owner: hir::ItemId,
     pub owner_handle: OwnerHandle,
@@ -283,13 +283,13 @@ pub struct LinkedSourceBinding {
     pub options: Box<[LinkedSourceOption]>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedSourceArgument {
     pub kernel: KernelId,
     pub required_signals: Box<[BackendItemId]>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedSourceOption {
     pub option_name: Box<str>,
     pub kernel: KernelId,
@@ -299,14 +299,14 @@ pub struct LinkedSourceOption {
 pub(crate) type DbCommitInvalidationSink =
     Arc<dyn Fn(RuntimeDbCommitInvalidation) + Send + Sync + 'static>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LinkedDbChangedRoute {
-    changed_input: InputHandle,
-    table: LinkedDbChangedRouteTable,
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkedDbChangedRoute {
+    pub changed_input: InputHandle,
+    pub table: LinkedDbChangedRouteTable,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum LinkedDbChangedRouteTable {
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LinkedDbChangedRouteTable {
     Signal {
         signal: SignalHandle,
     },
@@ -324,7 +324,7 @@ struct RuntimeDbTableIdentity {
     table_name: Box<str>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkedTaskBinding {
     pub owner: hir::ItemId,
     pub owner_handle: OwnerHandle,
@@ -334,7 +334,7 @@ pub struct LinkedTaskBinding {
     pub execution: LinkedTaskExecutionBinding,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LinkedTaskExecutionBinding {
     Ready {
         kernel: KernelId,
@@ -343,7 +343,7 @@ pub enum LinkedTaskExecutionBinding {
     Blocked(LinkedTaskExecutionBlocker),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LinkedTaskExecutionBlocker {
     MissingLoweredBody,
     UnsupportedParameters { parameter_count: usize },

@@ -230,6 +230,7 @@ where
         required_signal_globals,
         runtime_assembly,
         runtime_link,
+        runtime_tables: None,
         backend: aivi_runtime::hir_adapter::BackendRuntimePayload::Program(lowered.backend),
         backend_native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
         stub_signal_defaults,

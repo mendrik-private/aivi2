@@ -1024,6 +1024,7 @@ where
         required_signal_globals,
         runtime_assembly,
         runtime_link,
+        runtime_tables,
         backend,
         backend_native_kernels,
         stub_signal_defaults,
@@ -1042,29 +1043,57 @@ where
         );
     }
     let runtime_link_started = Instant::now();
-    let linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
-        runtime_assembly,
-        backend.clone(),
-        backend_native_kernels.clone(),
-        &runtime_link,
-    )
-    .map_err(|errors| {
-        let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            if let Some(program) = backend.as_program() {
-                rendered.push_str(&render_backend_runtime_link_error(
-                    error,
-                    None,
-                    program.as_ref(),
-                ));
-            } else {
-                rendered.push_str(&error.to_string());
+    let linked = if let Some(runtime_tables) = runtime_tables {
+        aivi_runtime::link_backend_runtime_with_tables_and_native_kernels_from_payload(
+            runtime_assembly,
+            backend.clone(),
+            backend_native_kernels.clone(),
+            runtime_tables,
+        )
+        .map_err(|errors| {
+            let mut rendered = String::from(
+                "failed to instantiate frozen backend runtime for `aivi build` output:\n",
+            );
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                if let Some(program) = backend.as_program() {
+                    rendered.push_str(&render_backend_runtime_link_error(
+                        error,
+                        None,
+                        program.as_ref(),
+                    ));
+                } else {
+                    rendered.push_str(&error.to_string());
+                }
+                rendered.push('\n');
             }
-            rendered.push('\n');
-        }
-        rendered
-    })?;
+            rendered
+        })?
+    } else {
+        aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
+            runtime_assembly,
+            backend.clone(),
+            backend_native_kernels.clone(),
+            &runtime_link,
+        )
+        .map_err(|errors| {
+            let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                if let Some(program) = backend.as_program() {
+                    rendered.push_str(&render_backend_runtime_link_error(
+                        error,
+                        None,
+                        program.as_ref(),
+                    ));
+                } else {
+                    rendered.push_str(&error.to_string());
+                }
+                rendered.push('\n');
+            }
+            rendered
+        })?
+    };
     let runtime_link = runtime_link_started.elapsed();
     record_startup_stage(
         &mut startup_metrics,

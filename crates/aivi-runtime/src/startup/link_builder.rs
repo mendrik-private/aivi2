@@ -1,15 +1,3 @@
-struct LinkArtifacts {
-    signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
-    runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
-    derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
-    reactive_signals: BTreeMap<SignalHandle, LinkedReactiveSignal>,
-    reactive_clauses: BTreeMap<ReactiveClauseHandle, LinkedReactiveClause>,
-    linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
-    source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
-    task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
-    db_changed_routes: Box<[LinkedDbChangedRoute]>,
-}
-
 struct LinkBuilder<'a> {
     assembly: &'a HirRuntimeAssembly,
     backend: BackendRuntimeView<'a>,
@@ -63,7 +51,7 @@ impl<'a> LinkBuilder<'a> {
         }
     }
 
-    fn build(&mut self) -> Result<LinkArtifacts, BackendRuntimeLinkErrors> {
+    fn build(&mut self) -> Result<BackendLinkedRuntimeTables, BackendRuntimeLinkErrors> {
         self.index_signal_items();
         self.link_sources();
         self.link_tasks();
@@ -71,7 +59,7 @@ impl<'a> LinkBuilder<'a> {
         self.link_db_changed_routes();
         self.link_derived_signals();
         if self.errors.is_empty() {
-            Ok(LinkArtifacts {
+            Ok(BackendLinkedRuntimeTables {
                 signal_items_by_handle: std::mem::take(&mut self.signal_items_by_handle),
                 runtime_signal_by_item: std::mem::take(&mut self.runtime_signal_by_item),
                 derived_signals: std::mem::take(&mut self.derived_signals),
