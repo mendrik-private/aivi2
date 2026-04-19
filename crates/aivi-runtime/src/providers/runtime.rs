@@ -48,6 +48,240 @@ fn dbus_value_step_supported(
 
 const MAX_DBUS_VALUE_DEPTH: usize = 64;
 
+fn runtime_dbus_value_supported(value: &RuntimeValue, depth: usize) -> bool {
+    if depth >= MAX_DBUS_VALUE_DEPTH {
+        return false;
+    }
+    match strip_signal(value) {
+        RuntimeValue::Sum(sum) => match (sum.variant_name.as_ref(), sum.fields.as_slice()) {
+            ("DbusString", [RuntimeValue::Text(_)]) => true,
+            ("DbusInt", [RuntimeValue::Int(_)]) => true,
+            ("DbusBool", [RuntimeValue::Bool(_)]) => true,
+            ("DbusList", [RuntimeValue::List(values)])
+            | ("DbusStruct", [RuntimeValue::List(values)]) => values
+                .iter()
+                .all(|value| runtime_dbus_value_supported(value, depth + 1)),
+            ("DbusVariant", [payload]) => runtime_dbus_value_supported(payload, depth + 1),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+pub(crate) fn runtime_dbus_values_to_variant(
+    values: &[RuntimeValue],
+) -> Result<Option<Variant>, Box<str>> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+    let children = values
+        .iter()
+        .map(|value| runtime_dbus_value_to_variant(value, 0))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(Variant::tuple_from_iter(children.iter())))
+}
+
+fn runtime_dbus_value_to_variant(value: &RuntimeValue, depth: usize) -> Result<Variant, Box<str>> {
+    if depth >= MAX_DBUS_VALUE_DEPTH {
+        return Err("D-Bus payload nesting exceeds the current runtime depth limit".into());
+    }
+    let RuntimeValue::Sum(sum) = strip_signal(value) else {
+        return Err("D-Bus payloads must use `DbusValue` constructors".into());
+    };
+    match (sum.variant_name.as_ref(), sum.fields.as_slice()) {
+        ("DbusString", [RuntimeValue::Text(text)]) => Ok(text.as_ref().to_variant()),
+        ("DbusInt", [RuntimeValue::Int(value)]) => Ok((*value).to_variant()),
+        ("DbusBool", [RuntimeValue::Bool(value)]) => Ok((*value).to_variant()),
+        ("DbusStruct", [RuntimeValue::List(values)]) => {
+            let children = values
+                .iter()
+                .map(|value| runtime_dbus_value_to_variant(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Variant::tuple_from_iter(children.iter()))
+        }
+        ("DbusList", [RuntimeValue::List(values)]) => {
+            let children = values
+                .iter()
+                .map(|value| runtime_dbus_value_to_variant(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
+            let Some(first) = children.first() else {
+                return Err(
+                    "empty `DbusList` values cannot be encoded because D-Bus array element type is unknown"
+                        .into(),
+                );
+            };
+            if !children.iter().all(|child| child.is_type(first.type_())) {
+                return Err(
+                    "heterogeneous `DbusList` values must wrap each element in `DbusVariant`"
+                        .into(),
+                );
+            }
+            Ok(Variant::array_from_iter_with_type(
+                first.type_(),
+                children.iter(),
+            ))
+        }
+        ("DbusVariant", [payload]) => Ok(runtime_dbus_value_to_variant(payload, depth + 1)?.to_variant()),
+        _ => Err("D-Bus payloads must use `DbusValue` constructors".into()),
+    }
+}
+
+pub(crate) fn runtime_dbus_body_from_variant(
+    parameters: Option<&Variant>,
+) -> Result<Vec<RuntimeValue>, Box<str>> {
+    let Some(parameters) = parameters else {
+        return Ok(Vec::new());
+    };
+    if parameters.type_().is_tuple() {
+        (0..parameters.n_children())
+            .map(|index| runtime_dbus_value_from_variant(&parameters.child_value(index), 0))
+            .collect()
+    } else {
+        Ok(vec![runtime_dbus_value_from_variant(parameters, 0)?])
+    }
+}
+
+fn runtime_dbus_value_from_variant(value: &Variant, depth: usize) -> Result<RuntimeValue, Box<str>> {
+    if depth >= MAX_DBUS_VALUE_DEPTH {
+        return Err("D-Bus payload nesting exceeds the current runtime depth limit".into());
+    }
+    match value.classify() {
+        VariantClass::Boolean => Ok(runtime_dbus_sum(
+            "DbusValue",
+            "DbusBool",
+            vec![RuntimeValue::Bool(
+                value
+                    .get::<bool>()
+                    .ok_or_else(|| "failed to decode D-Bus boolean payload".to_owned())?,
+            )],
+        )),
+        VariantClass::Byte => Ok(runtime_dbus_sum(
+            "DbusValue",
+            "DbusInt",
+            vec![RuntimeValue::Int(
+                value
+                    .get::<u8>()
+                    .ok_or_else(|| "failed to decode D-Bus byte payload".to_owned())?
+                    as i64,
+            )],
+        )),
+        VariantClass::Int16 => runtime_dbus_int_value(
+            value
+                .get::<i16>()
+                .ok_or_else(|| "failed to decode D-Bus int16 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Uint16 => runtime_dbus_int_value(
+            value
+                .get::<u16>()
+                .ok_or_else(|| "failed to decode D-Bus uint16 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Int32 => runtime_dbus_int_value(
+            value
+                .get::<i32>()
+                .ok_or_else(|| "failed to decode D-Bus int32 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Uint32 => runtime_dbus_int_value(
+            value
+                .get::<u32>()
+                .ok_or_else(|| "failed to decode D-Bus uint32 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Int64 => runtime_dbus_int_value(
+            value
+                .get::<i64>()
+                .ok_or_else(|| "failed to decode D-Bus int64 payload".to_owned())?,
+        ),
+        VariantClass::Uint64 => {
+            let value = value
+                .get::<u64>()
+                .ok_or_else(|| "failed to decode D-Bus uint64 payload".to_owned())?;
+            let value = i64::try_from(value)
+                .map_err(|_| "D-Bus uint64 payload exceeds the current Int runtime slice")?;
+            runtime_dbus_int_value(value)
+        }
+        VariantClass::Handle => runtime_dbus_int_value(
+            value
+                .get::<i32>()
+                .ok_or_else(|| "failed to decode D-Bus handle payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::String | VariantClass::ObjectPath | VariantClass::Signature => {
+            Ok(runtime_dbus_sum(
+                "DbusValue",
+                "DbusString",
+                vec![RuntimeValue::Text(
+                    value
+                        .str()
+                        .ok_or_else(|| "failed to decode D-Bus string payload".to_owned())?
+                        .into(),
+                )],
+            ))
+        }
+        VariantClass::Variant => {
+            let inner = value
+                .as_variant()
+                .ok_or_else(|| "failed to decode nested D-Bus variant payload".to_owned())?;
+            Ok(runtime_dbus_sum(
+                "DbusValue",
+                "DbusVariant",
+                vec![runtime_dbus_value_from_variant(&inner, depth + 1)?],
+            ))
+        }
+        VariantClass::Array => {
+            let mut values = Vec::with_capacity(value.n_children());
+            for index in 0..value.n_children() {
+                values.push(runtime_dbus_value_from_variant(&value.child_value(index), depth + 1)?);
+            }
+            Ok(runtime_dbus_sum(
+                "DbusValue",
+                "DbusList",
+                vec![RuntimeValue::List(values)],
+            ))
+        }
+        VariantClass::Tuple | VariantClass::DictEntry => {
+            let mut values = Vec::with_capacity(value.n_children());
+            for index in 0..value.n_children() {
+                values.push(runtime_dbus_value_from_variant(&value.child_value(index), depth + 1)?);
+            }
+            Ok(runtime_dbus_sum(
+                "DbusValue",
+                "DbusStruct",
+                vec![RuntimeValue::List(values)],
+            ))
+        }
+        VariantClass::Maybe => Err(
+            "D-Bus maybe payloads are not representable by the current DbusValue runtime slice"
+                .into(),
+        ),
+        VariantClass::Double => Err(
+            "D-Bus floating-point payloads are not representable by the current DbusValue runtime slice"
+                .into(),
+        ),
+        VariantClass::__Unknown(_) => Err("unknown D-Bus payload class".into()),
+        _ => Err("unsupported D-Bus payload class".into()),
+    }
+}
+
+fn runtime_dbus_int_value(value: i64) -> Result<RuntimeValue, Box<str>> {
+    Ok(runtime_dbus_sum(
+        "DbusValue",
+        "DbusInt",
+        vec![RuntimeValue::Int(value)],
+    ))
+}
+
+fn runtime_dbus_sum(type_name: &str, variant_name: &str, fields: Vec<RuntimeValue>) -> RuntimeValue {
+    RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+        item: hir::ItemId::from_raw(0),
+        type_name: type_name.into(),
+        variant_name: variant_name.into(),
+        fields,
+    })
+}
+
 fn dbus_body_external(parameters: Option<&Variant>) -> Result<ExternalSourceValue, Box<str>> {
     let Some(parameters) = parameters else {
         return Ok(ExternalSourceValue::List(Vec::new()));
@@ -202,6 +436,23 @@ fn open_dbus_connection(bus: DbusBus, address: Option<&str>) -> Result<DBusConne
     }
 }
 
+pub(crate) fn open_dbus_connection_text(
+    bus: &str,
+    address: Option<&str>,
+) -> Result<DBusConnection, Box<str>> {
+    let bus = match bus {
+        "session" => DbusBus::Session,
+        "system" => DbusBus::System,
+        other => {
+            return Err(format!(
+                "unsupported D-Bus bus `{other}`; expected `session` or `system`"
+            )
+            .into_boxed_str())
+        }
+    };
+    open_dbus_connection(bus, address)
+}
+
 fn spawn_dbus_own_name_worker(
     port: DetachedRuntimePublicationPort,
     plan: DbusOwnNamePlan,
@@ -214,7 +465,7 @@ fn spawn_dbus_own_name_worker(
         let context = MainContext::new();
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
-            install_dbus_stop_timer(&main_loop, &stop, &port);
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
             let owned_port = port.clone();
             let owned_output = plan.output.clone();
             let lost_port = port.clone();
@@ -302,7 +553,7 @@ fn spawn_dbus_signal_worker(
         let context = MainContext::new();
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
-            install_dbus_stop_timer(&main_loop, &stop, &port);
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
             let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
             let output = plan.output.clone();
             let publish_port = port.clone();
@@ -342,36 +593,119 @@ fn spawn_dbus_signal_worker(
     finish_dbus_startup(instance, provider, handle, startup_rx)
 }
 
+fn spawn_notification_events_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: NotificationEventsPlan,
+    stop: Arc<AtomicBool>,
+) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
+    let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+    let provider = BuiltinSourceProvider::NotificationsEvents;
+    let instance = plan.instance;
+    let handle = thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let startup = context.with_thread_default(|| {
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
+            let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            let app_name = plan.app_name.clone();
+            #[allow(deprecated)]
+            let subscription_id = connection.signal_subscribe(
+                Some("org.freedesktop.Notifications"),
+                Some("org.freedesktop.Notifications"),
+                None,
+                Some("/org/freedesktop/Notifications"),
+                None,
+                DBusSignalFlags::NONE,
+                move |_, _, _, _, signal_name, parameters| {
+                    let value = match signal_name {
+                        "ActionInvoked" => {
+                            let id = parameters.child_value(0).get::<u32>();
+                            let action_id =
+                                parameters.child_value(1).get::<String>().map(|text| text.to_string());
+                            match (id, action_id) {
+                                (Some(id), Some(action_id))
+                                    if notification_id_known(app_name.as_ref(), id) =>
+                                {
+                                    output.action_value(id, &action_id)
+                                }
+                                _ => return,
+                            }
+                        }
+                        "NotificationClosed" => {
+                            let id = parameters.child_value(0).get::<u32>();
+                            match id {
+                                Some(id) if notification_id_known(app_name.as_ref(), id) => {
+                                    remove_notification_id(app_name.as_ref(), id);
+                                    output.dismissed_value(id)
+                                }
+                                _ => return,
+                            }
+                        }
+                        _ => return,
+                    };
+                    let Ok(value) = value else {
+                        return;
+                    };
+                    let _ = publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                },
+            );
+            let _ = startup_tx.send(Ok(()));
+            main_loop.run();
+            #[allow(deprecated)]
+            connection.signal_unsubscribe(subscription_id);
+            Ok::<(), Box<str>>(())
+        });
+        match startup {
+            Ok(Ok(())) => {}
+            Ok(Err(detail)) => {
+                let _ = startup_tx.send(Err(detail));
+            }
+            Err(error) => {
+                let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+            }
+        }
+    });
+    finish_dbus_startup(instance, provider, handle, startup_rx)
+}
+
 fn spawn_dbus_method_worker(
     port: DetachedRuntimePublicationPort,
     plan: DbusMethodPlan,
+    context: SourceProviderContext,
     stop: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
     let (startup_tx, startup_rx) = mpsc::sync_channel(1);
     let provider = BuiltinSourceProvider::DbusMethod;
     let instance = plan.instance;
     let handle = thread::spawn(move || {
-        let context = MainContext::new();
-        let main_loop = MainLoop::new(Some(&context), false);
-        let startup = context.with_thread_default(|| {
-            install_dbus_stop_timer(&main_loop, &stop, &port);
+        let main_context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&main_context), false);
+        let startup = main_context.with_thread_default(|| {
+            install_dbus_stop_timer(&main_context, &main_loop, &stop, &port);
             let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
-            let reply_variant = plan
-                .reply_body
-                .as_deref()
-                .map(|text| {
-                    Variant::parse(None, text).map_err(|err| {
-                        format!("dbus.method reply option is not a valid GLib variant: {err}")
-                            .into_boxed_str()
+            let fixed_reply_variant = if let Some(values) = plan.reply_values.as_ref() {
+                runtime_dbus_values_to_variant(values)?
+            } else {
+                plan.reply_body
+                    .as_deref()
+                    .map(|text| {
+                        Variant::parse(None, text).map_err(|err| {
+                            format!("dbus.method reply option is not a valid GLib variant: {err}")
+                                .into_boxed_str()
+                        })
                     })
-                })
-                .transpose()?;
+                    .transpose()?
+            };
             let output = plan.output.clone();
             let publish_port = port.clone();
             let destination = plan.destination.clone();
+            let reply_task = plan.reply_task.clone();
             let path = plan.path.clone();
             let interface = plan.interface.clone();
             let member = plan.member.clone();
+            let provider_context = context.clone();
             let filter_id = connection.add_filter(move |connection, message, incoming| {
                 if !incoming
                     || message.message_type() != DBusMessageType::MethodCall
@@ -388,11 +722,35 @@ fn spawn_dbus_method_worker(
                 {
                     return Some(message.clone());
                 }
-                let reply = message.new_method_reply();
-                if let Some(body) = &reply_variant {
-                    reply.set_body(body);
+                if let Some(task) = reply_task.as_ref() {
+                    match execute_runtime_value_with_context_with_stdio(
+                        task.clone(),
+                        &provider_context,
+                    )
+                    .and_then(runtime_dbus_reply_task_result)
+                    {
+                        Ok(reply_variant) => {
+                            let reply = message.new_method_reply();
+                            if let Some(body) = reply_variant.as_ref() {
+                                reply.set_body(body);
+                            }
+                            let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
+                        }
+                        Err(error) => {
+                            let reply = message.new_method_error_literal(
+                                "org.freedesktop.DBus.Error.Failed",
+                                &error.to_string(),
+                            );
+                            let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
+                        }
+                    }
+                } else {
+                    let reply = message.new_method_reply();
+                    if let Some(body) = &fixed_reply_variant {
+                        reply.set_body(body);
+                    }
+                    let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
                 }
-                let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
                 if let (Some(path), Some(interface), Some(member)) =
                     (message.path(), message.interface(), message.member())
                     && let Ok(value) = output.method_value(
@@ -425,7 +783,17 @@ fn spawn_dbus_method_worker(
     finish_dbus_startup(instance, provider, handle, startup_rx)
 }
 
+fn runtime_dbus_reply_task_result(value: RuntimeValue) -> Result<Option<Variant>, RuntimeTaskExecutionError> {
+    let RuntimeValue::List(values) = value else {
+        return Err(RuntimeTaskExecutionError::new(
+            "dbus.method reply task must return `List DbusValue`",
+        ));
+    };
+    runtime_dbus_values_to_variant(&values).map_err(RuntimeTaskExecutionError::new)
+}
+
 fn install_dbus_stop_timer(
+    context: &MainContext,
     main_loop: &MainLoop,
     stop: &Arc<AtomicBool>,
     port: &DetachedRuntimePublicationPort,
@@ -433,14 +801,20 @@ fn install_dbus_stop_timer(
     let main_loop = main_loop.clone();
     let stop = stop.clone();
     let port = port.clone();
-    glib::timeout_add_local(Duration::from_millis(20), move || {
-        if stop.load(Ordering::Acquire) || port.is_cancelled() {
-            main_loop.quit();
-            ControlFlow::Break
-        } else {
-            ControlFlow::Continue
-        }
-    });
+    let source = glib::timeout_source_new(
+        Duration::from_millis(20),
+        None,
+        glib::Priority::DEFAULT,
+        move || {
+            if stop.load(Ordering::Acquire) || port.is_cancelled() {
+                main_loop.quit();
+                ControlFlow::Break
+            } else {
+                ControlFlow::Continue
+            }
+        },
+    );
+    source.attach(Some(context));
 }
 
 fn finish_dbus_startup(
@@ -1484,6 +1858,37 @@ fn parse_text_option(
     }
 }
 
+fn parse_dbus_value_list_option(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    option_name: &str,
+    value: &DetachedRuntimeValue,
+) -> Result<Vec<RuntimeValue>, SourceProviderExecutionError> {
+    let RuntimeValue::List(values) = strip_detached_signal(value) else {
+        return Err(SourceProviderExecutionError::InvalidOption {
+            instance,
+            provider,
+            option_name: option_name.into(),
+            expected: "List DbusValue".into(),
+            value: strip_detached_signal(value).clone(),
+        });
+    };
+    if values
+        .iter()
+        .all(|value| runtime_dbus_value_supported(value, 0))
+    {
+        Ok(values.clone())
+    } else {
+        Err(SourceProviderExecutionError::InvalidOption {
+            instance,
+            provider,
+            option_name: option_name.into(),
+            expected: "List DbusValue".into(),
+            value: strip_detached_signal(value).clone(),
+        })
+    }
+}
+
 fn parse_text_list(
     instance: SourceInstanceId,
     provider: BuiltinSourceProvider,
@@ -1912,4 +2317,3 @@ fn duration_from_suffix(amount: u64, suffix: &str) -> Option<Duration> {
         _ => None,
     }
 }
-

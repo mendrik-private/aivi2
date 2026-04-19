@@ -11,8 +11,8 @@ use aivi_backend::{
 };
 use aivi_core::{
     self as core, IncludedItems, LoweredRuntimeFragment, RuntimeFragmentSpec,
-    lower_runtime_fragment, lower_runtime_module_with_items, lower_runtime_module_with_workspace,
-    validate_module as validate_core_module,
+    lower_runtime_fragment, lower_runtime_fragment_with_workspace, lower_runtime_module_with_items,
+    lower_runtime_module_with_workspace, validate_module as validate_core_module,
 };
 use aivi_hir::ItemId as HirItemId;
 use aivi_lambda::{
@@ -293,6 +293,7 @@ pub(crate) struct RuntimeFragmentUnitCacheKey {
 #[derive(Clone)]
 pub(crate) struct RuntimeFragmentUnitCacheEntry {
     pub(crate) entry_hir: Arc<HirModuleResult>,
+    pub(crate) workspace_modules: Arc<[WorkspaceHirModule]>,
     pub(crate) value: Arc<Result<Arc<RuntimeFragmentBackendUnit>, BackendUnitError>>,
 }
 
@@ -350,9 +351,11 @@ pub fn runtime_fragment_backend_unit(
     fragment: &RuntimeFragmentSpec,
 ) -> Result<Arc<RuntimeFragmentBackendUnit>, BackendUnitError> {
     let entry_hir = hir_module(db, file);
+    let workspace_modules = collect_workspace_hir_modules(db, file, &entry_hir);
     let key = runtime_fragment_cache_key(file, fragment);
     if let Some(cached) = db.runtime_fragment_cache_entry(key)
         && Arc::ptr_eq(&cached.entry_hir, &entry_hir)
+        && workspace_modules_match(&cached.workspace_modules, &workspace_modules)
     {
         return clone_cached_value(&cached.value);
     }
@@ -360,12 +363,14 @@ pub fn runtime_fragment_backend_unit(
     let value = Arc::new(lower_runtime_fragment_backend_unit(
         file,
         entry_hir.clone(),
+        workspace_modules.clone(),
         fragment,
     ));
     db.store_runtime_fragment_cache_entry(
         key,
         RuntimeFragmentUnitCacheEntry {
             entry_hir,
+            workspace_modules,
             value: Arc::clone(&value),
         },
     );
@@ -458,10 +463,19 @@ fn lower_whole_program_backend_unit(
 fn lower_runtime_fragment_backend_unit(
     file: SourceFile,
     entry_hir: Arc<HirModuleResult>,
+    workspace_modules: Arc<[WorkspaceHirModule]>,
     fragment: &RuntimeFragmentSpec,
 ) -> Result<Arc<RuntimeFragmentBackendUnit>, BackendUnitError> {
-    let core = lower_runtime_fragment(entry_hir.module(), fragment)
-        .map_err(BackendUnitError::CoreLowering)?;
+    let workspace_hirs = workspace_modules
+        .iter()
+        .map(|module| (module.name.as_ref(), module.hir.module()))
+        .collect::<Vec<_>>();
+    let core = if workspace_hirs.is_empty() {
+        lower_runtime_fragment(entry_hir.module(), fragment)
+    } else {
+        lower_runtime_fragment_with_workspace(entry_hir.module(), &workspace_hirs, fragment)
+    }
+    .map_err(BackendUnitError::CoreLowering)?;
     validate_core_module(&core.module).map_err(BackendUnitError::CoreValidation)?;
 
     let lambda = lower_lambda_module(&core.module).map_err(BackendUnitError::LambdaLowering)?;

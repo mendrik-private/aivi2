@@ -615,6 +615,8 @@ fn imported_type(module: &mut Module, text: &str, kind: Kind) -> crate::TypeId {
             local_name: name(text),
             resolution: ImportBindingResolution::Resolved,
             metadata: ImportBindingMetadata::TypeConstructor {
+                type_item: None,
+                constructors: None,
                 kind,
                 fields: None,
                 definition: None,

@@ -402,6 +402,17 @@ pub fn coerce_runtime_value(
     value: RuntimeValue,
     layout: LayoutId,
 ) -> Result<RuntimeValue, RuntimeValue> {
+    let Some(layout_def) = program.layouts().get(layout) else {
+        return Err(value);
+    };
+    if let LayoutKind::Signal { element } = &layout_def.kind {
+        let inner = match value {
+            RuntimeValue::Signal(inner) => *inner,
+            other => other,
+        };
+        return coerce_runtime_value(program, inner, *element)
+            .map(|inner| RuntimeValue::Signal(Box::new(inner)));
+    }
     if value_matches_layout(program, &value, layout) {
         return Ok(value);
     }
@@ -411,10 +422,7 @@ pub fn coerce_runtime_value(
             return Ok(payload);
         }
     }
-    let Some(layout) = program.layouts().get(layout) else {
-        return Err(value);
-    };
-    match &layout.kind {
+    match &layout_def.kind {
         LayoutKind::Option { element } => {
             if value_matches_layout(program, &value, *element) {
                 Ok(RuntimeValue::OptionSome(Box::new(value)))
@@ -443,8 +451,6 @@ pub fn coerce_runtime_value(
                 _ => Err(value),
             }
         }
-        LayoutKind::Signal { element } => coerce_runtime_value(program, value, *element)
-            .map(|inner| RuntimeValue::Signal(Box::new(inner))),
         _ => Err(value),
     }
 }

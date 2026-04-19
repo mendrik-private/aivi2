@@ -396,6 +396,17 @@ pub enum IntrinsicValue {
     LogEmitContext,
     // Random float intrinsic (Task-returning)
     RandomFloat,
+    // D-Bus intrinsics (Task-returning)
+    DbusCall,
+    // Secret storage intrinsics (Task-returning)
+    SecretLookup,
+    SecretStore,
+    SecretDelete,
+    NotificationSend,
+    NotificationClose,
+    // Auth intrinsics (Task-returning)
+    AuthPkce,
+    AuthRefresh,
     // I18n intrinsics (pure/synchronous)
     I18nTranslate,
     I18nTranslatePlural,
@@ -595,6 +606,14 @@ intrinsic_unit_variants!(
     LogEmit,
     LogEmitContext,
     RandomFloat,
+    DbusCall,
+    SecretLookup,
+    SecretStore,
+    SecretDelete,
+    NotificationSend,
+    NotificationClose,
+    AuthPkce,
+    AuthRefresh,
     I18nTranslate,
     I18nTranslatePlural,
     RegexIsMatch,
@@ -774,6 +793,14 @@ impl fmt::Display for IntrinsicValue {
             Self::LogEmit => f.write_str("aivi.log.emit"),
             Self::LogEmitContext => f.write_str("aivi.log.emitContext"),
             Self::RandomFloat => f.write_str("aivi.random.randomFloat"),
+            Self::DbusCall => f.write_str("aivi.dbus.call"),
+            Self::SecretLookup => f.write_str("aivi.secret.lookup"),
+            Self::SecretStore => f.write_str("aivi.secret.store"),
+            Self::SecretDelete => f.write_str("aivi.secret.delete"),
+            Self::NotificationSend => f.write_str("aivi.notifications.send"),
+            Self::NotificationClose => f.write_str("aivi.notifications.close"),
+            Self::AuthPkce => f.write_str("aivi.auth.pkce"),
+            Self::AuthRefresh => f.write_str("aivi.auth.refresh"),
             Self::I18nTranslate => f.write_str("aivi.i18n.tr"),
             Self::I18nTranslatePlural => f.write_str("aivi.i18n.trn"),
             Self::RegexIsMatch => f.write_str("aivi.regex.isMatch"),
@@ -864,6 +891,8 @@ pub enum ImportBindingMetadata {
         name: Box<str>,
     },
     TypeConstructor {
+        type_item: Option<ItemId>,
+        constructors: Option<Vec<SumConstructorHandle>>,
         kind: Kind,
         /// Record fields when the exported type is a record alias, enabling
         /// cross-module field projection (`thread.subject`) in typed-core.

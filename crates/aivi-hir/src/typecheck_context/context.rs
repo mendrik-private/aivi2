@@ -1237,6 +1237,15 @@ impl<'a> GateTypeContext<'a> {
             GateType::List(Box::new(element))
         }
 
+        fn named(name: &str, arguments: Vec<GateType>) -> GateType {
+            GateType::OpaqueImport {
+                import: ImportId::from_raw(u32::MAX),
+                name: name.to_owned(),
+                arguments,
+                definition: None,
+            }
+        }
+
         fn map(key: GateType, value: GateType) -> GateType {
             GateType::Map {
                 key: Box::new(key),
@@ -1285,6 +1294,34 @@ impl<'a> GateTypeContext<'a> {
                 primitive(BuiltinType::Text),
                 primitive(BuiltinType::Text),
             ))
+        }
+
+        fn dbus_value_type() -> GateType {
+            named("DbusValue", Vec::new())
+        }
+
+        fn dbus_error_type() -> GateType {
+            named("DbusError", Vec::new())
+        }
+
+        fn secret_error_type() -> GateType {
+            named("SecretError", Vec::new())
+        }
+
+        fn notification_error_type() -> GateType {
+            named("NotificationError", Vec::new())
+        }
+
+        fn pkce_error_type() -> GateType {
+            named("PkceError", Vec::new())
+        }
+
+        fn pkce_config_type() -> GateType {
+            named("PkceConfig", Vec::new())
+        }
+
+        fn pkce_token_type() -> GateType {
+            named("PkceToken", Vec::new())
         }
 
         match value {
@@ -1685,6 +1722,103 @@ impl<'a> GateTypeContext<'a> {
             IntrinsicValue::RandomFloat => {
                 task(primitive(BuiltinType::Text), primitive(BuiltinType::Float))
             }
+            IntrinsicValue::DbusCall => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    arrow(
+                        primitive(BuiltinType::Text),
+                        arrow(
+                            primitive(BuiltinType::Text),
+                            arrow(
+                                list(dbus_value_type()),
+                                arrow(
+                                    primitive(BuiltinType::Text),
+                                    arrow(
+                                        primitive(BuiltinType::Text),
+                                        task(dbus_error_type(), list(dbus_value_type())),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IntrinsicValue::SecretLookup => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    map(
+                        primitive(BuiltinType::Text),
+                        primitive(BuiltinType::Text),
+                    ),
+                    task(
+                        secret_error_type(),
+                        option(primitive(BuiltinType::Text)),
+                    ),
+                ),
+            ),
+            IntrinsicValue::SecretStore => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    arrow(
+                        map(
+                            primitive(BuiltinType::Text),
+                            primitive(BuiltinType::Text),
+                        ),
+                        arrow(
+                            primitive(BuiltinType::Text),
+                            task(secret_error_type(), primitive(BuiltinType::Unit)),
+                        ),
+                    ),
+                ),
+            ),
+            IntrinsicValue::SecretDelete => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    map(
+                        primitive(BuiltinType::Text),
+                        primitive(BuiltinType::Text),
+                    ),
+                    task(secret_error_type(), primitive(BuiltinType::Bool)),
+                ),
+            ),
+            IntrinsicValue::NotificationSend => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    named("Notification", Vec::new()),
+                    arrow(
+                        primitive(BuiltinType::Text),
+                        arrow(
+                            primitive(BuiltinType::Text),
+                            task(notification_error_type(), primitive(BuiltinType::Int)),
+                        ),
+                    ),
+                ),
+            ),
+            IntrinsicValue::NotificationClose => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Int),
+                    arrow(
+                        primitive(BuiltinType::Text),
+                        arrow(
+                            primitive(BuiltinType::Text),
+                            task(notification_error_type(), primitive(BuiltinType::Unit)),
+                        ),
+                    ),
+                ),
+            ),
+            IntrinsicValue::AuthPkce => {
+                arrow(pkce_config_type(), task(pkce_error_type(), pkce_token_type()))
+            }
+            IntrinsicValue::AuthRefresh => arrow(
+                pkce_config_type(),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    task(pkce_error_type(), pkce_token_type()),
+                ),
+            ),
             // I18n intrinsics
             IntrinsicValue::I18nTranslate => {
                 arrow(primitive(BuiltinType::Text), primitive(BuiltinType::Text))
@@ -6917,6 +7051,23 @@ impl<'a> GateTypeContext<'a> {
                 GateType::Record(fields) => {
                     self.project_record_field_step(fields, true, subject, segment, path)
                 }
+                GateType::OpaqueImport { .. } => match self.project_type_step(
+                    payload,
+                    segment,
+                    path,
+                    current_domain,
+                )? {
+                    GateProjectionStep::RecordField { result } => Ok(
+                        GateProjectionStep::RecordField {
+                            result: GateType::Signal(Box::new(result)),
+                        },
+                    ),
+                    GateProjectionStep::DomainMember { .. } => Err(GateIssue::InvalidProjection {
+                        span: path.span(),
+                        path: name_path_text(path),
+                        subject: subject.to_string(),
+                    }),
+                },
                 _ => Err(GateIssue::InvalidProjection {
                     span: path.span(),
                     path: name_path_text(path),
@@ -6933,23 +7084,18 @@ impl<'a> GateTypeContext<'a> {
                 path,
                 current_domain,
             ),
-            GateType::OpaqueImport { import, .. } => {
-                // Guard against the sentinel value (u32::MAX) used when a named type was not
-                // found in the current module's imports — `get` returns None safely.
-                let Some(import_binding) = self.module.imports().get(*import) else {
-                    return Err(GateIssue::InvalidProjection {
-                        span: path.span(),
-                        path: name_path_text(path),
-                        subject: subject.to_string(),
-                    });
-                };
-                // Dispatch on the import metadata.
-                match &import_binding.metadata {
-                    ImportBindingMetadata::TypeConstructor {
+            GateType::OpaqueImport {
+                import,
+                arguments,
+                definition,
+                ..
+            } => {
+                if let Some(import_binding) = self.module.imports().get(*import) {
+                    if let ImportBindingMetadata::TypeConstructor {
                         fields: Some(fields),
                         ..
-                    } => {
-                        // Imported record type: resolve the named field.
+                    } = &import_binding.metadata
+                    {
                         let import_fields = fields
                             .iter()
                             .map(|f| GateRecordField {
@@ -6957,20 +7103,33 @@ impl<'a> GateTypeContext<'a> {
                                 ty: self.lower_import_value_type(&f.ty),
                             })
                             .collect::<Vec<_>>();
-                        self.project_record_field_step(
+                        return self.project_record_field_step(
                             &import_fields,
                             false,
                             subject,
                             segment,
                             path,
-                        )
+                        );
                     }
-                    _ => Err(GateIssue::InvalidProjection {
-                        span: path.span(),
-                        path: name_path_text(path),
-                        subject: subject.to_string(),
-                    }),
                 }
+                if let Some(ImportTypeDefinition::Alias(alias)) = definition.as_deref() {
+                    let lowered =
+                        lower_import_value_type_with_substitutions(self.module, alias, arguments);
+                    if let GateType::Record(fields) = lowered {
+                        return self.project_record_field_step(
+                            &fields,
+                            false,
+                            subject,
+                            segment,
+                            path,
+                        );
+                    }
+                }
+                Err(GateIssue::InvalidProjection {
+                    span: path.span(),
+                    path: name_path_text(path),
+                    subject: subject.to_string(),
+                })
             }
             _ => Err(GateIssue::InvalidProjection {
                 span: path.span(),
@@ -7114,6 +7273,25 @@ impl<'a> GateTypeContext<'a> {
         callee: &GateType,
         argument: &GateType,
     ) -> Option<GateType> {
+        fn wrap_signal(result: GateType) -> GateType {
+            match result {
+                GateType::Signal(_) => result,
+                other => GateType::Signal(Box::new(other)),
+            }
+        }
+
+        match (callee, argument) {
+            (GateType::Signal(callee_payload), GateType::Signal(argument_payload)) => {
+                return Some(wrap_signal(self.apply_function(callee_payload, argument_payload)?));
+            }
+            (GateType::Signal(callee_payload), other) => {
+                return Some(wrap_signal(self.apply_function(callee_payload, other)?));
+            }
+            (other, GateType::Signal(argument_payload)) => {
+                return Some(wrap_signal(self.apply_function(other, argument_payload)?));
+            }
+            _ => {}
+        }
         let GateType::Arrow { parameter, result } = callee else {
             return None;
         };

@@ -999,6 +999,63 @@ fn evaluate_intrinsic_value(
                 body: expect_intrinsic_text(kernel, expr, value, 2, body)?,
             }))
         }
+        (
+            IntrinsicValue::DbusCall,
+            [destination, path, interface, member, body, bus, address],
+        ) => Ok(RuntimeValue::Task(RuntimeTaskPlan::DbusCall {
+            destination: expect_intrinsic_text(kernel, expr, value, 0, destination)?,
+            path: expect_intrinsic_text(kernel, expr, value, 1, path)?,
+            interface: expect_intrinsic_text(kernel, expr, value, 2, interface)?,
+            member: expect_intrinsic_text(kernel, expr, value, 3, member)?,
+            body: expect_intrinsic_list(kernel, expr, value, 4, body)?,
+            bus: expect_intrinsic_text(kernel, expr, value, 5, bus)?,
+            address: expect_intrinsic_text(kernel, expr, value, 6, address)?,
+        })),
+        (IntrinsicValue::SecretLookup, [service, attributes]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::SecretLookup {
+                service: expect_intrinsic_text(kernel, expr, value, 0, service)?,
+                attributes: expect_intrinsic_text_map(kernel, expr, value, 1, attributes)?,
+            }))
+        }
+        (IntrinsicValue::SecretStore, [service, label, attributes, secret]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::SecretStore {
+                service: expect_intrinsic_text(kernel, expr, value, 0, service)?,
+                label: expect_intrinsic_text(kernel, expr, value, 1, label)?,
+                attributes: expect_intrinsic_text_map(kernel, expr, value, 2, attributes)?,
+                value: expect_intrinsic_text(kernel, expr, value, 3, secret)?,
+            }))
+        }
+        (IntrinsicValue::SecretDelete, [service, attributes]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::SecretDelete {
+                service: expect_intrinsic_text(kernel, expr, value, 0, service)?,
+                attributes: expect_intrinsic_text_map(kernel, expr, value, 1, attributes)?,
+            }))
+        }
+        (IntrinsicValue::NotificationSend, [app_name, notification, bus, address]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::NotificationSend {
+                app_name: expect_intrinsic_text(kernel, expr, value, 0, app_name)?,
+                notification: Box::new(strip_signal(notification.clone())),
+                bus: expect_intrinsic_text(kernel, expr, value, 2, bus)?,
+                address: expect_intrinsic_text(kernel, expr, value, 3, address)?,
+            }))
+        }
+        (IntrinsicValue::NotificationClose, [app_name, id, bus, address]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::NotificationClose {
+                app_name: expect_intrinsic_text(kernel, expr, value, 0, app_name)?,
+                id: expect_intrinsic_i64(kernel, expr, value, 1, id)?,
+                bus: expect_intrinsic_text(kernel, expr, value, 2, bus)?,
+                address: expect_intrinsic_text(kernel, expr, value, 3, address)?,
+            }))
+        }
+        (IntrinsicValue::AuthPkce, [config]) => Ok(RuntimeValue::Task(RuntimeTaskPlan::AuthPkce {
+            config: Box::new(strip_signal(config.clone())),
+        })),
+        (IntrinsicValue::AuthRefresh, [config, refresh_token]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::AuthRefresh {
+                config: Box::new(strip_signal(config.clone())),
+                refresh_token: expect_intrinsic_text(kernel, expr, value, 1, refresh_token)?,
+            }))
+        }
         // BigInt intrinsics — pure, no I/O
         (IntrinsicValue::BigIntFromInt, [n]) => {
             let n = expect_intrinsic_i64(kernel, expr, value, 0, n)?;
@@ -1706,6 +1763,62 @@ fn expect_intrinsic_text_list(
         .collect()
 }
 
+fn expect_intrinsic_list(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Box<[RuntimeValue]>, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::List(values) = found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    Ok(values.into_boxed_slice())
+}
+
+fn expect_intrinsic_text_map(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Box<[(Box<str>, Box<str>)]>, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::Map(entries) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    entries
+        .iter()
+        .map(|(key, value_entry)| {
+            let RuntimeValue::Text(key) = strip_signal(key.clone()) else {
+                return Err(invalid_intrinsic_argument(
+                    kernel,
+                    expr,
+                    value,
+                    index,
+                    strip_signal(key.clone()),
+                ));
+            };
+            let RuntimeValue::Text(value_text) = strip_signal(value_entry.clone()) else {
+                return Err(invalid_intrinsic_argument(
+                    kernel,
+                    expr,
+                    value,
+                    index,
+                    strip_signal(value_entry.clone()),
+                ));
+            };
+            Ok((key, value_text))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Vec::into_boxed_slice)
+}
+
 fn expect_intrinsic_db_connection(
     kernel: KernelId,
     expr: KernelExprId,
@@ -2005,4 +2118,3 @@ fn shared_suffixed_integer_suffix(
         _ => Some(None),
     }
 }
-

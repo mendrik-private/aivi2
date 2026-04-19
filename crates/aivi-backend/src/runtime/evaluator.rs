@@ -3187,6 +3187,13 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
         // Log intrinsics
         IntrinsicValue::LogEmit => 2,
         IntrinsicValue::LogEmitContext => 3,
+        IntrinsicValue::DbusCall => 7,
+        IntrinsicValue::SecretLookup | IntrinsicValue::SecretDelete => 2,
+        IntrinsicValue::SecretStore => 4,
+        IntrinsicValue::NotificationSend => 4,
+        IntrinsicValue::NotificationClose => 4,
+        IntrinsicValue::AuthPkce => 1,
+        IntrinsicValue::AuthRefresh => 2,
         // Regex intrinsics
         IntrinsicValue::RegexIsMatch
         | IntrinsicValue::RegexFind

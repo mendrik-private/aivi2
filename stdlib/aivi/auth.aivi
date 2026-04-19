@@ -1,5 +1,9 @@
 use aivi.url (Url)
 
+type AuthSource = Unit
+
+type AuthTask A = (Task PkceError A)
+
 type PkceConfig = {
     clientId: Text,
     authEndpoint: Url,
@@ -26,4 +30,4 @@ type PkceState =
   | PkceComplete PkceToken
   | PkceFailed PkceError
 
-export (PkceConfig, PkceToken, PkceError, UserCancelled, NetworkError, InvalidResponse, PkceTimeout, PkceState, PkceIdle, PkceInProgress, PkceComplete, PkceFailed)
+export (AuthSource, AuthTask, PkceConfig, PkceToken, PkceError, UserCancelled, NetworkError, InvalidResponse, PkceTimeout, PkceState, PkceIdle, PkceInProgress, PkceComplete, PkceFailed)

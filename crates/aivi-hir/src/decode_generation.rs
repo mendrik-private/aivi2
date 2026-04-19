@@ -268,13 +268,20 @@ fn generate_source_decode_program(
                 strategy,
                 ..
             } => {
-                let constructor_type_item = plan.sum_binding(*ty).map(|binding| binding.type_item);
+                let constructors = plan
+                    .sum_binding(*ty)
+                    .map(|binding| binding.constructors.as_slice());
                 DecodeProgramStep::Sum {
                     variants: variants
                         .iter()
                         .map(|variant| DecodeProgramVariant {
-                            constructor: constructor_type_item.and_then(|type_item| {
-                                module.sum_constructor_handle(type_item, variant.name.as_str())
+                            constructor: constructors.and_then(|constructors| {
+                                constructors
+                                    .iter()
+                                    .find(|constructor| {
+                                        constructor.variant_name.as_ref() == variant.name.as_str()
+                                    })
+                                    .cloned()
                             }),
                             name: variant.name.clone(),
                             payload: variant.payload.map(program_step_id),

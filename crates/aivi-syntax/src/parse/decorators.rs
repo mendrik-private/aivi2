@@ -82,6 +82,7 @@ impl<'a> Parser<'a> {
                 break;
             };
             arguments.push(argument);
+            let _ = self.consume_kind(cursor, end, TokenKind::Comma);
         }
 
         SourceDecorator {
@@ -109,6 +110,7 @@ impl<'a> Parser<'a> {
                 break;
             };
             arguments.push(argument);
+            let _ = self.consume_kind(cursor, end, TokenKind::Comma);
         }
 
         if arguments.is_empty() && options.is_none() {
@@ -123,6 +125,7 @@ impl<'a> Parser<'a> {
         while let Some(index) = self.peek_nontrivia(*cursor, end) {
             if self.is_identifier_text(index, "with")
                 || self.tokens[index].line_start()
+                || self.tokens[index].kind() == TokenKind::Comma
                 || self.tokens[index].kind().is_pipe_operator()
                 || !self.starts_expr(index)
             {

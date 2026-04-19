@@ -3518,6 +3518,18 @@ where
                     row.add_suffix(child);
                 }
             }
+            GtkChildMountRoute::ActionRowPrefix => {
+                for child in previous {
+                    child.unparent();
+                }
+                let row = parent_widget
+                    .clone()
+                    .downcast::<adw::ActionRow>()
+                    .expect("action row widget should downcast");
+                for child in next {
+                    row.add_prefix(child);
+                }
+            }
             GtkChildMountRoute::ExpanderRowRows => {
                 for child in previous {
                     child.unparent();
@@ -5917,6 +5929,52 @@ value view =
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
             assert_eq!(queued[0].value, TestValue::Unit);
+        });
+    }
+
+    #[test]
+    fn concrete_host_mounts_action_row_prefix_sequences() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-action-row-prefix.aivi",
+                r#"
+value view =
+    <Window title="Host">
+        <ListBox>
+            <ActionRow title="Thread" subtitle="Preview">
+                <ActionRow.prefix>
+                    <Label text="Mail" />
+                </ActionRow.prefix>
+            </ActionRow>
+        </ListBox>
+    </Window>
+"#,
+            );
+            let executor = GtkRuntimeExecutor::new(graph, GtkConcreteHost::<TestValue>::default())
+                .expect("concrete GTK host should mount action row prefix sequences");
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let list_box = window
+                .child()
+                .expect("window should have a child")
+                .downcast::<gtk::ListBox>()
+                .expect("window child should be a GTK list box");
+            let row = list_box
+                .first_child()
+                .expect("list box should mount an action row")
+                .downcast::<adw::ActionRow>()
+                .expect("list box row should be an action row");
+            assert_eq!(row.title(), "Thread");
         });
     }
 

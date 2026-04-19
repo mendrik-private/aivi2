@@ -43,7 +43,7 @@ These families now have a preferred public handle surface:
 | Environment | `@source env` + `EnvSource` | `env.get` plus handle-member environment snapshots/listing |
 | Logging / stdio | `@source log`, `@source stdio` | log/stdio handle members plus `stdio.read` |
 | Randomness | `@source random` + `RandomSource` | handle-member random tasks such as `entropy.bytes` |
-| Process / path / D-Bus | `@source process`, `@source path`, `@source dbus` | existing built-in providers plus handle-member host snapshots |
+| Process / path / D-Bus / secret / auth / notifications | `@source process`, `@source path`, `@source dbus`, `@source secret`, `@source auth`, `@source notifications` | existing built-in providers plus handle-member host snapshots, `bus.call`, desktop keyring tasks, PKCE auth tasks, and desktop notification send/response streams |
 
 Incoming payloads decode directly into the annotated target type. JSON-as-text helpers are no
 longer part of the public external boundary.
@@ -466,7 +466,11 @@ value view =
 
 ### `dbus.method`
 
-**Form:** `@source dbus.method destination`
+**Form:**
+
+```aivi
+@source dbus.method destination, replyTask with { ... }
+```
 
 | Option | Type | Current support |
 | --- | --- | --- |
@@ -475,6 +479,8 @@ value view =
 | `path` | `Text` | Supported. |
 | `interface` | `Text` | Supported. |
 | `member` | `Text` | Supported. |
+| `reply` | `Text` | Supported. Legacy raw GLib-variant text for immediate fixed replies. |
+| `replyValues` | `List DbusValue` | Supported. Immediate fixed reply encoded from AIVI `DbusValue` constructors. |
 
 **Notes**
 
@@ -482,7 +488,11 @@ value view =
 - Header fields must decode as `Text`.
 - The `body` field may currently be `Text` or `List DbusValue`.
 - `dbus.method` currently acts as a **service-side** method handler: it watches incoming calls whose destination/path/interface/member match the configured filter, publishes the call record into the signal graph, and replies immediately on the wire.
-- The optional `reply` option lets the runtime reply with a fixed GLib-variant body. Without it, the runtime replies with `Unit`.
+- When present, the optional second source argument must be a `Task` that returns `List DbusValue`; the runtime executes it on each incoming call and sends its result as the method reply body.
+- Use a comma before `replyTask` when it starts with an identifier or other apply-able expression, so the parser treats it as a second source argument instead of ordinary function application.
+- `reply` and `replyValues` are mutually exclusive. Without either option, the runtime replies with `Unit`.
+- A reply task argument is mutually exclusive with `reply` and `replyValues`.
+- Reply tasks currently do not receive the incoming `DbusCall` as an explicit parameter; fully call-dependent reply closures remain future work.
 
 ### `dbus.emit`
 
@@ -495,13 +505,36 @@ value view =
 | `interface` | `Text` | Supported. |
 | `member` | `Text` | Supported. |
 | `body` | `Text` | Supported. Sent as a single string argument. |
+| `bodyValues` | `List DbusValue` | Supported. Encoded as a tuple of D-Bus arguments. |
 | `refreshOn` | `Signal B` | Supported. |
 | `activeWhen` | `Signal Bool` | Supported. |
 
 **Notes**
 
 - The intended output shape is `Signal (Result DbusError Unit)`.
-- The current runtime emits a signal with at most one string payload argument. Rich structured emit bodies remain future work.
+- `body` and `bodyValues` are mutually exclusive.
+- `bodyValues` encodes each list element as one D-Bus argument using the current `DbusValue` runtime slice.
+
+### `bus.call`
+
+**Form:** `@source dbus destination` + `bus.call path interface member body`
+
+| Input piece | Type | Current support |
+| --- | --- | --- |
+| destination | `Text` | Supported through the handle argument. |
+| path | `Text` | Supported. |
+| interface | `Text` | Supported. |
+| member | `Text` | Supported. |
+| body | `List DbusValue` | Supported. Encoded as a tuple of D-Bus arguments. |
+| `bus` option | `Text` | Supported. Current accepted values are `"session"` and `"system"`. Defaults to the session bus. |
+| `address` option | `Text` | Supported. |
+
+**Notes**
+
+- Return type is `DbusTask (List DbusValue)`.
+- Reply tuples decode to a `List DbusValue`, one element per returned D-Bus argument.
+- Task failures surface as `DbusError` values (`ServiceUnknown`, `NameNotOwned`, `NoReply`, `AccessDenied`, `InvalidArgs`, `DbusProtocolError`).
+- The reply decoder uses the current `DbusValue` runtime slice, so maybe payloads and floating-point payloads remain unsupported.
 
 ## GNOME Online Accounts
 

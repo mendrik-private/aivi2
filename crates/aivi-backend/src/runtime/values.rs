@@ -378,6 +378,48 @@ pub enum RuntimeTaskPlan {
         url: Box<str>,
         body: Box<str>,
     },
+    DbusCall {
+        destination: Box<str>,
+        path: Box<str>,
+        interface: Box<str>,
+        member: Box<str>,
+        body: Box<[RuntimeValue]>,
+        bus: Box<str>,
+        address: Box<str>,
+    },
+    SecretLookup {
+        service: Box<str>,
+        attributes: Box<[(Box<str>, Box<str>)]>,
+    },
+    SecretStore {
+        service: Box<str>,
+        label: Box<str>,
+        attributes: Box<[(Box<str>, Box<str>)]>,
+        value: Box<str>,
+    },
+    SecretDelete {
+        service: Box<str>,
+        attributes: Box<[(Box<str>, Box<str>)]>,
+    },
+    NotificationSend {
+        app_name: Box<str>,
+        notification: Box<RuntimeValue>,
+        bus: Box<str>,
+        address: Box<str>,
+    },
+    NotificationClose {
+        app_name: Box<str>,
+        id: i64,
+        bus: Box<str>,
+        address: Box<str>,
+    },
+    AuthPkce {
+        config: Box<RuntimeValue>,
+    },
+    AuthRefresh {
+        config: Box<RuntimeValue>,
+        refresh_token: Box<str>,
+    },
     CustomCapabilityCommand(RuntimeCustomCapabilityCommandPlan),
     /// Deferred map: execute `inner`, then apply `function` to the result and wrap in `Pure`.
     Map {
@@ -466,6 +508,26 @@ impl fmt::Display for RuntimeTaskPlan {
             Self::HttpDelete { url } => write!(f, "http.delete({url})"),
             Self::HttpHead { url } => write!(f, "http.head({url})"),
             Self::HttpPostJson { url, .. } => write!(f, "http.postJson({url})"),
+            Self::DbusCall {
+                destination,
+                path,
+                interface,
+                member,
+                ..
+            } => write!(f, "dbus.call({destination}, {path}, {interface}, {member})"),
+            Self::SecretLookup { service, .. } => write!(f, "secret.lookup({service})"),
+            Self::SecretStore { service, label, .. } => {
+                write!(f, "secret.store({service}, {label})")
+            }
+            Self::SecretDelete { service, .. } => write!(f, "secret.delete({service})"),
+            Self::NotificationSend { app_name, .. } => {
+                write!(f, "notifications.send({app_name})")
+            }
+            Self::NotificationClose { app_name, id, .. } => {
+                write!(f, "notifications.close({app_name}, {id})")
+            }
+            Self::AuthPkce { .. } => f.write_str("auth.pkce(...)"),
+            Self::AuthRefresh { .. } => f.write_str("auth.refresh(...)"),
             Self::CustomCapabilityCommand(plan) => {
                 write!(f, "{}.{}", plan.provider_key, plan.command)
             }

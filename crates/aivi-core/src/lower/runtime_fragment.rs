@@ -61,6 +61,20 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         lowerer
     }
 
+    fn new_with_workspace(
+        hir: &'a aivi_hir::Module,
+        workspace_hirs: &[(&str, &'a aivi_hir::Module)],
+        fragment: &'a RuntimeFragmentSpec,
+    ) -> Result<Self, LoweringErrors> {
+        let mut lowerer = Self::new(hir, fragment);
+        lowerer.lowerer.ws_origin_base = lowerer.lowerer.next_synthetic_item_origin_raw;
+        for (name, ws_hir) in workspace_hirs {
+            lowerer.lowerer.compile_workspace_module(name, ws_hir)?;
+        }
+        lowerer.lowerer.next_synthetic_item_origin_raw = lowerer.lowerer.ws_origin_base;
+        Ok(lowerer)
+    }
+
     fn build(mut self) -> Result<LoweredRuntimeFragment, LoweringErrors> {
         // Guard: reject incomplete elaboration before walking dependencies.
         let has_completeness_errors = self.lowerer.errors.iter().any(|e| {
@@ -759,4 +773,3 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
         instance_members,
     }
 }
-

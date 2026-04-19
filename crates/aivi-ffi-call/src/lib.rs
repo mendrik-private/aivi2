@@ -471,13 +471,21 @@ extern "C" fn aivi_text_concat(count: i64, segments: *const *const u8) -> *const
 }
 
 extern "C" fn aivi_int_to_text(value: i64) -> *const u8 {
-    with_current_arena(|arena| arena.store_len_prefixed_bytes(value.to_string().as_bytes()).cast())
-        .unwrap_or(ptr::null())
+    with_current_arena(|arena| {
+        arena
+            .store_len_prefixed_bytes(value.to_string().as_bytes())
+            .cast()
+    })
+    .unwrap_or(ptr::null())
 }
 
 extern "C" fn aivi_float_to_text(value: f64) -> *const u8 {
-    with_current_arena(|arena| arena.store_len_prefixed_bytes(value.to_string().as_bytes()).cast())
-        .unwrap_or(ptr::null())
+    with_current_arena(|arena| {
+        arena
+            .store_len_prefixed_bytes(value.to_string().as_bytes())
+            .cast()
+    })
+    .unwrap_or(ptr::null())
 }
 
 extern "C" fn aivi_bool_to_text(value: i8) -> *const u8 {

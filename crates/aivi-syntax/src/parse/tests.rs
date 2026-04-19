@@ -267,6 +267,35 @@ export main
 }
 
 #[test]
+fn parser_accepts_comma_separated_source_arguments() {
+    let (_, parsed) = load(
+        r#"@source dbus.method "org.aivi.Test", replyTask with {
+    path: "/org/aivi/Test",
+    interface: "org.aivi.Test",
+    member: "GetStatus"
+}
+signal incoming : Signal DbusCall
+
+value replyTask : Task Text (List DbusValue) =
+    pure []
+"#,
+    );
+
+    assert!(
+        !parsed.has_errors(),
+        "comma-separated source args should parse"
+    );
+
+    match &parsed.module.items[0] {
+        Item::Signal(item) => match &item.base.decorators[0].payload {
+            DecoratorPayload::Source(source) => assert_eq!(source.arguments.len(), 2),
+            other => panic!("expected source decorator, got {other:?}"),
+        },
+        other => panic!("expected signal item, got {other:?}"),
+    }
+}
+
+#[test]
 fn parser_builds_sum_type_companions_inside_brace_bodies() {
     let (_, parsed) = load(
         r#"type Player = {

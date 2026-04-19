@@ -2652,8 +2652,10 @@ fn rewrite_fragment_signal_parameters(
             let Some(expr) = kernel.exprs_mut().get_mut(expr_id) else {
                 continue;
             };
-            if matches!(expr.kind, aivi_backend::KernelExprKind::Subject(aivi_backend::SubjectRef::Input))
-                && let Some(payload_layout) = input_payload_layout
+            if matches!(
+                expr.kind,
+                aivi_backend::KernelExprKind::Subject(aivi_backend::SubjectRef::Input)
+            ) && let Some(payload_layout) = input_payload_layout
             {
                 expr.layout = payload_layout;
             }
@@ -3282,7 +3284,8 @@ signal rows : Signal Int
             .find(|binding| binding.signal() == trigger)
             .expect("refreshOn trigger should resolve to a public signal binding");
         assert!(
-            trigger == changed.signal() || trigger_binding.dependencies().contains(&changed.signal()),
+            trigger == changed.signal()
+                || trigger_binding.dependencies().contains(&changed.signal()),
             "db.live refreshOn should resolve to users.changed or a projected signal derived from usersChanged"
         );
     }

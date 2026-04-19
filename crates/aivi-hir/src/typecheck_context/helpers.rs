@@ -16,11 +16,15 @@ pub(crate) fn builtin_type_arity(builtin: BuiltinType) -> usize {
 pub(crate) fn type_constructor_arity(head: TypeConstructorHead, module: &Module) -> usize {
     match head {
         TypeConstructorHead::Builtin(builtin) => builtin_type_arity(builtin),
-        TypeConstructorHead::Item(item_id) => match &module.items()[item_id] {
-            Item::Type(item) => item.parameters.len(),
-            Item::Domain(item) => item.parameters.len(),
-            _ => 0,
-        },
+        TypeConstructorHead::Item(item_id) => module
+            .items()
+            .get(item_id)
+            .map(|item| match item {
+                Item::Type(item) => item.parameters.len(),
+                Item::Domain(item) => item.parameters.len(),
+                _ => 0,
+            })
+            .unwrap_or(0),
         TypeConstructorHead::Import(import_id) => match &module.imports()[import_id].metadata {
             ImportBindingMetadata::TypeConstructor { kind, .. }
             | ImportBindingMetadata::Domain { kind, .. } => kind.arity(),
@@ -583,7 +587,7 @@ pub fn case_pattern_field_types(
         callee: &TermReference,
         subject: &GateType,
     ) -> Option<Vec<GateType>> {
-        let Item::Type(item) = &module.items()[item_id] else {
+        let Item::Type(item) = module.items().get(item_id)? else {
             return None;
         };
         let TypeItemBody::Sum(variants) = &item.body else {
@@ -691,7 +695,7 @@ pub fn domain_carrier_type(
     item_id: ItemId,
     arguments: &[GateType],
 ) -> Option<GateType> {
-    let Item::Domain(domain) = &module.items()[item_id] else {
+    let Item::Domain(domain) = module.items().get(item_id)? else {
         return None;
     };
     if domain.parameters.len() != arguments.len() {
@@ -712,7 +716,7 @@ pub fn opaque_type_carrier_type(
     item_id: ItemId,
     arguments: &[GateType],
 ) -> Option<GateType> {
-    let Item::Type(type_item) = &module.items()[item_id] else {
+    let Item::Type(type_item) = module.items().get(item_id)? else {
         return None;
     };
     let TypeItemBody::Alias(alias) = type_item.body else {
@@ -728,8 +732,10 @@ pub fn opaque_type_carrier_type(
         .zip(arguments.iter().cloned())
         .collect::<HashMap<_, _>>();
     let mut typing = GateTypeContext::new(module);
-    if let TypeKind::Apply { callee, arguments } = &module.types()[alias].kind
-        && let TypeKind::Name(reference) = &module.types()[*callee].kind
+    if let Some(alias_type) = module.types().get(alias)
+        && let TypeKind::Apply { callee, arguments } = &alias_type.kind
+        && let Some(callee_type) = module.types().get(*callee)
+        && let TypeKind::Name(reference) = &callee_type.kind
         && matches!(
             reference.resolution,
             ResolutionState::Resolved(TypeResolution::Item(resolved)) if resolved == item_id
@@ -748,166 +754,174 @@ pub fn opaque_type_carrier_type(
     typing.lower_hir_type(alias, &substitutions)
 }
 
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn foreign_item_ids_return_none_instead_of_panicking() {
+        let module = Module::empty();
+        let foreign = ItemId::from_raw(216);
+        assert_eq!(type_constructor_arity(TypeConstructorHead::Item(foreign), &module), 0);
+        assert!(domain_carrier_type(&module, foreign, &[]).is_none());
+        assert!(opaque_type_carrier_type(&module, foreign, &[]).is_none());
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpaqueTypeVariant {
     pub name: Box<str>,
     pub fields: Vec<GateType>,
 }
 
-pub fn opaque_type_variants(module: &Module, subject: &GateType) -> Option<Vec<OpaqueTypeVariant>> {
-    fn lower_import_value_type_with_substitutions(
-        module: &Module,
-        ty: &ImportValueType,
-        substitutions: &[GateType],
-    ) -> GateType {
-        match ty {
-            ImportValueType::Primitive(builtin) => GateType::Primitive(*builtin),
-            ImportValueType::Tuple(elements) => GateType::Tuple(
-                elements
-                    .iter()
-                    .map(|element| {
-                        lower_import_value_type_with_substitutions(module, element, substitutions)
-                    })
-                    .collect(),
-            ),
-            ImportValueType::Record(fields) => GateType::Record(
-                fields
-                    .iter()
-                    .map(|field| GateRecordField {
-                        name: field.name.to_string(),
-                        ty: lower_import_value_type_with_substitutions(
-                            module,
-                            &field.ty,
-                            substitutions,
-                        ),
-                    })
-                    .collect(),
-            ),
-            ImportValueType::Arrow { parameter, result } => GateType::Arrow {
-                parameter: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    parameter,
-                    substitutions,
-                )),
-                result: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    result,
-                    substitutions,
-                )),
-            },
-            ImportValueType::List(element) => GateType::List(Box::new(
-                lower_import_value_type_with_substitutions(module, element, substitutions),
+pub(crate) fn lower_import_value_type_with_substitutions(
+    module: &Module,
+    ty: &ImportValueType,
+    substitutions: &[GateType],
+) -> GateType {
+    match ty {
+        ImportValueType::Primitive(builtin) => GateType::Primitive(*builtin),
+        ImportValueType::Tuple(elements) => GateType::Tuple(
+            elements
+                .iter()
+                .map(|element| lower_import_value_type_with_substitutions(module, element, substitutions))
+                .collect(),
+        ),
+        ImportValueType::Record(fields) => GateType::Record(
+            fields
+                .iter()
+                .map(|field| GateRecordField {
+                    name: field.name.to_string(),
+                    ty: lower_import_value_type_with_substitutions(
+                        module,
+                        &field.ty,
+                        substitutions,
+                    ),
+                })
+                .collect(),
+        ),
+        ImportValueType::Arrow { parameter, result } => GateType::Arrow {
+            parameter: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                parameter,
+                substitutions,
             )),
-            ImportValueType::Map { key, value } => GateType::Map {
-                key: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    key,
-                    substitutions,
-                )),
-                value: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    value,
-                    substitutions,
-                )),
-            },
-            ImportValueType::Set(element) => GateType::Set(Box::new(
-                lower_import_value_type_with_substitutions(module, element, substitutions),
+            result: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                result,
+                substitutions,
             )),
-            ImportValueType::Option(element) => GateType::Option(Box::new(
-                lower_import_value_type_with_substitutions(module, element, substitutions),
+        },
+        ImportValueType::List(element) => GateType::List(Box::new(
+            lower_import_value_type_with_substitutions(module, element, substitutions),
+        )),
+        ImportValueType::Map { key, value } => GateType::Map {
+            key: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                key,
+                substitutions,
             )),
-            ImportValueType::Result { error, value } => GateType::Result {
-                error: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    error,
-                    substitutions,
-                )),
-                value: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    value,
-                    substitutions,
-                )),
-            },
-            ImportValueType::Validation { error, value } => GateType::Validation {
-                error: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    error,
-                    substitutions,
-                )),
-                value: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    value,
-                    substitutions,
-                )),
-            },
-            ImportValueType::Signal(element) => GateType::Signal(Box::new(
-                lower_import_value_type_with_substitutions(module, element, substitutions),
+            value: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                value,
+                substitutions,
             )),
-            ImportValueType::Task { error, value } => GateType::Task {
-                error: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    error,
-                    substitutions,
-                )),
-                value: Box::new(lower_import_value_type_with_substitutions(
-                    module,
-                    value,
-                    substitutions,
-                )),
-            },
-            ImportValueType::TypeVariable { index, name } => substitutions
-                .get(*index)
-                .cloned()
-                .unwrap_or_else(|| GateType::TypeParameter {
-                    parameter: TypeParameterId::from_raw(u32::MAX - *index as u32),
-                    name: name.clone(),
-                }),
-            ImportValueType::Named {
-                type_name,
-                arguments,
-                definition,
-            } => {
-                let lowered_args = arguments
-                    .iter()
-                    .map(|argument| {
-                        lower_import_value_type_with_substitutions(
-                            module,
-                            argument,
-                            substitutions,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                match definition.as_deref() {
-                    Some(ImportTypeDefinition::Alias(alias)) => {
-                        lower_import_value_type_with_substitutions(module, alias, &lowered_args)
-                    }
-                    Some(ImportTypeDefinition::Sum(_)) | None => {
-                        let import_id = module
-                            .imports()
-                            .iter()
-                            .find(|(_, binding)| {
-                                binding.imported_name.text() == type_name
-                                    && matches!(
-                                        &binding.metadata,
-                                        ImportBindingMetadata::TypeConstructor { .. }
-                                            | ImportBindingMetadata::AmbientType
-                                            | ImportBindingMetadata::BuiltinType(_)
-                                            | ImportBindingMetadata::Domain { .. }
-                                    )
-                            })
-                            .map(|(id, _)| id);
-                        GateType::OpaqueImport {
-                            import: import_id.unwrap_or_else(|| ImportId::from_raw(u32::MAX)),
-                            name: type_name.clone(),
-                            arguments: lowered_args,
-                            definition: definition.clone(),
-                        }
+        },
+        ImportValueType::Set(element) => GateType::Set(Box::new(
+            lower_import_value_type_with_substitutions(module, element, substitutions),
+        )),
+        ImportValueType::Option(element) => GateType::Option(Box::new(
+            lower_import_value_type_with_substitutions(module, element, substitutions),
+        )),
+        ImportValueType::Result { error, value } => GateType::Result {
+            error: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                error,
+                substitutions,
+            )),
+            value: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                value,
+                substitutions,
+            )),
+        },
+        ImportValueType::Validation { error, value } => GateType::Validation {
+            error: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                error,
+                substitutions,
+            )),
+            value: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                value,
+                substitutions,
+            )),
+        },
+        ImportValueType::Signal(element) => GateType::Signal(Box::new(
+            lower_import_value_type_with_substitutions(module, element, substitutions),
+        )),
+        ImportValueType::Task { error, value } => GateType::Task {
+            error: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                error,
+                substitutions,
+            )),
+            value: Box::new(lower_import_value_type_with_substitutions(
+                module,
+                value,
+                substitutions,
+            )),
+        },
+        ImportValueType::TypeVariable { index, name } => substitutions
+            .get(*index)
+            .cloned()
+            .unwrap_or_else(|| GateType::TypeParameter {
+                parameter: TypeParameterId::from_raw(u32::MAX - *index as u32),
+                name: name.clone(),
+            }),
+        ImportValueType::Named {
+            type_name,
+            arguments,
+            definition,
+        } => {
+            let lowered_args = arguments
+                .iter()
+                .map(|argument| {
+                    lower_import_value_type_with_substitutions(module, argument, substitutions)
+                })
+                .collect::<Vec<_>>();
+            match definition.as_deref() {
+                Some(ImportTypeDefinition::Alias(alias)) => {
+                    lower_import_value_type_with_substitutions(module, alias, &lowered_args)
+                }
+                Some(ImportTypeDefinition::Sum(_)) | None => {
+                    let import_id = module
+                        .imports()
+                        .iter()
+                        .find(|(_, binding)| {
+                            binding.imported_name.text() == type_name
+                                && matches!(
+                                    &binding.metadata,
+                                    ImportBindingMetadata::TypeConstructor { .. }
+                                        | ImportBindingMetadata::AmbientType
+                                        | ImportBindingMetadata::BuiltinType(_)
+                                        | ImportBindingMetadata::Domain { .. }
+                                )
+                        })
+                        .map(|(id, _)| id);
+                    GateType::OpaqueImport {
+                        import: import_id.unwrap_or_else(|| ImportId::from_raw(u32::MAX)),
+                        name: type_name.clone(),
+                        arguments: lowered_args,
+                        definition: definition.clone(),
                     }
                 }
             }
         }
     }
+}
 
+pub fn opaque_type_variants(module: &Module, subject: &GateType) -> Option<Vec<OpaqueTypeVariant>> {
     match subject {
         GateType::OpaqueItem {
             item,

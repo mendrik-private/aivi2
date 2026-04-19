@@ -20,20 +20,23 @@ fn stage_subject_value(
     value: &RuntimeValue,
 ) -> RuntimeValue {
     match backend {
-        BackendRuntimeView::Program(program) => {
-            aivi_backend::coerce_runtime_value(program, value.clone(), layout).unwrap_or_else(|_| {
-                match (
-                    &program.layouts()[layout]
-                        .kind,
-                    value,
-                ) {
-                    (LayoutKind::Signal { .. }, RuntimeValue::Signal(_)) => value.clone(),
-                    (LayoutKind::Signal { .. }, other) => RuntimeValue::Signal(Box::new(other.clone())),
+        BackendRuntimeView::Program(program) => match &program.layouts()[layout].kind {
+            LayoutKind::Signal { element } => {
+                let inner = match value {
+                    RuntimeValue::Signal(inner) => inner.as_ref().clone(),
+                    other => other.clone(),
+                };
+                let staged = aivi_backend::coerce_runtime_value(program, inner, *element)
+                    .unwrap_or_else(|inner| inner);
+                RuntimeValue::Signal(Box::new(staged))
+            }
+            _ => aivi_backend::coerce_runtime_value(program, value.clone(), layout).unwrap_or_else(
+                |_| match (&program.layouts()[layout].kind, value) {
                     (_, RuntimeValue::Signal(inner)) => inner.as_ref().clone(),
                     _ => value.clone(),
-                }
-            })
-        }
+                },
+            ),
+        },
         _ => match (&backend.layout(layout).expect("linked runtime layout should exist").kind, value) {
             (LayoutKind::Signal { .. }, RuntimeValue::Signal(_)) => value.clone(),
             (LayoutKind::Signal { .. }, other) => RuntimeValue::Signal(Box::new(other.clone())),

@@ -5,8 +5,8 @@ use crate::{
     DomainMemberKind, ExportItem, ExportResolution, ImportBindingMetadata, ImportBundleKind,
     ImportId, ImportRecordField, ImportSumVariant, ImportTypeDefinition, ImportValueType,
     ImportedDomainLiteralSuffix, Item, ItemId, LiteralSuffixBase, Module, RecordExpr,
-    ResolutionState, TypeId, TypeItemBody, TypeKind, TypeParameterId, TypeReference,
-    TypeResolution,
+    ResolutionState, SumConstructorHandle, TypeId, TypeItemBody, TypeKind, TypeParameterId,
+    TypeReference, TypeResolution,
 };
 
 /// The kind of an exported name.
@@ -289,6 +289,8 @@ fn explicit_item_exported_name(
                     let fields = extract_type_record_fields(module, item_id, item);
                     let definition = extract_type_definition(module, item_id, item);
                     ImportBindingMetadata::TypeConstructor {
+                        type_item: Some(item_id),
+                        constructors: extract_type_sum_constructors(module, item_id, item),
                         kind: aivi_typing::Kind::constructor(item.parameters.len()),
                         fields,
                         definition,
@@ -383,6 +385,8 @@ fn explicit_item_exported_name(
                 ImportBindingMetadata::AmbientType
             } else {
                 ImportBindingMetadata::TypeConstructor {
+                    type_item: Some(item_id),
+                    constructors: None,
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                     fields: None,
                     definition: None,
@@ -425,7 +429,7 @@ fn explicit_item_exported_name(
         Item::Value(item) => (item.name.text() == exported_name).then(|| ExportedName {
             name: exported_name.to_owned(),
             kind: ExportedNameKind::Value,
-            metadata: exported_value_metadata(module, item.annotation),
+            metadata: exported_value_metadata(module, item_id, item.annotation),
             callable_type: None,
             deprecation,
         }),
@@ -448,7 +452,7 @@ fn explicit_item_exported_name(
             .then(|| ExportedName {
                 name: exported_name.to_owned(),
                 kind: ExportedNameKind::Signal,
-                metadata: exported_value_metadata(module, item.annotation),
+                metadata: exported_value_metadata(module, item_id, item.annotation),
                 callable_type: None,
                 deprecation,
             }),
@@ -470,6 +474,8 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Type,
             metadata: ImportBindingMetadata::TypeConstructor {
+                type_item: Some(item_id),
+                constructors: extract_type_sum_constructors(module, item_id, item),
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
                 fields: extract_type_record_fields(module, item_id, item),
                 definition: extract_type_definition(module, item_id, item),
@@ -480,7 +486,7 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
         Item::Value(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Value,
-            metadata: exported_value_metadata(module, item.annotation),
+            metadata: exported_value_metadata(module, item_id, item.annotation),
             callable_type: None,
             deprecation,
         }),
@@ -501,7 +507,7 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
         Item::Signal(item) => (!item.is_source_capability_handle).then(|| ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Signal,
-            metadata: exported_value_metadata(module, item.annotation),
+            metadata: exported_value_metadata(module, item_id, item.annotation),
             callable_type: None,
             deprecation,
         }),
@@ -509,6 +515,8 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Class,
             metadata: ImportBindingMetadata::TypeConstructor {
+                type_item: Some(item_id),
+                constructors: None,
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
                 fields: None,
                 definition: None,
@@ -553,11 +561,104 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
     }
 }
 
-fn exported_value_metadata(module: &Module, annotation: Option<TypeId>) -> ImportBindingMetadata {
+fn exported_value_metadata(
+    module: &Module,
+    item_id: ItemId,
+    annotation: Option<TypeId>,
+) -> ImportBindingMetadata {
     annotation
         .and_then(|annotation| import_value_type(module, annotation))
+        .or_else(|| inferred_item_import_value_type(module, item_id))
         .map(|ty| ImportBindingMetadata::Value { ty })
         .unwrap_or(ImportBindingMetadata::OpaqueValue)
+}
+
+fn inferred_item_import_value_type(module: &Module, item_id: ItemId) -> Option<ImportValueType> {
+    let mut typing = crate::typecheck_context::GateTypeContext::new(module);
+    let ty = typing.item_value_type(item_id)?;
+    gate_type_import_value_type(&ty)
+}
+
+fn gate_type_import_value_type(ty: &crate::GateType) -> Option<ImportValueType> {
+    match ty {
+        crate::GateType::Primitive(builtin) => primitive_import_value_type_from_builtin(*builtin),
+        crate::GateType::TypeParameter { .. } => None,
+        crate::GateType::Tuple(elements) => Some(ImportValueType::Tuple(
+            elements
+                .iter()
+                .map(gate_type_import_value_type)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        crate::GateType::Record(fields) => Some(ImportValueType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    Some(ImportRecordField {
+                        name: field.name.clone().into_boxed_str(),
+                        ty: gate_type_import_value_type(&field.ty)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        crate::GateType::Arrow { parameter, result } => Some(ImportValueType::Arrow {
+            parameter: Box::new(gate_type_import_value_type(parameter)?),
+            result: Box::new(gate_type_import_value_type(result)?),
+        }),
+        crate::GateType::List(element) => Some(ImportValueType::List(Box::new(
+            gate_type_import_value_type(element)?,
+        ))),
+        crate::GateType::Map { key, value } => Some(ImportValueType::Map {
+            key: Box::new(gate_type_import_value_type(key)?),
+            value: Box::new(gate_type_import_value_type(value)?),
+        }),
+        crate::GateType::Set(element) => Some(ImportValueType::Set(Box::new(
+            gate_type_import_value_type(element)?,
+        ))),
+        crate::GateType::Option(element) => Some(ImportValueType::Option(Box::new(
+            gate_type_import_value_type(element)?,
+        ))),
+        crate::GateType::Result { error, value } => Some(ImportValueType::Result {
+            error: Box::new(gate_type_import_value_type(error)?),
+            value: Box::new(gate_type_import_value_type(value)?),
+        }),
+        crate::GateType::Validation { error, value } => Some(ImportValueType::Validation {
+            error: Box::new(gate_type_import_value_type(error)?),
+            value: Box::new(gate_type_import_value_type(value)?),
+        }),
+        crate::GateType::Signal(payload) => Some(ImportValueType::Signal(Box::new(
+            gate_type_import_value_type(payload)?,
+        ))),
+        crate::GateType::Task { error, value } => Some(ImportValueType::Task {
+            error: Box::new(gate_type_import_value_type(error)?),
+            value: Box::new(gate_type_import_value_type(value)?),
+        }),
+        crate::GateType::Domain {
+            name, arguments, ..
+        }
+        | crate::GateType::OpaqueItem {
+            name, arguments, ..
+        } => Some(ImportValueType::Named {
+            type_name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(gate_type_import_value_type)
+                .collect::<Option<Vec<_>>>()?,
+            definition: None,
+        }),
+        crate::GateType::OpaqueImport {
+            name,
+            arguments,
+            definition,
+            ..
+        } => Some(ImportValueType::Named {
+            type_name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(gate_type_import_value_type)
+                .collect::<Option<Vec<_>>>()?,
+            definition: definition.clone(),
+        }),
+    }
 }
 
 /// Collect all instance declarations from a module for cross-module instance resolution.
@@ -1841,6 +1942,20 @@ fn extract_type_definition(
     extract_type_definition_with_stack(module, item, &mut item_stack)
 }
 
+fn extract_type_sum_constructors(
+    module: &Module,
+    item_id: ItemId,
+    item: &crate::TypeItem,
+) -> Option<Vec<SumConstructorHandle>> {
+    let TypeItemBody::Sum(variants) = &item.body else {
+        return None;
+    };
+    variants
+        .iter()
+        .map(|variant| module.sum_constructor_handle(item_id, variant.name.text()))
+        .collect()
+}
+
 fn extract_type_definition_with_stack(
     module: &Module,
     item: &crate::TypeItem,
@@ -2067,6 +2182,39 @@ export (Box, one)
                 other => panic!("expected exported reduce signature, got {other:?}"),
             },
             other => panic!("expected exported reduce signature, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exported_unannotated_signal_infers_signal_payload_metadata() {
+        let lowered = lower_text(
+            "signals.aivi",
+            r#"
+signal windowTitle = "Mailfox"
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "lowering should succeed: {:?}",
+            lowered.diagnostics()
+        );
+
+        let exported = exports(lowered.module());
+        let window_title = exported
+            .find("windowTitle")
+            .expect("windowTitle signal should be exported");
+        match &window_title.metadata {
+            ImportBindingMetadata::Value {
+                ty: ImportValueType::Signal(payload),
+            } => {
+                assert_eq!(
+                    payload.as_ref(),
+                    &ImportValueType::Primitive(crate::BuiltinType::Text)
+                );
+            }
+            other => {
+                panic!("expected signal metadata for unannotated signal export, got {other:?}")
+            }
         }
     }
 }

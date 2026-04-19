@@ -2448,6 +2448,133 @@ value cleanup = files.delete "cache.txt"
 }
 
 #[test]
+fn lowers_dbus_call_capability_handle_values() {
+    let lowered = lower_text(
+        "dbus_call_source_capability_handles.aivi",
+        r#"
+type DbusSource = Unit
+type DbusValue =
+  | DbusString Text
+  | DbusInt Int
+  | DbusBool Bool
+  | DbusList (List DbusValue)
+  | DbusStruct (List DbusValue)
+  | DbusVariant DbusValue
+
+type DbusError =
+  | NameNotOwned Text
+  | ServiceUnknown Text
+  | NoReply
+  | AccessDenied Text
+  | InvalidArgs Text
+  | DbusProtocolError Text
+
+@source dbus "org.freedesktop.DBus" with {
+    bus: "session"
+}
+signal busHandle : DbusSource
+
+value names : Task DbusError (List DbusValue) =
+    busHandle.call "/org/freedesktop/DBus" "org.freedesktop.DBus" "ListNames" []
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "dbus.call capability lowering should not introduce front-end diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+}
+
+#[test]
+fn lowers_secret_capability_handle_values() {
+    let lowered = lower_text(
+        "secret_source_capability_handles.aivi",
+        r#"
+type SecretSource = Unit
+type SecretError =
+  | SecretUnavailable Text
+  | SecretLocked
+  | SecretCancelled
+  | SecretProtocolError Text
+
+@source secret "io.mailfox"
+signal secrets : SecretSource
+
+value saved : Task SecretError (Option Text) =
+    secrets.lookup (Map { "account": "primary", "kind": "refresh-token" })
+
+value write : Task SecretError Unit =
+    secrets.store "Primary refresh token" (Map { "account": "primary", "kind": "refresh-token" }) "token"
+
+value cleared : Task SecretError Bool =
+    secrets.delete (Map { "account": "primary", "kind": "refresh-token" })
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "secret capability lowering should not introduce front-end diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+}
+
+#[test]
+fn lowers_auth_capability_handle_values() {
+    let lowered = lower_text(
+        "auth_source_capability_handles.aivi",
+        r#"
+type AuthSource = Unit
+type PkceError =
+  | UserCancelled
+  | NetworkError Text
+  | InvalidResponse Text
+  | PkceTimeout
+
+type PkceToken = {
+    accessToken: Text,
+    refreshToken: Option Text,
+    expiresAt: Option Int
+}
+
+type Url = Text
+
+type PkceConfig = {
+    clientId: Text,
+    authEndpoint: Url,
+    tokenEndpoint: Url,
+    scopes: List Text,
+    redirectPort: Int
+}
+
+@source auth
+signal auth : AuthSource
+
+value signIn : Task PkceError PkceToken =
+    auth.pkce {
+        clientId: "desktop-client",
+        authEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        scopes: ["mail.read", "mail.send"],
+        redirectPort: 43123
+    }
+
+value refresh : Task PkceError PkceToken =
+    auth.refresh {
+        clientId: "desktop-client",
+        authEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        scopes: ["mail.read", "mail.send"],
+        redirectPort: 43123
+    } "refresh-token"
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "auth capability lowering should not introduce front-end diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+}
+
+#[test]
 fn lowers_tray_capability_handles_into_dbus_sources() {
     let lowered = lower_text(
         "tray_source_capability_handles.aivi",
@@ -2518,10 +2645,12 @@ signal trayActions : Signal DbusCall = trayHandle.actions
         .header
         .decorators
         .iter()
-        .find_map(|decorator_id| match &lowered.module().decorators()[*decorator_id].payload {
-            DecoratorPayload::Source(source) => source.options,
-            _ => None,
-        })
+        .find_map(
+            |decorator_id| match &lowered.module().decorators()[*decorator_id].payload {
+                DecoratorPayload::Source(source) => source.options,
+                _ => None,
+            },
+        )
         .expect("tray action lowering should synthesize dbus.method options");
     let ExprKind::Record(crate::RecordExpr { fields }) =
         &lowered.module().exprs()[action_options].kind
@@ -2536,7 +2665,78 @@ signal trayActions : Signal DbusCall = trayHandle.actions
         labels.contains(&"path".to_owned())
             && labels.contains(&"interface".to_owned())
             && labels.contains(&"member".to_owned()),
-        "tray action lowering should provide path/interface/member dbus.method options, found {labels:?}"
+        "tray action lowering should provide dbus.method path/interface/member defaults, found {labels:?}"
+    );
+}
+
+#[test]
+fn lowers_notifications_capability_handles() {
+    let lowered = lower_text(
+        "notifications_source_capability_handles.aivi",
+        r#"
+type NotificationAction = {
+    label: Text,
+    id: Text
+}
+
+type Notification = {
+    summary: Text,
+    body: Option Text,
+    icon: Option Text,
+    actions: List NotificationAction
+}
+
+type NotificationError =
+  NotificationFailed Text
+
+type NotificationResponse =
+  | ActionTriggered Text
+  | Dismissed
+
+type NotificationEvent = {
+    id: Int,
+    response: NotificationResponse
+}
+
+type NotificationSource = Unit
+
+@source notifications "io.mailfox" with {
+    bus: "session"
+}
+signal notificationsHandle : NotificationSource
+
+signal events : Signal NotificationEvent = notificationsHandle.events
+value sendNotification : Task NotificationError Int =
+    notificationsHandle.send {
+        summary: "New mail",
+        body: Some "Alex replied",
+        icon: Some "mail-unread",
+        actions: [{ label: "Open", id: "open" }]
+    }
+value closeNotification : Task NotificationError Unit =
+    notificationsHandle.close 42
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "notifications capability lowering should not introduce front-end diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+
+    let notifications_handle = find_signal(lowered.module(), "notificationsHandle");
+    assert!(
+        notifications_handle.is_source_capability_handle,
+        "bodyless `@source notifications` anchors should lower as capability handles"
+    );
+
+    let events = find_signal(lowered.module(), "events");
+    let metadata = events
+        .source_metadata
+        .as_ref()
+        .expect("lowered notifications events signal should carry ordinary source metadata");
+    assert_eq!(
+        metadata.provider,
+        SourceProviderRef::Builtin(aivi_typing::BuiltinSourceProvider::NotificationsEvents)
     );
 }
 

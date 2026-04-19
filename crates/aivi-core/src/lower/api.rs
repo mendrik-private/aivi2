@@ -466,6 +466,14 @@ pub fn lower_runtime_fragment(
     RuntimeFragmentLowerer::new(hir, fragment).build()
 }
 
+pub fn lower_runtime_fragment_with_workspace<'a>(
+    hir: &'a aivi_hir::Module,
+    workspace_hirs: &[(&str, &'a aivi_hir::Module)],
+    fragment: &RuntimeFragmentSpec,
+) -> Result<LoweredRuntimeFragment, LoweringErrors> {
+    RuntimeFragmentLowerer::new_with_workspace(hir, workspace_hirs, fragment)?.build()
+}
+
 pub fn runtime_fragment_included_items(
     hir: &aivi_hir::Module,
     fragment: &RuntimeFragmentSpec,

@@ -961,6 +961,115 @@ value view =
 }
 
 #[test]
+fn imported_source_sums_drive_native_run_signals() {
+    let workspace = TempDir::new("imported-source-sums");
+    workspace.write("aivi.toml", "");
+    workspace.write(
+        "types.aivi",
+        r#"
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+export (BusNameState, Owned, Queued, Lost)
+"#,
+    );
+    let entry = workspace.write(
+        "main.aivi",
+        r#"
+use types (BusNameState, Owned, Queued, Lost)
+
+@source dbus.ownName "org.aivi.Test"
+signal busState : Signal BusNameState
+
+func describe = state => state
+ ||> Owned  -> "owned"
+ ||> Queued -> "queued"
+ ||> Lost   -> "lost"
+
+signal status = busState |> describe
+
+value main =
+    <Window title={status} />
+"#,
+    );
+    let snapshot = WorkspaceHirSnapshot::load(&entry).expect("workspace snapshot should load");
+    let artifact = prepare_run_from_workspace(&workspace, "main.aivi", None)
+        .expect("workspace artifact should prepare");
+    let decode_report = aivi_hir::generate_source_decode_programs(snapshot.entry_hir().module());
+    let bus_state_item = snapshot
+        .entry_hir()
+        .module()
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| match item {
+            aivi_hir::Item::Signal(signal) if signal.name.text() == "busState" => Some(item_id),
+            _ => None,
+        })
+        .expect("busState item should exist");
+    let decode_node = decode_report
+        .nodes()
+        .iter()
+        .find(|node| node.owner == bus_state_item)
+        .expect("busState decode node should exist");
+    let aivi_hir::SourceDecodeProgramOutcome::Planned(program) = &decode_node.outcome else {
+        panic!("busState decode should be planned");
+    };
+    let aivi_hir::DecodeProgramStep::Sum { variants, .. } = program.step(program.root()) else {
+        panic!("busState decode should lower to a sum decoder");
+    };
+    assert!(
+        variants.iter().all(|variant| variant.constructor.is_some()),
+        "imported sum decoders should preserve constructor handles"
+    );
+
+    let mut linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
+        artifact.runtime_assembly.clone(),
+        artifact.backend.clone(),
+        artifact.backend_native_kernels.clone(),
+        &artifact.runtime_link,
+    )
+    .expect("workspace runtime should link");
+    publish_source_value_by_signal_name(
+        &mut linked,
+        &snapshot,
+        "busState",
+        RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+            item: aivi_hir::ItemId::from_raw(0),
+            type_name: "BusNameState".into(),
+            variant_name: "Queued".into(),
+            fields: vec![],
+        }),
+    );
+    linked.tick().expect("linked runtime tick should succeed");
+
+    let status_item = snapshot
+        .entry_hir()
+        .module()
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| match item {
+            aivi_hir::Item::Signal(signal) if signal.name.text() == "status" => Some(item_id),
+            _ => None,
+        })
+        .expect("status item should exist");
+    let status_signal = linked
+        .assembly()
+        .signal(status_item)
+        .expect("status signal binding should exist")
+        .derived()
+        .expect("status should be a derived signal");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(status_signal.as_signal())
+            .expect("status signal lookup should succeed"),
+        Some(&RuntimeValue::Text("queued".into()))
+    );
+}
+
+#[test]
 fn prepare_run_accepts_control_nodes() {
     let artifact = prepare_run_from_text(
         "control-node.aivi",
@@ -1358,6 +1467,62 @@ value view =
         .expect("button should keep one event hook");
     assert!(artifact.event_handlers.contains_key(&handler.handler));
     assert!(artifact.hydration_inputs.contains_key(&handler.input));
+    assert!(matches!(
+        artifact.event_handlers.get(&handler.handler),
+        Some(ResolvedRunEventHandler {
+            payload: ResolvedRunEventPayload::ScopedInput,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn prepare_run_accepts_imported_signal_payload_event_hooks() {
+    let workspace = TempDir::new("workspace-imported-event-hook");
+    workspace.write(
+        "main.aivi",
+        r#"
+use shared.tabs (ReaderTab, MarkdownTab, selectTab)
+
+value view =
+    <Window title="Host">
+        <Button label="Select" onClick={selectTab MarkdownTab} />
+    </Window>
+"#,
+    );
+    workspace.write(
+        "shared/tabs.aivi",
+        r#"
+type ReaderTab =
+  | MarkdownTab
+  | TextTab
+
+signal selectTab : Signal ReaderTab
+
+export (ReaderTab, MarkdownTab, TextTab, selectTab)
+"#,
+    );
+
+    let artifact = prepare_run_from_workspace(&workspace, "main.aivi", None)
+        .expect("workspace run preparation should accept imported signal payload event hooks");
+    let widget = artifact
+        .bridge
+        .nodes()
+        .iter()
+        .find_map(|node| match &node.kind {
+            GtkBridgeNodeKind::Widget(widget)
+                if widget.widget.segments().last().text() == "Button" =>
+            {
+                Some(widget)
+            }
+            _ => None,
+        })
+        .expect("bridge should keep the imported payload button widget");
+    let handler = widget
+        .event_hooks
+        .first()
+        .expect("button should keep one imported payload event hook");
+    assert!(artifact.event_handlers.contains_key(&handler.handler));
     assert!(matches!(
         artifact.event_handlers.get(&handler.handler),
         Some(ResolvedRunEventHandler {

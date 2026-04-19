@@ -1942,15 +1942,209 @@ impl DbusSignalPlan {
 }
 
 #[derive(Clone)]
+struct NotificationEventsPlan {
+    instance: SourceInstanceId,
+    app_name: Box<str>,
+    bus: DbusBus,
+    address: Option<Box<str>>,
+    output: NotificationEventOutputPlan,
+}
+
+impl NotificationEventsPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::NotificationsEvents;
+        validate_argument_count(instance, provider, config, 1)?;
+        let app_name = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let mut bus = DbusBus::Session;
+        let mut address = None;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "bus" => {
+                    bus = DbusBus::parse_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?;
+                }
+                "address" => {
+                    address = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            instance,
+            app_name,
+            bus,
+            address,
+            output: NotificationEventOutputPlan::parse(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct NotificationEventOutputPlan {
+    decode: hir::SourceDecodeProgram,
+}
+
+impl NotificationEventOutputPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::NotificationsEvents;
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        let hir::DecodeProgramStep::Record { fields, .. } = decode.root_step() else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events currently decodes to a `NotificationEvent`-shaped record"
+                    .into(),
+            });
+        };
+        if fields.len() != 2 {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events currently requires record fields [\"id\", \"response\"]"
+                    .into(),
+            });
+        }
+        let Some(id_field) = fields.iter().find(|field| field.name.as_str() == "id") else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events currently requires record fields [\"id\", \"response\"]"
+                    .into(),
+            });
+        };
+        if !matches!(
+            decode.step(id_field.step),
+            hir::DecodeProgramStep::Scalar {
+                scalar: aivi_typing::PrimitiveType::Int,
+            }
+        ) {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events field `id` must decode as Int".into(),
+            });
+        }
+        let Some(response_field) = fields.iter().find(|field| field.name.as_str() == "response")
+        else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events currently requires record fields [\"id\", \"response\"]"
+                    .into(),
+            });
+        };
+        let hir::DecodeProgramStep::Sum { variants, .. } = decode.step(response_field.step) else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events field `response` must decode as NotificationResponse".into(),
+            });
+        };
+        let mut saw_action = false;
+        let mut saw_dismissed = false;
+        for variant in variants {
+            match (variant.name.as_str(), variant.payload) {
+                ("ActionTriggered", Some(payload))
+                    if matches!(
+                        decode.step(payload),
+                        hir::DecodeProgramStep::Scalar {
+                            scalar: aivi_typing::PrimitiveType::Text,
+                        }
+                    ) =>
+                {
+                    saw_action = true;
+                }
+                ("Dismissed", None) => {
+                    saw_dismissed = true;
+                }
+                _ => {}
+            }
+        }
+        if !saw_action || !saw_dismissed {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "notifications.events responses must support `ActionTriggered Text` and `Dismissed`"
+                    .into(),
+            });
+        }
+        Ok(Self { decode })
+    }
+
+    fn action_value(
+        &self,
+        id: u32,
+        action_id: &str,
+    ) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::Record(BTreeMap::from([
+                ("id".into(), ExternalSourceValue::Int(i64::from(id))),
+                (
+                    "response".into(),
+                    ExternalSourceValue::variant_with_payload(
+                        "ActionTriggered",
+                        ExternalSourceValue::Text(action_id.into()),
+                    ),
+                ),
+            ])),
+        )
+    }
+
+    fn dismissed_value(&self, id: u32) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::Record(BTreeMap::from([
+                ("id".into(), ExternalSourceValue::Int(i64::from(id))),
+                ("response".into(), ExternalSourceValue::variant("Dismissed")),
+            ])),
+        )
+    }
+}
+
+#[derive(Clone)]
 struct DbusMethodPlan {
     instance: SourceInstanceId,
     bus: DbusBus,
     address: Option<Box<str>>,
     destination: Box<str>,
+    reply_task: Option<RuntimeValue>,
     path: Option<Box<str>>,
     interface: Option<Box<str>>,
     member: Option<Box<str>>,
     reply_body: Option<Box<str>>,
+    reply_values: Option<Vec<RuntimeValue>>,
     output: DbusMessageOutputPlan,
 }
 
@@ -1960,14 +2154,27 @@ impl DbusMethodPlan {
         config: &EvaluatedSourceConfig,
     ) -> Result<Self, SourceProviderExecutionError> {
         let provider = BuiltinSourceProvider::DbusMethod;
-        validate_argument_count(instance, provider, config, 1)?;
+        if !(1..=2).contains(&config.arguments.len()) {
+            return Err(SourceProviderExecutionError::InvalidArgumentCount {
+                instance,
+                provider,
+                expected: 2,
+                found: config.arguments.len(),
+            });
+        }
         let destination = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let reply_task = if config.arguments.len() == 2 {
+            Some(parse_task_argument(instance, provider, 1, &config.arguments[1])?)
+        } else {
+            None
+        };
         let mut bus = DbusBus::Session;
         let mut address = None;
         let mut path = None;
         let mut interface = None;
         let mut member = None;
         let mut reply_body = None;
+        let mut reply_values = None;
         for option in &config.options {
             match option.option_name.as_ref() {
                 "bus" => {
@@ -2011,7 +2218,49 @@ impl DbusMethodPlan {
                     )?);
                 }
                 "reply" => {
+                    if reply_task.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail:
+                                "dbus.method accepts either a reply task argument or fixed `reply`/`replyValues` options, not both"
+                                    .into(),
+                        });
+                    }
+                    if reply_values.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail: "dbus.method accepts either `reply` or `replyValues`, not both"
+                                .into(),
+                        });
+                    }
                     reply_body = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "replyValues" => {
+                    if reply_task.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail:
+                                "dbus.method accepts either a reply task argument or fixed `reply`/`replyValues` options, not both"
+                                    .into(),
+                        });
+                    }
+                    if reply_body.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail: "dbus.method accepts either `reply` or `replyValues`, not both"
+                                .into(),
+                        });
+                    }
+                    reply_values = Some(parse_dbus_value_list_option(
                         instance,
                         provider,
                         &option.option_name,
@@ -2032,10 +2281,12 @@ impl DbusMethodPlan {
             bus,
             address,
             destination,
+            reply_task,
             path,
             interface,
             member,
             reply_body,
+            reply_values,
             output: DbusMessageOutputPlan::parse_method(instance, config)?,
         })
     }
@@ -2324,4 +2575,3 @@ impl DbusMessageOutputPlan {
         Ok(ExternalSourceValue::Record(record))
     }
 }
-

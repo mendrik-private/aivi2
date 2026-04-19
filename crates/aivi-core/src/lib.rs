@@ -49,8 +49,8 @@ pub use expr::{
 pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, StageId};
 pub use lower::{
     LoweredRuntimeFragment, LoweringError, LoweringErrors, RuntimeFragmentSpec, lower_module,
-    lower_module_with_items, lower_runtime_fragment, lower_runtime_module,
-    lower_runtime_module_with_items, lower_runtime_module_with_workspace,
+    lower_module_with_items, lower_runtime_fragment, lower_runtime_fragment_with_workspace,
+    lower_runtime_module, lower_runtime_module_with_items, lower_runtime_module_with_workspace,
     runtime_fragment_included_items,
 };
 pub use module::{

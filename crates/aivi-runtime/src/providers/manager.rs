@@ -755,7 +755,23 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusMethod) => {
                 let plan = DbusMethodPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                let handle = spawn_dbus_method_worker(port, plan, stop.clone())?;
+                let handle =
+                    spawn_dbus_method_worker(port, plan, self.context.clone(), stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::NotificationsEvents) => {
+                let plan = NotificationEventsPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_notification_events_worker(port, plan, stop.clone())?;
                 self.thread_handles
                     .lock()
                     .unwrap()

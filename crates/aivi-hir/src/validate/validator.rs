@@ -6104,6 +6104,7 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::DbusSignal
                             | BuiltinSourceProvider::DbusMethod
                             | BuiltinSourceProvider::DbusEmit
+                            | BuiltinSourceProvider::NotificationsEvents
                             | BuiltinSourceProvider::WindowKeyDown
                             | BuiltinSourceProvider::GtkDarkMode
                             | BuiltinSourceProvider::GtkClipboard

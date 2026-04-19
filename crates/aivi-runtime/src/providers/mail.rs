@@ -35,6 +35,7 @@ struct DbusEmitPlan {
     interface: Box<str>,
     member: Box<str>,
     body: Box<str>,
+    body_values: Option<Vec<RuntimeValue>>,
     result: RequestResultPlan,
 }
 
@@ -51,6 +52,7 @@ impl DbusEmitPlan {
         let mut interface = None;
         let mut member = None;
         let mut body: Box<str> = "".into();
+        let mut body_values = None;
         for option in &config.options {
             match option.option_name.as_ref() {
                 "bus" => {
@@ -86,7 +88,31 @@ impl DbusEmitPlan {
                     )?);
                 }
                 "body" => {
+                    if body_values.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail: "dbus.emit accepts either `body` or `bodyValues`, not both"
+                                .into(),
+                        });
+                    }
                     body = parse_text_option(instance, provider, &option.option_name, &option.value)?;
+                }
+                "bodyValues" => {
+                    if !body.is_empty() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail: "dbus.emit accepts either `body` or `bodyValues`, not both"
+                                .into(),
+                        });
+                    }
+                    body_values = Some(parse_dbus_value_list_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
                 }
                 "refreshOn" | "activeWhen" => {}
                 _ => {
@@ -106,6 +132,7 @@ impl DbusEmitPlan {
             interface: interface.unwrap_or_else(|| "io.mailfox.Daemon".into()),
             member: member.unwrap_or_else(|| "Changed".into()),
             body,
+            body_values,
             result: RequestResultPlan::parse(instance, provider, config)?,
         })
     }
@@ -272,7 +299,7 @@ fn spawn_goa_mail_accounts_worker(
         let context = MainContext::new();
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
-            install_dbus_stop_timer(&main_loop, &stop, &port);
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
             let connection = gio::bus_get_sync(BusType::Session, None::<&gio::Cancellable>)
                 .map_err(|error| error.to_string().into_boxed_str())?;
             publish_goa_mail_accounts(&connection, &port, &plan)?;
@@ -350,10 +377,15 @@ fn spawn_dbus_emit_worker(
         let context = MainContext::new();
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
-            install_dbus_stop_timer(&main_loop, &stop, &port);
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
             let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
-            let payload = (!plan.body.is_empty())
-                .then(|| Variant::tuple_from_iter([plan.body.as_ref().to_variant()]));
+            let payload = if let Some(values) = plan.body_values.as_ref() {
+                runtime_dbus_values_to_variant(values)?
+            } else if !plan.body.is_empty() {
+                Some(Variant::tuple_from_iter([plan.body.as_ref().to_variant()]))
+            } else {
+                None
+            };
             connection
                 .emit_signal(
                     None,

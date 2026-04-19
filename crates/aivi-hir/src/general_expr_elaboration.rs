@@ -4866,18 +4866,26 @@ impl<'a> GeneralExprElaborator<'a> {
         let ExprKind::Name(reference) = &self.module.exprs()[*callee].kind else {
             return None;
         };
-        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
-            reference.resolution.as_ref()
-        else {
-            return None;
-        };
-        let Item::Signal(signal) = &self.module.items()[*item_id] else {
-            return None;
+        let signal_payload_ty = match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+                let Item::Signal(signal) = &self.module.items()[*item_id] else {
+                    return None;
+                };
+                signal_payload_type(self.module, signal)
+            }
+            ResolutionState::Resolved(TermResolution::Import(import_id)) => self
+                .typing
+                .import_value_type(*import_id)
+                .and_then(|ty| match ty {
+                    GateType::Signal(payload) => Some(*payload),
+                    _ => None,
+                }),
+            _ => None,
         };
         self.typing
             .infer_expr(payload_expr, env, None)
             .ty
-            .or_else(|| signal_payload_type(self.module, signal))
+            .or(signal_payload_ty)
             .map(|ty| (payload_expr, ty))
     }
 }
@@ -6546,6 +6554,143 @@ export Participant
         assert!(
             matches!(sender_outcome, GeneralExprOutcome::Lowered(_)),
             "senderName should lower cleanly, found {sender_outcome:?}"
+        );
+    }
+
+    #[test]
+    fn imported_signal_alias_field_projection_has_markup_runtime_type() {
+        let lowered = lower_text_with_single_import(
+            "main.aivi",
+            r#"
+use shared.accounts (selectedAccount)
+
+value main =
+    <Window title={selectedAccount.detail} />
+"#,
+            vec!["shared", "accounts"],
+            "shared/accounts.aivi",
+            r#"
+type Account = {
+    detail: Text
+}
+
+signal selectedAccount : Signal Account = { detail: "ada@example.com" }
+
+export (Account, selectedAccount)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "repro should lower to HIR cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let main_body = module
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                crate::Item::Value(value) if value.name.text() == "main" => Some(value.body),
+                _ => None,
+            })
+            .expect("main value should exist");
+        let sites = super::collect_markup_runtime_expr_sites(module, main_body);
+        assert!(
+            sites.is_ok(),
+            "markup runtime expr sites should resolve imported signal alias field projection, got {sites:?}"
+        );
+    }
+
+    #[test]
+    fn curried_function_application_stays_typed_through_signal_argument() {
+        let lowered = lower_text_with_single_import(
+            "main.aivi",
+            r#"
+use shared.tabs (ReaderTab, MarkdownTab, currentTab)
+
+type ReaderTab -> ReaderTab -> Text -> Text
+func tabTitle = current target label => current == target
+ T|> "> {label}"
+ F|> label
+
+value main =
+    <Window title={tabTitle currentTab MarkdownTab "Markdown"} />
+"#,
+            vec!["shared", "tabs"],
+            "shared/tabs.aivi",
+            r#"
+type ReaderTab =
+  | MarkdownTab
+  | TextTab
+
+signal currentTab : Signal ReaderTab = MarkdownTab
+
+export (ReaderTab, MarkdownTab, TextTab, currentTab)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "repro should lower to HIR cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let main_body = module
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                crate::Item::Value(value) if value.name.text() == "main" => Some(value.body),
+                _ => None,
+            })
+            .expect("main value should exist");
+        let sites = super::collect_markup_runtime_expr_sites(module, main_body);
+        assert!(
+            sites.is_ok(),
+            "markup runtime expr sites should keep curried signal application typed, got {sites:?}"
+        );
+    }
+
+    #[test]
+    fn imported_signal_application_records_markup_runtime_payload_type() {
+        let lowered = lower_text_with_single_import(
+            "main.aivi",
+            r#"
+use shared.tabs (ReaderTab, MarkdownTab, selectTab)
+
+value main =
+    <Button onClick={selectTab MarkdownTab} />
+"#,
+            vec!["shared", "tabs"],
+            "shared/tabs.aivi",
+            r#"
+type ReaderTab =
+  | MarkdownTab
+  | TextTab
+
+signal selectTab : Signal ReaderTab
+
+export (ReaderTab, MarkdownTab, TextTab, selectTab)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "repro should lower to HIR cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let main_body = module
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                crate::Item::Value(value) if value.name.text() == "main" => Some(value.body),
+                _ => None,
+            })
+            .expect("main value should exist");
+        let sites = super::collect_markup_runtime_expr_sites(module, main_body);
+        assert!(
+            sites.is_ok(),
+            "markup runtime expr sites should accept imported signal application, got {sites:?}"
         );
     }
 }

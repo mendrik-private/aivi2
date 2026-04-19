@@ -1,9 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, fs,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
+    net::TcpListener,
     path::Path,
     process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use aivi_backend::{
@@ -11,9 +14,18 @@ use aivi_backend::{
     RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
     RuntimeTaskPlan, RuntimeValue, TaskFunctionApplier,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use gio::DBusCallFlags;
+use glib::{Variant, VariantTy, prelude::ToVariant};
 use regex::Regex;
+use secret_service::{EncryptionType, blocking::SecretService};
+use sha2::{Digest, Sha256};
+use url::Url;
 
-use crate::providers::SourceProviderContext;
+use crate::providers::{
+    SourceProviderContext, open_dbus_connection_text, runtime_dbus_body_from_variant,
+    runtime_dbus_values_to_variant,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeTaskExecutionError {
@@ -462,6 +474,89 @@ pub fn execute_runtime_task_plan_with_context(
                 .map_err(|e| task_error(format!("http read: {e}")))?;
             Ok(RuntimeValue::Text(response.into()))
         }
+        RuntimeTaskPlan::DbusCall {
+            destination,
+            path,
+            interface,
+            member,
+            body,
+            bus,
+            address,
+        } => {
+            let connection = open_dbus_connection_text(
+                bus.as_ref(),
+                (!address.is_empty()).then_some(address.as_ref()),
+            )
+            .map_err(task_error)?;
+            let body = runtime_dbus_values_to_variant(body.as_ref()).map_err(task_error)?;
+            let reply = connection
+                .call_sync(
+                    Some(destination.as_ref()),
+                    path.as_ref(),
+                    interface.as_ref(),
+                    member.as_ref(),
+                    body.as_ref(),
+                    None::<&glib::VariantTy>,
+                    DBusCallFlags::NONE,
+                    5_000,
+                    None::<&gio::Cancellable>,
+                )
+                .map_err(runtime_dbus_call_error)?;
+            Ok(RuntimeValue::List(
+                runtime_dbus_body_from_variant(Some(&reply)).map_err(task_error)?,
+            ))
+        }
+        RuntimeTaskPlan::SecretLookup {
+            service,
+            attributes,
+        } => runtime_secret_lookup(service.as_ref(), attributes.as_ref()),
+        RuntimeTaskPlan::SecretStore {
+            service,
+            label,
+            attributes,
+            value,
+        } => {
+            runtime_secret_store(
+                service.as_ref(),
+                label.as_ref(),
+                attributes.as_ref(),
+                value.as_ref(),
+            )?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::SecretDelete {
+            service,
+            attributes,
+        } => Ok(RuntimeValue::Bool(runtime_secret_delete(
+            service.as_ref(),
+            attributes.as_ref(),
+        )?)),
+        RuntimeTaskPlan::NotificationSend {
+            app_name,
+            notification,
+            bus,
+            address,
+        } => runtime_notification_send(
+            app_name.as_ref(),
+            notification.as_ref(),
+            bus.as_ref(),
+            address.as_ref(),
+        )
+        .map(RuntimeValue::Int),
+        RuntimeTaskPlan::NotificationClose {
+            app_name,
+            id,
+            bus,
+            address,
+        } => {
+            runtime_notification_close(app_name.as_ref(), id, bus.as_ref(), address.as_ref())?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::AuthPkce { config } => runtime_auth_pkce(config.as_ref()),
+        RuntimeTaskPlan::AuthRefresh {
+            config,
+            refresh_token,
+        } => runtime_auth_refresh(config.as_ref(), refresh_token.as_ref()),
         RuntimeTaskPlan::CustomCapabilityCommand(plan) => {
             let Some(executor) = context.custom_capability_command_executor() else {
                 return Err(task_error(format!(
@@ -699,6 +794,754 @@ pub(crate) fn execute_runtime_value_with_context_with_stdio_effects(
 
 fn task_error(message: impl Into<String>) -> RuntimeTaskExecutionError {
     RuntimeTaskExecutionError::new(message)
+}
+
+fn runtime_dbus_call_error(error: glib::Error) -> RuntimeTaskExecutionError {
+    use gio::DBusError;
+
+    let message = error.message().to_string();
+    let value = match error.kind::<DBusError>() {
+        Some(DBusError::NameHasNoOwner) => {
+            runtime_dbus_error("NameNotOwned", vec![RuntimeValue::Text(message.into())])
+        }
+        Some(DBusError::ServiceUnknown) => {
+            runtime_dbus_error("ServiceUnknown", vec![RuntimeValue::Text(message.into())])
+        }
+        Some(DBusError::NoReply | DBusError::TimedOut | DBusError::Timeout) => {
+            runtime_dbus_error("NoReply", Vec::new())
+        }
+        Some(DBusError::AccessDenied) => {
+            runtime_dbus_error("AccessDenied", vec![RuntimeValue::Text(message.into())])
+        }
+        Some(DBusError::InvalidArgs) => {
+            runtime_dbus_error("InvalidArgs", vec![RuntimeValue::Text(message.into())])
+        }
+        _ => runtime_dbus_error(
+            "DbusProtocolError",
+            vec![RuntimeValue::Text(message.into())],
+        ),
+    };
+    RuntimeTaskExecutionError::new(value.to_string())
+}
+
+fn runtime_dbus_error(variant_name: &str, fields: Vec<RuntimeValue>) -> RuntimeValue {
+    RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+        item: aivi_hir::ItemId::from_raw(0),
+        type_name: "DbusError".into(),
+        variant_name: variant_name.into(),
+        fields,
+    })
+}
+
+const AIVI_SECRET_SERVICE_ATTRIBUTE: &str = "aivi.secret.service";
+const FREEDESKTOP_NOTIFICATIONS_DESTINATION: &str = "org.freedesktop.Notifications";
+const FREEDESKTOP_NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+const FREEDESKTOP_NOTIFICATIONS_INTERFACE: &str = "org.freedesktop.Notifications";
+const FREEDESKTOP_NOTIFICATIONS_DEFAULT_TIMEOUT_MS: i32 = -1;
+
+fn runtime_secret_lookup(
+    service: &str,
+    attributes: &[(Box<str>, Box<str>)],
+) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    let ss = runtime_secret_service()?;
+    let mut items = runtime_secret_search_items(&ss, service, attributes)?;
+    let Some(item) = items.pop() else {
+        return Ok(RuntimeValue::OptionNone);
+    };
+    let secret = item.get_secret().map_err(runtime_secret_error)?;
+    let secret = String::from_utf8(secret).map_err(|error| {
+        RuntimeTaskExecutionError::new(runtime_secret_protocol_error(error.to_string()).to_string())
+    })?;
+    Ok(RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(
+        secret.into_boxed_str(),
+    ))))
+}
+
+fn runtime_secret_store(
+    service: &str,
+    label: &str,
+    attributes: &[(Box<str>, Box<str>)],
+    value: &str,
+) -> Result<(), RuntimeTaskExecutionError> {
+    let ss = runtime_secret_service()?;
+    let collection = ss.get_default_collection().map_err(runtime_secret_error)?;
+    collection
+        .create_item(
+            label,
+            runtime_secret_attribute_map(service, attributes),
+            value.as_bytes(),
+            true,
+            "text/plain",
+        )
+        .map_err(runtime_secret_error)?;
+    Ok(())
+}
+
+fn runtime_secret_delete(
+    service: &str,
+    attributes: &[(Box<str>, Box<str>)],
+) -> Result<bool, RuntimeTaskExecutionError> {
+    let ss = runtime_secret_service()?;
+    let items = runtime_secret_search_items(&ss, service, attributes)?;
+    let had_items = !items.is_empty();
+    for item in items {
+        item.delete().map_err(runtime_secret_error)?;
+    }
+    Ok(had_items)
+}
+
+pub(crate) fn register_notification_id(app_name: &str, id: u32) {
+    let mut registry = notification_registry()
+        .lock()
+        .expect("notification registry mutex should not be poisoned");
+    registry.entry(app_name.into()).or_default().insert(id);
+}
+
+pub(crate) fn remove_notification_id(app_name: &str, id: u32) {
+    let mut registry = notification_registry()
+        .lock()
+        .expect("notification registry mutex should not be poisoned");
+    if let Some(ids) = registry.get_mut(app_name) {
+        ids.remove(&id);
+        if ids.is_empty() {
+            registry.remove(app_name);
+        }
+    }
+}
+
+pub(crate) fn notification_id_known(app_name: &str, id: u32) -> bool {
+    notification_registry()
+        .lock()
+        .expect("notification registry mutex should not be poisoned")
+        .get(app_name)
+        .is_some_and(|ids| ids.contains(&id))
+}
+
+fn notification_registry() -> &'static std::sync::Mutex<BTreeMap<Box<str>, BTreeSet<u32>>> {
+    static REGISTRY: std::sync::OnceLock<std::sync::Mutex<BTreeMap<Box<str>, BTreeSet<u32>>>> =
+        std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+struct RuntimeNotificationAction {
+    label: Box<str>,
+    id: Box<str>,
+}
+
+struct RuntimeNotificationRequest {
+    summary: Box<str>,
+    body: Option<Box<str>>,
+    icon: Option<Box<str>>,
+    actions: Vec<RuntimeNotificationAction>,
+}
+
+fn runtime_notification_send(
+    app_name: &str,
+    notification: &RuntimeValue,
+    bus: &str,
+    address: &str,
+) -> Result<i64, RuntimeTaskExecutionError> {
+    let request = parse_notification_request(notification)?;
+    let connection = open_dbus_connection_text(bus, (!address.is_empty()).then_some(address))
+        .map_err(runtime_notification_error)?;
+    let action_values = request
+        .actions
+        .iter()
+        .flat_map(|action| {
+            [
+                action.id.as_ref().to_variant(),
+                action.label.as_ref().to_variant(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let actions = Variant::array_from_iter_with_type(VariantTy::STRING, action_values.iter());
+    let hints = Variant::parse(
+        Some(VariantTy::new("a{sv}").expect("notification hints type should be valid")),
+        "{}",
+    )
+    .map_err(runtime_notification_error)?;
+    let reply = connection
+        .call_sync(
+            Some(FREEDESKTOP_NOTIFICATIONS_DESTINATION),
+            FREEDESKTOP_NOTIFICATIONS_PATH,
+            FREEDESKTOP_NOTIFICATIONS_INTERFACE,
+            "Notify",
+            Some(&Variant::tuple_from_iter([
+                app_name.to_variant(),
+                0_u32.to_variant(),
+                request.icon.unwrap_or_default().to_variant(),
+                request.summary.to_variant(),
+                request.body.unwrap_or_default().to_variant(),
+                actions,
+                hints,
+                FREEDESKTOP_NOTIFICATIONS_DEFAULT_TIMEOUT_MS.to_variant(),
+            ])),
+            None::<&glib::VariantTy>,
+            DBusCallFlags::NONE,
+            5_000,
+            None::<&gio::Cancellable>,
+        )
+        .map_err(runtime_notification_error)?;
+    let id = reply
+        .child_value(0)
+        .get::<u32>()
+        .ok_or_else(|| runtime_notification_error("notification reply missing id"))?;
+    register_notification_id(app_name, id);
+    Ok(i64::from(id))
+}
+
+fn runtime_notification_close(
+    app_name: &str,
+    id: i64,
+    bus: &str,
+    address: &str,
+) -> Result<(), RuntimeTaskExecutionError> {
+    let id = u32::try_from(id)
+        .map_err(|_| runtime_notification_error("notification id must fit in u32"))?;
+    let connection = open_dbus_connection_text(bus, (!address.is_empty()).then_some(address))
+        .map_err(runtime_notification_error)?;
+    connection
+        .call_sync(
+            Some(FREEDESKTOP_NOTIFICATIONS_DESTINATION),
+            FREEDESKTOP_NOTIFICATIONS_PATH,
+            FREEDESKTOP_NOTIFICATIONS_INTERFACE,
+            "CloseNotification",
+            Some(&Variant::tuple_from_iter([id.to_variant()])),
+            None::<&glib::VariantTy>,
+            DBusCallFlags::NONE,
+            5_000,
+            None::<&gio::Cancellable>,
+        )
+        .map_err(runtime_notification_error)?;
+    remove_notification_id(app_name, id);
+    Ok(())
+}
+
+fn parse_notification_request(
+    notification: &RuntimeValue,
+) -> Result<RuntimeNotificationRequest, RuntimeTaskExecutionError> {
+    let RuntimeValue::Record(fields) = notification else {
+        return Err(runtime_notification_error(
+            "notification payload must be a Notification record",
+        ));
+    };
+    let summary = runtime_record_text_field(fields, "summary")?;
+    let body = runtime_record_optional_text_field(fields, "body")?;
+    let icon = runtime_record_optional_text_field(fields, "icon")?;
+    let actions = match runtime_record_field(fields, "actions") {
+        Some(RuntimeValue::List(actions)) => actions
+            .iter()
+            .map(parse_notification_action)
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(runtime_notification_error(
+                "notification payload field `actions` must be List NotificationAction",
+            ));
+        }
+    };
+    Ok(RuntimeNotificationRequest {
+        summary,
+        body,
+        icon,
+        actions,
+    })
+}
+
+fn parse_notification_action(
+    value: &RuntimeValue,
+) -> Result<RuntimeNotificationAction, RuntimeTaskExecutionError> {
+    let RuntimeValue::Record(fields) = value else {
+        return Err(runtime_notification_error(
+            "notification actions must be NotificationAction records",
+        ));
+    };
+    Ok(RuntimeNotificationAction {
+        label: runtime_record_text_field(fields, "label")?,
+        id: runtime_record_text_field(fields, "id")?,
+    })
+}
+
+fn runtime_secret_service() -> Result<SecretService<'static>, RuntimeTaskExecutionError> {
+    SecretService::connect(EncryptionType::Dh).map_err(runtime_secret_error)
+}
+
+fn runtime_secret_search_items<'a>(
+    ss: &'a SecretService<'a>,
+    service: &str,
+    attributes: &[(Box<str>, Box<str>)],
+) -> Result<Vec<secret_service::blocking::Item<'a>>, RuntimeTaskExecutionError> {
+    let search = ss
+        .search_items(runtime_secret_attribute_map(service, attributes))
+        .map_err(runtime_secret_error)?;
+    let mut items = search.unlocked;
+    for item in search.locked {
+        item.unlock().map_err(runtime_secret_error)?;
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn runtime_secret_attribute_map<'a>(
+    service: &'a str,
+    attributes: &'a [(Box<str>, Box<str>)],
+) -> std::collections::HashMap<&'a str, &'a str> {
+    let mut mapped = std::collections::HashMap::with_capacity(attributes.len() + 1);
+    mapped.insert(AIVI_SECRET_SERVICE_ATTRIBUTE, service);
+    for (key, value) in attributes {
+        mapped.insert(key.as_ref(), value.as_ref());
+    }
+    mapped
+}
+
+fn runtime_secret_error(error: secret_service::Error) -> RuntimeTaskExecutionError {
+    let value = match error {
+        secret_service::Error::Unavailable => runtime_secret_sum(
+            "SecretUnavailable",
+            vec![RuntimeValue::Text("secret service unavailable".into())],
+        ),
+        secret_service::Error::Locked => runtime_secret_sum("SecretLocked", Vec::new()),
+        secret_service::Error::Prompt => runtime_secret_sum("SecretCancelled", Vec::new()),
+        other => runtime_secret_protocol_error(other.to_string()),
+    };
+    RuntimeTaskExecutionError::new(value.to_string())
+}
+
+fn runtime_secret_protocol_error(message: String) -> RuntimeValue {
+    runtime_secret_sum(
+        "SecretProtocolError",
+        vec![RuntimeValue::Text(message.into_boxed_str())],
+    )
+}
+
+fn runtime_secret_sum(variant_name: &str, fields: Vec<RuntimeValue>) -> RuntimeValue {
+    RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+        item: aivi_hir::ItemId::from_raw(0),
+        type_name: "SecretError".into(),
+        variant_name: variant_name.into(),
+        fields,
+    })
+}
+
+const PKCE_CALLBACK_HOST: &str = "127.0.0.1";
+const PKCE_CALLBACK_PATH: &str = "/callback";
+const PKCE_TIMEOUT: Duration = Duration::from_secs(180);
+
+struct RuntimePkceConfig {
+    client_id: Box<str>,
+    auth_endpoint: Box<str>,
+    token_endpoint: Box<str>,
+    scopes: Vec<Box<str>>,
+    redirect_port: u16,
+}
+
+fn runtime_auth_pkce(config: &RuntimeValue) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    let config = parse_pkce_config(config)?;
+    let redirect_uri = pkce_redirect_uri(config.redirect_port);
+    let state = pkce_random_token(24);
+    let verifier = pkce_random_token(64);
+    let challenge = pkce_code_challenge(&verifier);
+    let listener = TcpListener::bind((PKCE_CALLBACK_HOST, config.redirect_port))
+        .map_err(runtime_pkce_network_error)?;
+    listener
+        .set_nonblocking(true)
+        .map_err(runtime_pkce_network_error)?;
+
+    let mut auth_url = Url::parse(config.auth_endpoint.as_ref())
+        .map_err(|error| runtime_pkce_invalid_response(error.to_string()))?;
+    {
+        let mut query = auth_url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", config.client_id.as_ref());
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("scope", &config.scopes.join(" "));
+        query.append_pair("code_challenge", &challenge);
+        query.append_pair("code_challenge_method", "S256");
+        query.append_pair("state", &state);
+    }
+
+    runtime_launch_browser(auth_url.as_ref())?;
+    let callback = runtime_wait_for_pkce_callback(&listener)?;
+    if let Some(error) = callback.error {
+        return match error.as_ref() {
+            "access_denied" => Err(runtime_pkce_error("UserCancelled", Vec::new())),
+            _ => Err(runtime_pkce_invalid_response(error.into_string())),
+        };
+    }
+    if callback.state != state {
+        return Err(runtime_pkce_invalid_response(
+            "PKCE callback state mismatch".to_owned(),
+        ));
+    }
+    let code = callback
+        .code
+        .ok_or_else(|| runtime_pkce_invalid_response("PKCE callback missing code".to_owned()))?;
+
+    runtime_exchange_pkce_token(
+        &config,
+        &[
+            ("grant_type", "authorization_code"),
+            ("client_id", config.client_id.as_ref()),
+            ("code", code.as_ref()),
+            ("redirect_uri", redirect_uri.as_ref()),
+            ("code_verifier", verifier.as_ref()),
+        ],
+        None,
+    )
+}
+
+fn runtime_auth_refresh(
+    config: &RuntimeValue,
+    refresh_token: &str,
+) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    let config = parse_pkce_config(config)?;
+    runtime_exchange_pkce_token(
+        &config,
+        &[
+            ("grant_type", "refresh_token"),
+            ("client_id", config.client_id.as_ref()),
+            ("refresh_token", refresh_token),
+        ],
+        Some(refresh_token),
+    )
+}
+
+fn runtime_exchange_pkce_token(
+    config: &RuntimePkceConfig,
+    params: &[(&str, &str)],
+    fallback_refresh_token: Option<&str>,
+) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(params.iter().copied())
+        .finish();
+    let response = ureq::post(config.token_endpoint.as_ref())
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&body)
+        .map_err(|error| runtime_pkce_network_error(error.to_string()))?;
+    let payload = response.into_string().map_err(runtime_pkce_network_error)?;
+    let json: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|error| runtime_pkce_invalid_response(error.to_string()))?;
+    runtime_pkce_token_from_json(&json, fallback_refresh_token)
+}
+
+struct PkceCallback {
+    code: Option<Box<str>>,
+    state: Box<str>,
+    error: Option<Box<str>>,
+}
+
+fn runtime_wait_for_pkce_callback(
+    listener: &TcpListener,
+) -> Result<PkceCallback, RuntimeTaskExecutionError> {
+    let deadline = Instant::now() + PKCE_TIMEOUT;
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut request = String::new();
+                {
+                    let mut reader = BufReader::new(&mut stream);
+                    loop {
+                        let mut line = String::new();
+                        let bytes = reader
+                            .read_line(&mut line)
+                            .map_err(runtime_pkce_network_error)?;
+                        if bytes == 0 {
+                            break;
+                        }
+                        request.push_str(&line);
+                        if line == "\r\n" {
+                            break;
+                        }
+                    }
+                }
+                let callback = parse_pkce_callback_request(&request)?;
+                let response_body = if callback.error.is_some() {
+                    "Authentication failed. You can close this window."
+                } else {
+                    "Authentication complete. You can close this window."
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .map_err(runtime_pkce_network_error)?;
+                return Ok(callback);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(runtime_pkce_error("PkceTimeout", Vec::new()));
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(runtime_pkce_network_error(error)),
+        }
+    }
+}
+
+fn parse_pkce_callback_request(request: &str) -> Result<PkceCallback, RuntimeTaskExecutionError> {
+    let first_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| runtime_pkce_invalid_response("empty PKCE callback request".to_owned()))?;
+    let path = first_line.split_whitespace().nth(1).ok_or_else(|| {
+        runtime_pkce_invalid_response("malformed PKCE callback request".to_owned())
+    })?;
+    let url = Url::parse(&format!("http://{PKCE_CALLBACK_HOST}{path}"))
+        .map_err(|error| runtime_pkce_invalid_response(error.to_string()))?;
+    let mut code = None;
+    let mut state = None;
+    let mut error = None;
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = Some(value.into_owned().into_boxed_str()),
+            "state" => state = Some(value.into_owned().into_boxed_str()),
+            "error" => error = Some(value.into_owned().into_boxed_str()),
+            _ => {}
+        }
+    }
+    Ok(PkceCallback {
+        code,
+        state: state.ok_or_else(|| {
+            runtime_pkce_invalid_response("PKCE callback missing state".to_owned())
+        })?,
+        error,
+    })
+}
+
+fn runtime_launch_browser(url: &str) -> Result<(), RuntimeTaskExecutionError> {
+    #[cfg(test)]
+    {
+        let opener = TEST_BROWSER_OPENER
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .expect("test browser opener mutex should not be poisoned")
+            .as_ref()
+            .copied();
+        if let Some(opener) = opener {
+            opener(url).map_err(runtime_pkce_network_error)?;
+            return Ok(());
+        }
+    }
+    let status = Command::new("xdg-open")
+        .arg(url)
+        .status()
+        .map_err(runtime_pkce_network_error)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(runtime_pkce_network_error(format!(
+            "xdg-open exited with status {status}"
+        )))
+    }
+}
+
+fn parse_pkce_config(
+    config: &RuntimeValue,
+) -> Result<RuntimePkceConfig, RuntimeTaskExecutionError> {
+    let RuntimeValue::Record(fields) = config else {
+        return Err(runtime_pkce_invalid_response(
+            "PKCE config must be a record".to_owned(),
+        ));
+    };
+    let client_id = runtime_record_text_field(fields, "clientId")?;
+    let auth_endpoint = runtime_record_text_field(fields, "authEndpoint")?;
+    let token_endpoint = runtime_record_text_field(fields, "tokenEndpoint")?;
+    let scopes_value = runtime_record_field(fields, "scopes")
+        .ok_or_else(|| runtime_pkce_invalid_response("PKCE config missing scopes".to_owned()))?;
+    let RuntimeValue::List(scopes) = scopes_value else {
+        return Err(runtime_pkce_invalid_response(
+            "PKCE config scopes must be List Text".to_owned(),
+        ));
+    };
+    let scopes = scopes
+        .iter()
+        .map(|scope| match scope {
+            RuntimeValue::Text(text) => Ok(text.clone()),
+            _ => Err(runtime_pkce_invalid_response(
+                "PKCE config scopes must be List Text".to_owned(),
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let redirect_port = runtime_record_int_field(fields, "redirectPort")?;
+    let redirect_port = u16::try_from(redirect_port).map_err(|_| {
+        runtime_pkce_invalid_response("PKCE redirectPort must fit in u16".to_owned())
+    })?;
+    Ok(RuntimePkceConfig {
+        client_id,
+        auth_endpoint,
+        token_endpoint,
+        scopes,
+        redirect_port,
+    })
+}
+
+fn runtime_pkce_token_from_json(
+    json: &serde_json::Value,
+    fallback_refresh_token: Option<&str>,
+) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    let Some(access_token) = json.get("access_token").and_then(serde_json::Value::as_str) else {
+        return Err(runtime_pkce_invalid_response(
+            "token response missing access_token".to_owned(),
+        ));
+    };
+    let refresh_token = json
+        .get("refresh_token")
+        .and_then(serde_json::Value::as_str)
+        .map(|token| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(token.into()))))
+        .or_else(|| {
+            fallback_refresh_token
+                .map(|token| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(token.into()))))
+        })
+        .unwrap_or(RuntimeValue::OptionNone);
+    let expires_at = json
+        .get("expires_in")
+        .and_then(serde_json::Value::as_i64)
+        .map(|seconds| {
+            RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(
+                current_unix_ms().saturating_add(seconds.saturating_mul(1000)),
+            )))
+        })
+        .unwrap_or(RuntimeValue::OptionNone);
+    Ok(RuntimeValue::Record(vec![
+        aivi_backend::RuntimeRecordField {
+            label: "accessToken".into(),
+            value: RuntimeValue::Text(access_token.into()),
+        },
+        aivi_backend::RuntimeRecordField {
+            label: "refreshToken".into(),
+            value: refresh_token,
+        },
+        aivi_backend::RuntimeRecordField {
+            label: "expiresAt".into(),
+            value: expires_at,
+        },
+    ]))
+}
+
+fn runtime_record_field<'a>(
+    fields: &'a [aivi_backend::RuntimeRecordField],
+    label: &str,
+) -> Option<&'a RuntimeValue> {
+    fields
+        .iter()
+        .find(|field| field.label.as_ref() == label)
+        .map(|field| &field.value)
+}
+
+fn runtime_record_text_field(
+    fields: &[aivi_backend::RuntimeRecordField],
+    label: &str,
+) -> Result<Box<str>, RuntimeTaskExecutionError> {
+    match runtime_record_field(fields, label) {
+        Some(RuntimeValue::Text(text)) => Ok(text.clone()),
+        _ => Err(runtime_pkce_invalid_response(format!(
+            "PKCE config field `{label}` must be Text"
+        ))),
+    }
+}
+
+fn runtime_record_optional_text_field(
+    fields: &[aivi_backend::RuntimeRecordField],
+    label: &str,
+) -> Result<Option<Box<str>>, RuntimeTaskExecutionError> {
+    match runtime_record_field(fields, label) {
+        Some(RuntimeValue::OptionSome(value)) => match value.as_ref() {
+            RuntimeValue::Text(text) => Ok(Some(text.clone())),
+            _ => Err(runtime_notification_error(format!(
+                "notification payload field `{label}` must be Option Text"
+            ))),
+        },
+        Some(RuntimeValue::OptionNone) => Ok(None),
+        _ => Err(runtime_notification_error(format!(
+            "notification payload field `{label}` must be Option Text"
+        ))),
+    }
+}
+
+fn runtime_record_int_field(
+    fields: &[aivi_backend::RuntimeRecordField],
+    label: &str,
+) -> Result<i64, RuntimeTaskExecutionError> {
+    match runtime_record_field(fields, label) {
+        Some(RuntimeValue::Int(value)) => Ok(*value),
+        _ => Err(runtime_pkce_invalid_response(format!(
+            "PKCE config field `{label}` must be Int"
+        ))),
+    }
+}
+
+fn pkce_redirect_uri(port: u16) -> Box<str> {
+    format!("http://{PKCE_CALLBACK_HOST}:{port}{PKCE_CALLBACK_PATH}").into_boxed_str()
+}
+
+fn pkce_random_token(length: usize) -> Box<str> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let token = (0..length)
+        .map(|_| {
+            let index = fastrand::usize(..ALPHABET.len());
+            ALPHABET[index] as char
+        })
+        .collect::<String>();
+    token.into_boxed_str()
+}
+
+fn pkce_code_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn current_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(i64::MAX)
+}
+
+fn runtime_pkce_network_error(error: impl fmt::Display) -> RuntimeTaskExecutionError {
+    runtime_pkce_error(
+        "NetworkError",
+        vec![RuntimeValue::Text(error.to_string().into_boxed_str())],
+    )
+}
+
+fn runtime_notification_error(error: impl fmt::Display) -> RuntimeTaskExecutionError {
+    RuntimeTaskExecutionError::new(format!("NotificationFailed {error}"))
+}
+
+fn runtime_pkce_invalid_response(message: String) -> RuntimeTaskExecutionError {
+    runtime_pkce_error(
+        "InvalidResponse",
+        vec![RuntimeValue::Text(message.into_boxed_str())],
+    )
+}
+
+fn runtime_pkce_error(variant_name: &str, fields: Vec<RuntimeValue>) -> RuntimeTaskExecutionError {
+    RuntimeTaskExecutionError::new(
+        RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+            item: aivi_hir::ItemId::from_raw(0),
+            type_name: "PkceError".into(),
+            variant_name: variant_name.into(),
+            fields,
+        })
+        .to_string(),
+    )
+}
+
+#[cfg(test)]
+static TEST_BROWSER_OPENER: std::sync::OnceLock<
+    std::sync::Mutex<Option<fn(&str) -> Result<(), String>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn set_test_browser_opener(opener: Option<fn(&str) -> Result<(), String>>) {
+    *TEST_BROWSER_OPENER
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .expect("test browser opener mutex should not be poisoned") = opener;
 }
 
 fn execute_runtime_db_task_plan_with_effects(
@@ -973,7 +1816,15 @@ fn read_os_random_bytes(count: usize) -> Result<Box<[u8]>, RuntimeTaskExecutionE
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc};
+    use std::{
+        collections::BTreeSet,
+        fs,
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        path::PathBuf,
+        sync::{Arc, Mutex, OnceLock},
+        thread,
+    };
 
     use aivi_backend::{
         RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan, RuntimeDbConnection,
@@ -987,6 +1838,8 @@ mod tests {
         execute_runtime_value_with_effects,
     };
     use crate::SourceProviderContext;
+
+    static AUTH_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     #[derive(Default)]
     struct EchoCustomCapabilityCommandExecutor;
@@ -1037,6 +1890,73 @@ mod tests {
             "aivi-runtime-task-{prefix}-{}-{unique}.sqlite",
             std::process::id()
         ))
+    }
+
+    fn auth_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        AUTH_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("auth test mutex should not be poisoned")
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+        let mut reader = BufReader::new(stream);
+        let mut request = String::new();
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            let bytes = reader
+                .read_line(&mut line)
+                .expect("request line should read");
+            if bytes == 0 {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                content_length = value.trim().parse().expect("content-length should parse");
+            }
+            request.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        if content_length > 0 {
+            let mut body = vec![0u8; content_length];
+            reader
+                .read_exact(&mut body)
+                .expect("request body should read");
+            request.push_str(&String::from_utf8(body).expect("request body should be utf-8"));
+        }
+        request
+    }
+
+    fn pkce_config(auth_endpoint: &str, token_endpoint: &str, redirect_port: u16) -> RuntimeValue {
+        RuntimeValue::Record(vec![
+            aivi_backend::RuntimeRecordField {
+                label: "clientId".into(),
+                value: RuntimeValue::Text("desktop-client".into()),
+            },
+            aivi_backend::RuntimeRecordField {
+                label: "authEndpoint".into(),
+                value: RuntimeValue::Text(auth_endpoint.into()),
+            },
+            aivi_backend::RuntimeRecordField {
+                label: "tokenEndpoint".into(),
+                value: RuntimeValue::Text(token_endpoint.into()),
+            },
+            aivi_backend::RuntimeRecordField {
+                label: "scopes".into(),
+                value: RuntimeValue::List(vec![
+                    RuntimeValue::Text("mail.read".into()),
+                    RuntimeValue::Text("mail.send".into()),
+                ]),
+            },
+            aivi_backend::RuntimeRecordField {
+                label: "redirectPort".into(),
+                value: RuntimeValue::Int(i64::from(redirect_port)),
+            },
+        ])
     }
 
     #[test]
@@ -1365,5 +2285,266 @@ mod tests {
         assert!(stdout.is_empty());
         assert!(stderr.is_empty());
         let _ = fs::remove_file(&database);
+    }
+
+    #[test]
+    fn execute_runtime_task_plan_calls_dbus_methods_and_decodes_reply_values() {
+        if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            return;
+        }
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let value = execute_runtime_task_plan(
+            RuntimeTaskPlan::DbusCall {
+                destination: "org.freedesktop.DBus".into(),
+                path: "/org/freedesktop/DBus".into(),
+                interface: "org.freedesktop.DBus".into(),
+                member: "ListNames".into(),
+                body: Box::new([]),
+                bus: "session".into(),
+                address: "".into(),
+            },
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect("D-Bus call should execute");
+
+        let RuntimeValue::List(reply) = value else {
+            panic!("D-Bus call should decode to a list of DbusValue arguments");
+        };
+        let [RuntimeValue::Sum(names)] = reply.as_slice() else {
+            panic!("ListNames should return one D-Bus argument");
+        };
+        assert_eq!(names.variant_name.as_ref(), "DbusList");
+        let [RuntimeValue::List(entries)] = names.fields.as_slice() else {
+            panic!("ListNames should decode as DbusList payload");
+        };
+        assert!(
+            entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    RuntimeValue::Sum(sum)
+                        if sum.variant_name.as_ref() == "DbusString"
+                            && matches!(sum.fields.as_slice(), [RuntimeValue::Text(text)] if text.as_ref() == "org.freedesktop.DBus")
+                )
+            }),
+            "reply should include org.freedesktop.DBus in returned names"
+        );
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn execute_runtime_task_plan_surfaces_dbus_errors_as_dbuserror_values() {
+        if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            return;
+        }
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let error = execute_runtime_task_plan(
+            RuntimeTaskPlan::DbusCall {
+                destination: "org.aivi.DoesNotExist".into(),
+                path: "/org/aivi/DoesNotExist".into(),
+                interface: "org.aivi.DoesNotExist".into(),
+                member: "Ping".into(),
+                body: Box::new([]),
+                bus: "session".into(),
+                address: "".into(),
+            },
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect_err("unknown D-Bus services should fail");
+
+        assert!(
+            error.to_string().starts_with("ServiceUnknown ")
+                || error.to_string().starts_with("NameNotOwned ")
+                || error.to_string().starts_with("DbusProtocolError "),
+            "expected structured D-Bus error, found {}",
+            error
+        );
+    }
+
+    #[test]
+    fn execute_runtime_task_plan_runs_pkce_browser_flow() {
+        let _guard = auth_test_lock();
+        let token_listener = TcpListener::bind("127.0.0.1:0").expect("token listener should bind");
+        let token_port = token_listener
+            .local_addr()
+            .expect("token listener addr should resolve")
+            .port();
+        let token_thread = thread::spawn(move || {
+            let (mut stream, _) = token_listener
+                .accept()
+                .expect("token request should connect");
+            let request = read_http_request(&mut stream);
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .expect("token request should contain a body");
+            assert!(
+                body.contains("grant_type=authorization_code"),
+                "expected authorization_code grant, found {body}"
+            );
+            assert!(
+                body.contains("code=test-code"),
+                "expected test code, found {body}"
+            );
+            assert!(
+                body.contains("code_verifier="),
+                "expected code verifier in token request, found {body}"
+            );
+            let payload =
+                r#"{"access_token":"access-123","refresh_token":"refresh-456","expires_in":3600}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            )
+            .expect("token response should write");
+        });
+
+        let redirect_probe = TcpListener::bind("127.0.0.1:0").expect("redirect probe should bind");
+        let redirect_port = redirect_probe
+            .local_addr()
+            .expect("redirect probe addr should resolve")
+            .port();
+        drop(redirect_probe);
+
+        fn mock_browser_callback(url: &str) -> Result<(), String> {
+            let parsed = url::Url::parse(url).map_err(|error| error.to_string())?;
+            let redirect_uri = parsed
+                .query_pairs()
+                .find_map(|(key, value)| (key == "redirect_uri").then(|| value.into_owned()))
+                .ok_or_else(|| "missing redirect_uri".to_owned())?;
+            let state = parsed
+                .query_pairs()
+                .find_map(|(key, value)| (key == "state").then(|| value.into_owned()))
+                .ok_or_else(|| "missing state".to_owned())?;
+            let callback = format!("{redirect_uri}?code=test-code&state={state}");
+            thread::spawn(move || {
+                let _ = ureq::get(&callback).call();
+            });
+            Ok(())
+        }
+        super::set_test_browser_opener(Some(mock_browser_callback));
+        struct TestBrowserOpenerGuard;
+        impl Drop for TestBrowserOpenerGuard {
+            fn drop(&mut self) {
+                super::set_test_browser_opener(None);
+            }
+        }
+        let _opener_guard = TestBrowserOpenerGuard;
+        let token_endpoint = format!("http://127.0.0.1:{token_port}/token");
+        let config = pkce_config(
+            "https://auth.example/authorize",
+            &token_endpoint,
+            redirect_port,
+        );
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let value = execute_runtime_task_plan(
+            RuntimeTaskPlan::AuthPkce {
+                config: Box::new(config),
+            },
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect("PKCE flow should succeed");
+        token_thread.join().expect("token thread should finish");
+
+        let RuntimeValue::Record(fields) = value else {
+            panic!("PKCE flow should return token record");
+        };
+        assert!(matches!(
+            super::runtime_record_field(&fields, "accessToken"),
+            Some(RuntimeValue::Text(token)) if token.as_ref() == "access-123"
+        ));
+        assert!(matches!(
+            super::runtime_record_field(&fields, "refreshToken"),
+            Some(RuntimeValue::OptionSome(inner))
+                if matches!(inner.as_ref(), RuntimeValue::Text(token) if token.as_ref() == "refresh-456")
+        ));
+        assert!(matches!(
+            super::runtime_record_field(&fields, "expiresAt"),
+            Some(RuntimeValue::OptionSome(inner)) if matches!(inner.as_ref(), RuntimeValue::Int(_))
+        ));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn execute_runtime_task_plan_refreshes_pkce_tokens() {
+        let token_listener = TcpListener::bind("127.0.0.1:0").expect("token listener should bind");
+        let token_port = token_listener
+            .local_addr()
+            .expect("token listener addr should resolve")
+            .port();
+        let token_thread = thread::spawn(move || {
+            let (mut stream, _) = token_listener
+                .accept()
+                .expect("refresh request should connect");
+            let mut buffer = [0u8; 4096];
+            let read = stream
+                .read(&mut buffer)
+                .expect("refresh request should read");
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .expect("refresh request should contain a body");
+            assert!(
+                body.contains("grant_type=refresh_token"),
+                "expected refresh grant, found {body}"
+            );
+            assert!(
+                body.contains("refresh_token=refresh-old"),
+                "expected refresh token in request, found {body}"
+            );
+            let payload = r#"{"access_token":"access-new","expires_in":1800}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            )
+            .expect("refresh response should write");
+        });
+
+        let config = pkce_config(
+            "https://auth.example/authorize",
+            &format!("http://127.0.0.1:{token_port}/token"),
+            43123,
+        );
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let value = execute_runtime_task_plan(
+            RuntimeTaskPlan::AuthRefresh {
+                config: Box::new(config),
+                refresh_token: "refresh-old".into(),
+            },
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect("refresh flow should succeed");
+        token_thread.join().expect("refresh thread should finish");
+
+        let RuntimeValue::Record(fields) = value else {
+            panic!("refresh flow should return token record");
+        };
+        assert!(matches!(
+            super::runtime_record_field(&fields, "accessToken"),
+            Some(RuntimeValue::Text(token)) if token.as_ref() == "access-new"
+        ));
+        assert!(matches!(
+            super::runtime_record_field(&fields, "refreshToken"),
+            Some(RuntimeValue::OptionSome(inner))
+                if matches!(inner.as_ref(), RuntimeValue::Text(token) if token.as_ref() == "refresh-old")
+        ));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
     }
 }

@@ -482,6 +482,178 @@ signal next = increment base
 }
 
 #[test]
+fn linked_runtime_stages_signal_wrappers_for_native_signal_lifted_calls() {
+    let lowered = lower_text(
+        "runtime-startup-native-signal-lifted-call.aivi",
+        r#"
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+func describe = state => state
+ ||> Owned  -> "owned"
+ ||> Queued -> "queued"
+ ||> Lost   -> "lost"
+
+signal busState = Queued
+signal status = busState |> describe
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let status_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "status"))
+        .expect("status signal binding should exist")
+        .derived()
+        .expect("status should be a derived signal");
+    assert!(
+        matches!(
+            linked
+                .derived_signal(status_signal)
+                .expect("status derived signal should link")
+                .eval_lane,
+            LinkedEvalLane::Native(_)
+        ),
+        "signal-lifted derived signal should link onto the native lane"
+    );
+
+    linked.tick().expect("linked runtime tick should succeed");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(status_signal.as_signal())
+            .expect("status signal lookup should succeed"),
+        Some(&RuntimeValue::Text("queued".into()))
+    );
+}
+
+#[test]
+fn linked_runtime_coerces_signal_arguments_to_exact_signal_layouts() {
+    let lowered = lower_text(
+        "runtime-startup-exact-signal-call-layouts.aivi",
+        r#"
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+fun keep:(Signal BusNameState) = state:(Signal BusNameState)=> state
+
+func describe = state => state
+ ||> Owned  -> "owned"
+ ||> Queued -> "queued"
+ ||> Lost   -> "lost"
+
+signal busState = Queued
+signal status = keep busState |> describe
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let status_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "status"))
+        .expect("status signal binding should exist")
+        .derived()
+        .expect("status should be a derived signal");
+
+    linked.tick().expect("linked runtime tick should succeed");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(status_signal.as_signal())
+            .expect("status signal lookup should succeed"),
+        Some(&RuntimeValue::Text("queued".into()))
+    );
+}
+
+#[test]
+fn linked_runtime_stages_source_signal_wrappers_for_native_lifted_calls() {
+    let lowered = lower_text(
+        "runtime-startup-source-signal-lifted-call.aivi",
+        r#"
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+@source dbus.ownName "org.aivi.Test"
+signal busState : Signal BusNameState
+
+func describe = state => state
+ ||> Owned  -> "owned"
+ ||> Queued -> "queued"
+ ||> Lost   -> "lost"
+
+signal status = busState |> describe
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let bus_state_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "busState"))
+        .expect("busState signal binding should exist")
+        .signal();
+    let source_binding = linked
+        .source_bindings()
+        .find(|binding| binding.signal == bus_state_signal)
+        .cloned()
+        .expect("busState should have a source binding");
+    let status_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "status"))
+        .expect("status signal binding should exist")
+        .derived()
+        .expect("status should be a derived signal");
+    let stamp = linked
+        .runtime_mut()
+        .advance_generation(source_binding.input)
+        .expect("source input should advance");
+    linked
+        .runtime_mut()
+        .queue_publication(Publication::new(
+            stamp,
+            RuntimeValue::Sum(RuntimeSumValue {
+                item: item_id(lowered.hir.module(), "BusNameState"),
+                type_name: "BusNameState".into(),
+                variant_name: "Queued".into(),
+                fields: vec![],
+            }),
+        ))
+        .expect("source publication should queue");
+
+    linked.tick().expect("linked runtime tick should succeed");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(status_signal.as_signal())
+            .expect("status signal lookup should succeed"),
+        Some(&RuntimeValue::Text("queued".into()))
+    );
+}
+
+#[test]
 fn linked_runtime_executes_payload_sensitive_text_option_bodies_on_native_lane() {
     let lowered = lower_text(
         "runtime-startup-derived-fallback-lane.aivi",

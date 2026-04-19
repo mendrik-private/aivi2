@@ -39,6 +39,7 @@ pub enum BuiltinSourceProvider {
     DbusSignal,
     DbusMethod,
     DbusEmit,
+    NotificationsEvents,
     WindowKeyDown,
     GtkDarkMode,
     GtkClipboard,
@@ -58,7 +59,7 @@ pub enum BuiltinSourceProvider {
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 43] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -85,6 +86,7 @@ impl BuiltinSourceProvider {
         Self::DbusSignal,
         Self::DbusMethod,
         Self::DbusEmit,
+        Self::NotificationsEvents,
         Self::WindowKeyDown,
         Self::GtkDarkMode,
         Self::GtkClipboard,
@@ -131,6 +133,7 @@ impl BuiltinSourceProvider {
             "dbus.signal" => Some(Self::DbusSignal),
             "dbus.method" => Some(Self::DbusMethod),
             "dbus.emit" => Some(Self::DbusEmit),
+            "notifications.events" => Some(Self::NotificationsEvents),
             "window.keyDown" => Some(Self::WindowKeyDown),
             "gtk.darkMode" => Some(Self::GtkDarkMode),
             "clipboard.changed" => Some(Self::GtkClipboard),
@@ -179,6 +182,7 @@ impl BuiltinSourceProvider {
             Self::DbusSignal => "dbus.signal",
             Self::DbusMethod => "dbus.method",
             Self::DbusEmit => "dbus.emit",
+            Self::NotificationsEvents => "notifications.events",
             Self::WindowKeyDown => "window.keyDown",
             Self::GtkDarkMode => "gtk.darkMode",
             Self::GtkClipboard => "clipboard.changed",
@@ -275,6 +279,12 @@ impl BuiltinSourceProvider {
             Self::DbusEmit => {
                 SourceContract::new(self, dbus_emit_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
+            Self::NotificationsEvents => SourceContract::new(
+                self,
+                notifications_events_options(),
+                DBUS_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -692,6 +702,7 @@ pub enum SourceNominalType {
     DecodeMode,
     Duration,
     DbError,
+    DbusValue,
     FsWatchEvent,
     Path,
     Retry,
@@ -705,6 +716,7 @@ impl SourceNominalType {
             Self::DecodeMode => "DecodeMode",
             Self::Duration => "Duration",
             Self::DbError => "DbError",
+            Self::DbusValue => "DbusValue",
             Self::FsWatchEvent => "FsWatchEvent",
             Self::Path => "Path",
             Self::Retry => "Retry",
@@ -1029,11 +1041,16 @@ fn dbus_method_options() -> &'static [SourceOptionContract] {
             SourceOptionContract::new("interface", SourceContractType::text()),
             SourceOptionContract::new("member", SourceContractType::text()),
             SourceOptionContract::new("reply", SourceContractType::text()),
+            SourceOptionContract::new(
+                "replyValues",
+                SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::DbusValue)),
+            ),
         ]
     })
 }
 
 static DBUS_EMIT_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+static NOTIFICATIONS_EVENTS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 
 fn dbus_emit_options() -> &'static [SourceOptionContract] {
     DBUS_EMIT_OPTIONS_STORAGE.get_or_init(|| {
@@ -1044,6 +1061,10 @@ fn dbus_emit_options() -> &'static [SourceOptionContract] {
             SourceOptionContract::new("member", SourceContractType::text()),
             SourceOptionContract::new("body", SourceContractType::text()),
             SourceOptionContract::new(
+                "bodyValues",
+                SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::DbusValue)),
+            ),
+            SourceOptionContract::new(
                 "refreshOn",
                 SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
             ),
@@ -1051,6 +1072,15 @@ fn dbus_emit_options() -> &'static [SourceOptionContract] {
                 "activeWhen",
                 SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
             ),
+        ]
+    })
+}
+
+fn notifications_events_options() -> &'static [SourceOptionContract] {
+    NOTIFICATIONS_EVENTS_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new("address", SourceContractType::text()),
         ]
     })
 }
@@ -1227,6 +1257,8 @@ mod tests {
     fn exposes_dbus_source_option_contract_types() {
         let own_name = BuiltinSourceProvider::DbusOwnName.contract();
         let signal = BuiltinSourceProvider::DbusSignal.contract();
+        let method = BuiltinSourceProvider::DbusMethod.contract();
+        let emit = BuiltinSourceProvider::DbusEmit.contract();
 
         assert_eq!(
             own_name.option("bus").map(|option| option.ty()),
@@ -1241,6 +1273,18 @@ mod tests {
         assert_eq!(
             signal.option("bus").map(|option| option.ty()),
             Some(SourceContractType::text())
+        );
+        assert_eq!(
+            method.option("replyValues").map(|option| option.ty()),
+            Some(SourceContractType::list(SourceTypeAtom::nominal(
+                SourceNominalType::DbusValue,
+            )))
+        );
+        assert_eq!(
+            emit.option("bodyValues").map(|option| option.ty()),
+            Some(SourceContractType::list(SourceTypeAtom::nominal(
+                SourceNominalType::DbusValue,
+            )))
         );
         assert_eq!(
             own_name.intrinsic_wakeup(),

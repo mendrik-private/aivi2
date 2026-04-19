@@ -8,8 +8,8 @@ use crate::{
     DecoratorPayload, Expr, ExprId, ExprKind, ImportBinding, ImportBindingMetadata,
     ImportBindingResolution, ImportId, ImportValueType, IntrinsicValue, Item, ItemId, Module, Name,
     NamePath, NonEmpty, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
-    ResolutionState, SignalItem, SourceDecorator, SourceProviderRef, TermReference,
-    TermResolution, TypeKind, TypeResolution, ValueItem,
+    ResolutionState, SignalItem, SourceDecorator, SourceProviderRef, TermReference, TermResolution,
+    TypeKind, TypeResolution, ValueItem,
     custom_source_capabilities::{
         CustomSourceCapabilityKind, resolve_custom_source_capability_member,
     },
@@ -19,23 +19,26 @@ pub(crate) fn is_builtin_source_capability_family_path(path: &NamePath) -> bool 
     if path.segments().len() != 1 {
         return false;
     }
-        matches!(
-            path.segments().first().text(),
-            "fs" | "http"
-                | "db"
-                | "env"
+    matches!(
+        path.segments().first().text(),
+        "fs" | "http"
+            | "db"
+            | "auth"
+            | "secret"
+            | "env"
             | "log"
             | "stdio"
             | "random"
             | "process"
             | "path"
             | "dbus"
-                | "imap"
-                | "smtp"
-                | "time"
-                | "tray"
-                | "api"
-        )
+            | "imap"
+            | "smtp"
+            | "time"
+            | "tray"
+            | "notifications"
+            | "api"
+    )
 }
 
 pub(crate) fn elaborate_capability_handles(module: &mut Module, diagnostics: &mut Vec<Diagnostic>) {
@@ -62,6 +65,8 @@ enum BuiltinCapabilityFamily {
     Fs,
     Http,
     Db,
+    Auth,
+    Secret,
     Env,
     Log,
     Stdio,
@@ -73,6 +78,7 @@ enum BuiltinCapabilityFamily {
     Smtp,
     Time,
     Tray,
+    Notifications,
     Api,
 }
 
@@ -925,7 +931,26 @@ fn lower_builtin_signal_member(
             }
             _ => None,
         },
-        BuiltinCapabilityFamily::Log
+        BuiltinCapabilityFamily::Notifications => match invocation.member.as_str() {
+            "events" => Some(SourceDecorator {
+                provider: Some(provider_name_path(
+                    invocation.span,
+                    BuiltinSourceProvider::NotificationsEvents,
+                )),
+                arguments: inherited_arguments(handle, &invocation.arguments),
+                options: filtered_option_record(
+                    module,
+                    handle.options,
+                    invocation.span,
+                    &["bus", "address"],
+                    Vec::new(),
+                ),
+            }),
+            _ => None,
+        },
+        BuiltinCapabilityFamily::Auth
+        | BuiltinCapabilityFamily::Log
+        | BuiltinCapabilityFamily::Secret
         | BuiltinCapabilityFamily::Random
         | BuiltinCapabilityFamily::Smtp => None,
         BuiltinCapabilityFamily::Imap => {
@@ -1008,6 +1033,55 @@ fn lower_builtin_value_member(
                 inherited_arguments(handle, &invocation.arguments),
             ))
         }
+        BuiltinCapabilityFamily::Auth => {
+            let intrinsic = match invocation.member.as_str() {
+                "pkce" => IntrinsicValue::AuthPkce,
+                "refresh" => IntrinsicValue::AuthRefresh,
+                _ => return None,
+            };
+            Some(build_intrinsic_call(
+                module,
+                intrinsic,
+                invocation.span,
+                inherited_arguments(handle, &invocation.arguments),
+            ))
+        }
+        BuiltinCapabilityFamily::Secret => {
+            let intrinsic = match invocation.member.as_str() {
+                "lookup" => IntrinsicValue::SecretLookup,
+                "store" => IntrinsicValue::SecretStore,
+                "delete" => IntrinsicValue::SecretDelete,
+                _ => return None,
+            };
+            Some(build_intrinsic_call(
+                module,
+                intrinsic,
+                invocation.span,
+                inherited_arguments(handle, &invocation.arguments),
+            ))
+        }
+        BuiltinCapabilityFamily::Notifications => {
+            let intrinsic = match invocation.member.as_str() {
+                "send" => IntrinsicValue::NotificationSend,
+                "close" => IntrinsicValue::NotificationClose,
+                _ => return None,
+            };
+            let mut arguments = inherited_arguments(handle, &invocation.arguments);
+            arguments.push(
+                capability_option_argument(module, handle.options, "bus")
+                    .unwrap_or_else(|| synthesize_text_literal(module, "session", invocation.span)),
+            );
+            arguments.push(
+                capability_option_argument(module, handle.options, "address")
+                    .unwrap_or_else(|| synthesize_text_literal(module, "", invocation.span)),
+            );
+            Some(build_intrinsic_call(
+                module,
+                intrinsic,
+                invocation.span,
+                arguments,
+            ))
+        }
         BuiltinCapabilityFamily::Env => {
             let intrinsic = match invocation.member.as_str() {
                 "get" => IntrinsicValue::EnvGet,
@@ -1079,8 +1153,28 @@ fn lower_builtin_value_member(
                 inherited_arguments(handle, &invocation.arguments),
             ))
         }
+        BuiltinCapabilityFamily::Dbus => {
+            let intrinsic = match invocation.member.as_str() {
+                "call" => IntrinsicValue::DbusCall,
+                _ => return None,
+            };
+            let mut arguments = inherited_arguments(handle, &invocation.arguments);
+            arguments.push(
+                capability_option_argument(module, handle.options, "bus")
+                    .unwrap_or_else(|| synthesize_text_literal(module, "session", invocation.span)),
+            );
+            arguments.push(
+                capability_option_argument(module, handle.options, "address")
+                    .unwrap_or_else(|| synthesize_text_literal(module, "", invocation.span)),
+            );
+            Some(build_intrinsic_call(
+                module,
+                intrinsic,
+                invocation.span,
+                arguments,
+            ))
+        }
         BuiltinCapabilityFamily::Process
-        | BuiltinCapabilityFamily::Dbus
         | BuiltinCapabilityFamily::Imap
         | BuiltinCapabilityFamily::Time
         | BuiltinCapabilityFamily::Tray => None,
@@ -1366,6 +1460,21 @@ fn filtered_option_record(
             })
             .expect("capability lowering should fit inside the expression arena"),
     )
+}
+
+fn capability_option_argument(
+    module: &Module,
+    handle_options: Option<ExprId>,
+    label: &str,
+) -> Option<ExprId> {
+    let options_id = handle_options?;
+    let ExprKind::Record(RecordExpr { fields }) = &module.exprs()[options_id].kind else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|field| field.label.text() == label)
+        .map(|field| field.value)
 }
 
 fn lower_api_signal_member(
@@ -1735,6 +1844,8 @@ fn builtin_capability_family(path: &NamePath) -> Option<BuiltinCapabilityFamily>
         "fs" => Some(BuiltinCapabilityFamily::Fs),
         "http" => Some(BuiltinCapabilityFamily::Http),
         "db" => Some(BuiltinCapabilityFamily::Db),
+        "auth" => Some(BuiltinCapabilityFamily::Auth),
+        "secret" => Some(BuiltinCapabilityFamily::Secret),
         "env" => Some(BuiltinCapabilityFamily::Env),
         "log" => Some(BuiltinCapabilityFamily::Log),
         "stdio" => Some(BuiltinCapabilityFamily::Stdio),
@@ -1746,6 +1857,7 @@ fn builtin_capability_family(path: &NamePath) -> Option<BuiltinCapabilityFamily>
         "smtp" => Some(BuiltinCapabilityFamily::Smtp),
         "time" => Some(BuiltinCapabilityFamily::Time),
         "tray" => Some(BuiltinCapabilityFamily::Tray),
+        "notifications" => Some(BuiltinCapabilityFamily::Notifications),
         "api" => Some(BuiltinCapabilityFamily::Api),
         _ => None,
     }
@@ -1756,6 +1868,8 @@ fn supports_builtin_signal_member(family: BuiltinCapabilityFamily, member: &str)
         BuiltinCapabilityFamily::Fs => matches!(member, "read" | "watch"),
         BuiltinCapabilityFamily::Http => matches!(member, "get"),
         BuiltinCapabilityFamily::Db => matches!(member, "connect" | "live"),
+        BuiltinCapabilityFamily::Auth => false,
+        BuiltinCapabilityFamily::Secret => false,
         BuiltinCapabilityFamily::Env => matches!(member, "get"),
         BuiltinCapabilityFamily::Stdio => matches!(member, "read"),
         BuiltinCapabilityFamily::Process => matches!(member, "spawn" | "args" | "cwd" | "appDir"),
@@ -1767,6 +1881,7 @@ fn supports_builtin_signal_member(family: BuiltinCapabilityFamily, member: &str)
         BuiltinCapabilityFamily::Imap => matches!(member, "connect" | "idle" | "fetchBody"),
         BuiltinCapabilityFamily::Time => matches!(member, "nowMs"),
         BuiltinCapabilityFamily::Tray => matches!(member, "ownName" | "actions"),
+        BuiltinCapabilityFamily::Notifications => matches!(member, "events"),
         BuiltinCapabilityFamily::Log
         | BuiltinCapabilityFamily::Random
         | BuiltinCapabilityFamily::Smtp => false,
@@ -1800,6 +1915,9 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
             "get" | "getBytes" | "getStatus" | "post" | "put" | "delete" | "head" | "postJson"
         ),
         BuiltinCapabilityFamily::Db => matches!(member, "query" | "commit" | "exec"),
+        BuiltinCapabilityFamily::Auth => matches!(member, "pkce" | "refresh"),
+        BuiltinCapabilityFamily::Secret => matches!(member, "lookup" | "store" | "delete"),
+        BuiltinCapabilityFamily::Notifications => matches!(member, "send" | "close"),
         BuiltinCapabilityFamily::Env => matches!(member, "get" | "list"),
         BuiltinCapabilityFamily::Log => matches!(member, "emit" | "emitContext"),
         BuiltinCapabilityFamily::Stdio => {
@@ -1822,8 +1940,8 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
                 | "dataDirs"
                 | "configDirs"
         ),
+        BuiltinCapabilityFamily::Dbus => matches!(member, "call"),
         BuiltinCapabilityFamily::Process
-        | BuiltinCapabilityFamily::Dbus
         | BuiltinCapabilityFamily::Imap
         | BuiltinCapabilityFamily::Time
         | BuiltinCapabilityFamily::Tray => false,

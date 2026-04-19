@@ -2,12 +2,15 @@
 
 Types for OAuth 2.0 PKCE sign-in flows.
 
-This module gives you the records and tagged unions used to model a browser-based sign-in flow. It is data only: the current stdlib file does not start sign-in or exchange tokens by itself.
+This module gives you the records and tagged unions used to model a browser-based sign-in flow plus
+the `AuthSource` handle marker for `@source auth`.
 
 ## Import
 
 ```aivi
 use aivi.auth (
+    AuthSource
+    AuthTask
     PkceConfig
     PkceToken
     PkceError
@@ -27,10 +30,42 @@ use aivi.auth (
 
 | Type | Purpose |
 |------|---------|
+| `AuthSource` | Handle annotation for `@source auth` |
+| `AuthTask A` | Background auth work returning `A` |
 | `PkceConfig` | Settings for one OAuth provider |
 | `PkceToken` | Access token details returned after sign-in |
 | `PkceError` | Why the flow failed or stopped |
 | `PkceState` | High-level state of the sign-in process |
+
+---
+
+## Capability handle
+
+```aivi
+use aivi.auth (AuthSource, AuthTask, PkceToken)
+
+@source auth
+signal auth : AuthSource
+
+value signIn : AuthTask PkceToken =
+    auth.pkce {
+        clientId: "desktop-client",
+        authEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        scopes: ["mail.read"],
+        redirectPort: 43123
+    }
+```
+
+Current canonical handle members:
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `auth.pkce config` | `AuthTask PkceToken` | Run browser-based PKCE flow, wait for loopback callback, exchange code for tokens |
+| `auth.refresh config refreshToken` | `AuthTask PkceToken` | Exchange one refresh token for a fresh access token |
+
+`auth.pkce` launches the external browser with `xdg-open` and listens on
+`http://127.0.0.1:{redirectPort}/callback`.
 
 ---
 

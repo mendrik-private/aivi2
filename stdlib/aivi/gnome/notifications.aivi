@@ -10,6 +10,10 @@ type Notification = {
     actions: List NotificationAction
 }
 
+type NotificationSource = Unit
+
+type NotificationTask A = (Task NotificationError A)
+
 type NotificationError =
   NotificationFailed Text
 
@@ -17,4 +21,9 @@ type NotificationResponse =
   | ActionTriggered Text
   | Dismissed
 
-export (NotificationAction, Notification, NotificationError, NotificationFailed, NotificationResponse, ActionTriggered, Dismissed)
+type NotificationEvent = {
+    id: Int,
+    response: NotificationResponse
+}
+
+export (NotificationAction, Notification, NotificationSource, NotificationTask, NotificationError, NotificationFailed, NotificationResponse, ActionTriggered, Dismissed, NotificationEvent)

@@ -366,11 +366,15 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
             })
         }
         ("aivi.network", "Request") => Some(ImportBindingMetadata::TypeConstructor {
+            type_item: None,
+            constructors: None,
             kind: Kind::constructor(1),
             fields: None,
             definition: None,
         }),
         ("aivi.network", "Channel") => Some(ImportBindingMetadata::TypeConstructor {
+            type_item: None,
+            constructors: None,
             kind: Kind::constructor(2),
             fields: None,
             definition: None,
@@ -515,6 +519,8 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
             ),
         )),
         ("aivi.random", "RandomError") => Some(ImportBindingMetadata::TypeConstructor {
+            type_item: None,
+            constructors: None,
             kind: Kind::constructor(0),
             fields: None,
             definition: None,

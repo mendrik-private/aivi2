@@ -828,6 +828,45 @@ signal emitted : Signal (Result DbusError Unit)
 }
 
 #[test]
+fn dbus_emit_source_encodes_structured_signal_payloads() {
+    fn dbus_value(name: &str, field: RuntimeValue) -> RuntimeValue {
+        RuntimeValue::Sum(aivi_backend::RuntimeSumValue {
+            item: aivi_hir::ItemId::from_raw(0),
+            type_name: "DbusValue".into(),
+            variant_name: name.into(),
+            fields: vec![field],
+        })
+    }
+
+    let payload = runtime_dbus_values_to_variant(&[
+        dbus_value("DbusString", RuntimeValue::Text("hello".into())),
+        dbus_value("DbusInt", RuntimeValue::Int(7)),
+        dbus_value("DbusBool", RuntimeValue::Bool(true)),
+    ])
+    .expect("structured D-Bus payload should encode")
+    .expect("structured D-Bus payload should not be empty");
+    assert_eq!(
+        payload.n_children(),
+        3,
+        "signal should emit three arguments"
+    );
+    assert_eq!(
+        payload.child_value(0).get::<String>().unwrap(),
+        "hello",
+        "first argument should be text"
+    );
+    assert_eq!(
+        payload.child_value(1).get::<i64>().unwrap(),
+        7,
+        "second argument should be int"
+    );
+    assert!(
+        payload.child_value(2).get::<bool>().unwrap(),
+        "third argument should be bool"
+    );
+}
+
+#[test]
 fn dbus_method_source_replies_unit_and_publishes_calls() {
     if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
         return;
@@ -846,6 +885,11 @@ type BusNameState =
   | Owned
   | Queued
   | Lost
+
+type DbusValue =
+  | DbusString Text
+  | DbusInt Int
+  | DbusBool Bool
 
 type DbusCall = {{
     destination: Text,
@@ -940,6 +984,113 @@ signal incoming : Signal DbusCall
 }
 
 #[test]
+fn dbus_method_source_replies_with_task_result() {
+    if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+        return;
+    }
+    let service_name = format!("org.aivi.RuntimeTestTaskReply{}", std::process::id());
+    let lowered = lower_text(
+        "runtime-provider-dbus-method-task-reply.aivi",
+        &format!(
+            r#"
+type BusNameFlag =
+  | AllowReplacement
+  | ReplaceExisting
+  | DoNotQueue
+
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+type DbusValue =
+  | DbusString Text
+  | DbusInt Int
+  | DbusBool Bool
+
+type DbusCall = {{
+    destination: Text,
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: Text
+}}
+
+value replyTask : Task Text (List DbusValue) =
+    pure [DbusString "running", DbusInt 42]
+
+@source dbus.ownName "{service_name}"
+signal busState : Signal BusNameState
+
+@source dbus.method "{service_name}", replyTask with {{
+    path: "/org/aivi/Test"
+    interface: "org.aivi.Test"
+    member: "GetStatus"
+}}
+signal incoming : Signal DbusCall
+"#,
+            service_name = service_name,
+        ),
+    );
+    let assembly =
+        assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let actions = linked
+        .tick_with_source_lifecycle()
+        .expect("linked runtime tick should succeed");
+    let mut providers = SourceProviderManager::new();
+    providers
+        .apply_actions(actions.source_actions())
+        .expect("dbus providers should execute");
+
+    let bus_state_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "busState"))
+        .expect("busState signal binding should exist")
+        .signal();
+    let owned_deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let bus_state = spin_until(&mut linked, bus_state_signal, Duration::from_millis(50))
+            .expect("dbus.ownName should publish");
+        if matches!(&bus_state, RuntimeValue::Sum(sum) if sum.variant_name.as_ref() == "Owned") {
+            break;
+        }
+        assert!(
+            Instant::now() < owned_deadline,
+            "dbus.ownName should eventually acquire the requested name"
+        );
+    }
+
+    let connection = gio::bus_get_sync(BusType::Session, None::<&gio::Cancellable>)
+        .expect("session bus should be reachable");
+    let reply = connection
+        .call_sync(
+            Some(service_name.as_ref()),
+            "/org/aivi/Test",
+            "org.aivi.Test",
+            "GetStatus",
+            None::<&Variant>,
+            None::<&glib::VariantTy>,
+            gio::DBusCallFlags::NONE,
+            1_000,
+            None::<&gio::Cancellable>,
+        )
+        .expect("dbus.method source should reply with task result");
+    assert_eq!(
+        reply.n_children(),
+        2,
+        "task reply should contain the configured tuple"
+    );
+    assert_eq!(reply.child_value(0).get::<String>().unwrap(), "running");
+    assert_eq!(reply.child_value(1).get::<i64>().unwrap(), 42);
+}
+
+#[test]
 #[ignore = "known pre-existing failure: flaky GLib threading in D-Bus reply handling"]
 fn dbus_method_source_replies_with_configured_body() {
     if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
@@ -975,7 +1126,7 @@ signal busState : Signal BusNameState
     path: "/org/aivi/Test"
     interface: "org.aivi.Test"
     member: "GetStatus"
-    reply: "('running', 42)"
+    replyValues: [DbusString "running", DbusInt 42]
 }}
 signal incoming : Signal DbusCall
 "#,
@@ -1039,7 +1190,7 @@ signal incoming : Signal DbusCall
     let first = reply.child_value(0);
     assert_eq!(first.get::<String>().unwrap(), "running");
     let second = reply.child_value(1);
-    assert_eq!(second.get::<i32>().unwrap(), 42);
+    assert_eq!(second.get::<i64>().unwrap(), 42);
 }
 
 #[test]

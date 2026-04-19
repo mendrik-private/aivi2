@@ -10,8 +10,8 @@ use aivi_typing::{
 use crate::{
     BuiltinType, DecoratorId, DecoratorPayload, ExprId, ExprKind, ImportBindingMetadata, ImportId,
     ImportTypeDefinition, ImportValueType, Item, ItemId, Module, ResolutionState, SignalItem,
-    SourceDecorator, TermReference, TermResolution, TypeId as HirTypeId, TypeItemBody, TypeKind,
-    TypeParameterId as HirTypeParameterId, TypeResolution, TypeVariant,
+    SourceDecorator, SumConstructorHandle, TermReference, TermResolution, TypeId as HirTypeId,
+    TypeItemBody, TypeKind, TypeParameterId as HirTypeParameterId, TypeResolution, TypeVariant,
 };
 
 /// Focused pre-runtime decode-schema handoff for `@source` signals.
@@ -86,7 +86,7 @@ pub struct SourceDecodeDomainBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceDecodeSumBinding {
     pub ty: StructuralTypeId,
-    pub type_item: ItemId,
+    pub constructors: Vec<SumConstructorHandle>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -825,7 +825,7 @@ impl<'a> DecodeTypeLowerer<'a> {
                         self.lower_type(alias, &item_substitutions, item_stack)
                     }
                     TypeItemBody::Sum(variants) => {
-                        let variants = variants
+                        let lowered_variants = variants
                             .iter()
                             .map(|variant| {
                                 self.lower_sum_variant(variant, &item_substitutions, item_stack)
@@ -833,7 +833,7 @@ impl<'a> DecodeTypeLowerer<'a> {
                             .collect::<Result<Vec<_>, _>>()?;
                         let ty = self
                             .types
-                            .sum(Closedness::Closed, variants)
+                            .sum(Closedness::Closed, lowered_variants)
                             .map_err(|error| {
                                 DecodeTypeLoweringError::invalid_shape(
                                     item.header.span,
@@ -843,7 +843,13 @@ impl<'a> DecodeTypeLowerer<'a> {
                         if self.sum_bindings.iter().all(|binding| binding.ty != ty) {
                             self.sum_bindings.push(SourceDecodeSumBinding {
                                 ty,
-                                type_item: item_id,
+                                constructors: variants
+                                    .iter()
+                                    .filter_map(|variant| {
+                                        self.module
+                                            .sum_constructor_handle(item_id, variant.name.text())
+                                    })
+                                    .collect(),
                             });
                         }
                         Ok(ty)
@@ -936,6 +942,7 @@ impl<'a> DecodeTypeLowerer<'a> {
         }
         match &import.metadata {
             ImportBindingMetadata::TypeConstructor {
+                constructors,
                 definition: Some(definition),
                 ..
             } => {
@@ -943,6 +950,15 @@ impl<'a> DecodeTypeLowerer<'a> {
                 let lowered = self.lower_import_type_definition(definition, arguments, span);
                 let popped = self.imports_in_progress.pop();
                 debug_assert_eq!(popped, Some(import_id));
+                if let (Ok(ty), Some(constructors), ImportTypeDefinition::Sum(_)) =
+                    (&lowered, constructors, definition)
+                    && self.sum_bindings.iter().all(|binding| binding.ty != *ty)
+                {
+                    self.sum_bindings.push(SourceDecodeSumBinding {
+                        ty: *ty,
+                        constructors: constructors.clone(),
+                    });
+                }
                 lowered
             }
             ImportBindingMetadata::Domain {

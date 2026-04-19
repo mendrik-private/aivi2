@@ -866,8 +866,8 @@ impl TaskFunctionApplier for NativeOnlyExecutionEngine<'_> {
 mod tests {
     use super::LazyJitExecutionEngine;
     use crate::{
-        BackendExecutionOptions, ItemId, ItemKind, Program,
-        lower_module as lower_backend_module, validate_program,
+        BackendExecutionOptions, ItemId, ItemKind, Program, lower_module as lower_backend_module,
+        validate_program,
     };
     use aivi_base::SourceDatabase;
     use aivi_core::{lower_module as lower_core_module, validate_module as validate_core_module};
@@ -1321,8 +1321,8 @@ impl NativeKernelPlan {
         kernel_id: KernelId,
     ) -> Option<Self> {
         let fingerprint = meta.kernels().get(kernel_id)?.fingerprint;
-        let artifact =
-            native_artifacts.and_then(|artifacts| artifacts.get_for_kernel(fingerprint, kernel_id))?;
+        let artifact = native_artifacts
+            .and_then(|artifacts| artifacts.get_for_kernel(fingerprint, kernel_id))?;
         if let Some(frozen_abi) = artifact.frozen_abi()
             && let Some(plan) = Self::from_frozen_native_artifact(kernel_id, artifact, frozen_abi)
         {
@@ -1337,8 +1337,8 @@ impl NativeKernelPlan {
         kernel_id: KernelId,
     ) -> Option<Self> {
         let fingerprint = catalog.kernels().get(kernel_id)?.fingerprint;
-        let artifact =
-            native_artifacts.and_then(|artifacts| artifacts.get_for_kernel(fingerprint, kernel_id))?;
+        let artifact = native_artifacts
+            .and_then(|artifacts| artifacts.get_for_kernel(fingerprint, kernel_id))?;
         if let Some(frozen_abi) = artifact.frozen_abi()
             && let Some(plan) = Self::from_frozen_native_artifact(kernel_id, artifact, frozen_abi)
         {
@@ -1988,7 +1988,8 @@ impl MarshalPlan {
             ) => carrier.matches(value) || matches!(value, RuntimeValue::SuffixedInteger { .. }),
             (MarshalPlanKind::RepresentationalDomain { carrier }, value) => carrier.matches(value),
             (MarshalPlanKind::ErasedOpaque { item, type_name }, RuntimeValue::Sum(value)) => {
-                value.item == *item && value.type_name.as_ref() == type_name.as_ref()
+                let _ = item;
+                value.type_name.as_ref() == type_name.as_ref()
             }
             (
                 MarshalPlanKind::Opaque {
@@ -1998,8 +1999,8 @@ impl MarshalPlan {
                 },
                 RuntimeValue::Sum(value),
             ) => {
-                value.item == *item
-                    && value.type_name.as_ref() == type_name.as_ref()
+                let _ = item;
+                value.type_name.as_ref() == type_name.as_ref()
                     && variants
                         .iter()
                         .find(|variant| variant.name.as_ref() == value.variant_name.as_ref())
@@ -2330,7 +2331,8 @@ impl MarshalPlan {
                 let RuntimeValue::Sum(sum) = value else {
                     return None;
                 };
-                if sum.item != *item || sum.type_name.as_ref() != type_name.as_ref() {
+                let _ = item;
+                if sum.type_name.as_ref() != type_name.as_ref() {
                     return None;
                 }
                 pack_erased_domain_value(value, arena, hints)?
@@ -2343,7 +2345,8 @@ impl MarshalPlan {
                 let RuntimeValue::Sum(sum) = value else {
                     return None;
                 };
-                if sum.item != *item || sum.type_name.as_ref() != type_name.as_ref() {
+                let _ = item;
+                if sum.type_name.as_ref() != type_name.as_ref() {
                     return None;
                 }
                 let variant = variants

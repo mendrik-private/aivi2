@@ -60,6 +60,42 @@ use aivi.dbus (
 
 ---
 
+## Capability handle
+
+```aivi
+use aivi.dbus (
+    DbusSource
+    DbusValue
+    DbusTask
+)
+
+@source dbus "org.freedesktop.DBus"
+signal bus : DbusSource
+
+value names : DbusTask (List DbusValue) =
+    bus.call "/org/freedesktop/DBus" "org.freedesktop.DBus" "ListNames" []
+```
+
+Current canonical handle members:
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `bus.call path interface member body` | `DbusTask (List DbusValue)` | Call one method and decode reply body into raw `DbusValue` arguments |
+
+Handle-level `bus` / `address` options apply to `bus.call`.
+
+For service-side method handlers, `@source dbus.method destination` now accepts an optional
+second argument:
+
+```aivi
+@source dbus.method destination, replyTask with { ... }
+```
+
+When present, that task is executed on each incoming call and its `List DbusValue` result is
+sent back as the method reply body.
+
+---
+
 ## `DbusValue`
 
 ```aivi
@@ -256,4 +292,4 @@ type DbusTask A =
   Task DbusError A
 ```
 
-Use `DbusCallResult` when you want the raw values returned by a method call. Use `DbusTask A` when a higher-level helper decodes those values into some application type `A`.
+`dbus.call` currently returns `DbusTask (List DbusValue)`. `DbusCallResult` remains available for higher-level helpers that want to wrap reply decoding in an explicit `Result`.

@@ -191,7 +191,7 @@ impl GateType {
             .is_some_and(|(name, _arguments)| name == expected)
     }
 
-    pub(crate) fn same_shape(&self, other: &Self) -> bool {
+    pub fn same_shape(&self, other: &Self) -> bool {
         let mut left_to_right = HashMap::new();
         let mut right_to_left = HashMap::new();
         Self::same_shape_inner(self, other, &mut left_to_right, &mut right_to_left)

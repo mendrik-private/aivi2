@@ -6,8 +6,13 @@ These are operating-system notifications: the kind that appear in the desktop sh
 are separate from `AppNotification` in `aivi.app.lifecycle`, which describes messages shown
 inside your own app window.
 
-This module defines the payloads and result types used by desktop-notification APIs. It does
-not itself send a notification.
+This module defines the payloads, handle annotation, task alias, and response types used by the
+built-in desktop notification capability:
+
+```aivi
+@source notifications "io.mailfox"
+signal notifications : NotificationSource
+```
 
 ## Import
 
@@ -15,8 +20,11 @@ not itself send a notification.
 use aivi.gnome.notifications (
     NotificationAction
     Notification
+    NotificationSource
+    NotificationTask
     NotificationError
     NotificationResponse
+    NotificationEvent
 )
 ```
 
@@ -26,8 +34,11 @@ use aivi.gnome.notifications (
 |------|-------------|
 | `NotificationAction` | One clickable action button in a notification |
 | `Notification` | Full desktop notification payload |
+| `NotificationSource` | Nominal handle annotation for `@source notifications ...` |
+| `NotificationTask A` | Generic desktop-notification task alias |
 | `NotificationError` | Failure case when notification delivery fails |
 | `NotificationResponse` | What the user did with the notification |
+| `NotificationEvent` | Response paired with notification id |
 
 ## Types
 
@@ -71,6 +82,22 @@ Full notification payload.
 - `body` — optional longer message
 - `icon` — optional icon name or other backend-specific text identifier
 - `actions` — zero or more clickable actions
+
+### NotificationSource
+
+```aivi
+type NotificationSource = Unit
+```
+
+Nominal handle annotation used with `@source notifications "app.name"`.
+
+### NotificationTask
+
+```aivi
+type NotificationTask A = (Task NotificationError A)
+```
+
+Alias used by `notifications.send` and `notifications.close`.
 
 ```aivi
 use aivi.gnome.notifications (
@@ -124,4 +151,44 @@ type NotificationResponse -> Text
 func responseLabel = response => response
  ||> ActionTriggered actionId -> "Clicked: {actionId}"
  ||> Dismissed                -> "Dismissed"
+```
+
+### NotificationEvent
+
+```aivi
+type NotificationEvent = {
+    id: Int,
+    response: NotificationResponse
+}
+```
+
+Published by `notifications.events` so apps can correlate responses with previously shown
+desktop notifications.
+
+## Capability surface
+
+```aivi
+use aivi.gnome.notifications (
+    Notification
+    NotificationEvent
+    NotificationSource
+)
+
+@source notifications "io.mailfox" with {
+    bus: "session"
+}
+signal notifications : NotificationSource
+
+signal events : Signal NotificationEvent = notifications.events
+
+value showMail : Task NotificationError Int =
+    notifications.send {
+        summary: "New mail"
+        body: Some "Alex replied about dinner"
+        icon: Some "mail-unread"
+        actions: [{ label: "Open", id: "open" }, { label: "Mark read", id: "read" }]
+    }
+
+value closeMail : Task NotificationError Unit =
+    notifications.close 42
 ```

@@ -220,6 +220,26 @@ fn runtime_fragment_backend_unit_invalidates_when_fragment_environment_changes()
 }
 
 #[test]
+fn runtime_fragment_backend_unit_compiles_workspace_import_bodies() {
+    let db = RootDatabase::new();
+    let (main, _dependency, _dependency_path) = open_workspace_math_program(&db, 1);
+    let hir = hir_module(&db, main);
+    let fragment = first_general_expr_fragment(hir.module());
+    let unit = runtime_fragment_backend_unit(&db, main, &fragment)
+        .expect("runtime fragment lowering should compile reachable workspace imports");
+    let imported = unit
+        .backend()
+        .items()
+        .iter()
+        .find_map(|(_, item)| (item.name.as_ref() == "inc").then_some(item))
+        .expect("fragment backend should keep imported workspace function");
+    assert!(
+        imported.body.is_some(),
+        "imported workspace function should keep executable body in runtime fragment backend"
+    );
+}
+
+#[test]
 fn whole_program_backend_fingerprint_matches_backend_content_fingerprint() {
     let db = RootDatabase::new();
     let file = SourceFile::new(

@@ -1013,7 +1013,7 @@ fn resolve_run_event_handler(
                     payload_expr.as_raw()
                 )
             })?;
-            if site.ty != required_payload {
+            if !site.ty.same_shape(&required_payload) {
                 return Err(format!(
                     "event handler `{}` at {location} points at signal `{}`, but the explicit payload has type `{}` and the signal requires `{}`",
                     name_path_text(&reference.path),
@@ -1214,7 +1214,19 @@ fn import_value_type_to_gate_type(ty: &ImportValueType) -> Option<GateType> {
             parameter: aivi_hir::TypeParameterId::from_raw(u32::MAX - *index as u32),
             name: name.clone(),
         },
-        ImportValueType::Named { .. } => return None,
+        ImportValueType::Named {
+            type_name,
+            arguments,
+            definition,
+        } => GateType::OpaqueImport {
+            import: aivi_hir::ImportId::from_raw(u32::MAX),
+            name: type_name.clone(),
+            arguments: arguments
+                .iter()
+                .map(import_value_type_to_gate_type)
+                .collect::<Option<Vec<_>>>()?,
+            definition: definition.clone(),
+        },
     })
 }
 

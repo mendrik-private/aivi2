@@ -121,9 +121,11 @@ impl NativeKernelArtifactSet {
         fingerprint: KernelFingerprint,
         kernel_id: KernelId,
     ) -> Option<&NativeKernelArtifact> {
-        self.artifacts
-            .get(&fingerprint)
-            .and_then(|artifacts| artifacts.get(&kernel_id).or_else(|| artifacts.values().next()))
+        self.artifacts.get(&fingerprint).and_then(|artifacts| {
+            artifacts
+                .get(&kernel_id)
+                .or_else(|| artifacts.values().next())
+        })
     }
 
     pub fn insert(

@@ -91,7 +91,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.gnome.tray](tray.md) | GNOME tray bridge vocabulary | `TraySource`, `defaultPath`, `actionMember` |
 | [aivi.gnome.settings](settings.md) | GSettings schema, key, and value types | `make`, `parse`, `GSettingsSource` |
 | [aivi.gnome.onlineAccounts](onlineAccounts.md) | Desktop account and token records | `id`, `token`, `tokenType`, `expiresAt` |
-| [aivi.gnome.notifications](notifications.md) | Desktop notification payloads | `summary`, `body`, `icon`, `actions` |
+| [aivi.gnome.notifications](notifications.md) | Desktop notification capability vocabulary | `NotificationSource`, `NotificationTask`, `NotificationEvent` |
 | [aivi.clipboard](clipboard.md) | Clipboard content types and watcher shapes | `ClipboardContent`, `ClipboardSource` |
 | [aivi.color](color.md) | Packed ARGB color domain with blend and GNOME palette | `argb`, `blend`, `gnomeBlue3`, `gnomeRed3` |
 | [aivi.px](px.md) | Pixel dimension domain for type-safe sizing | `px`, `(+)`, `(-)`, `scale`, `zero` |
@@ -189,7 +189,7 @@ place to look when wiring a Linux desktop app together.
 - [`aivi.dbus`](/stdlib/dbus) — D-Bus vocabulary plus `DbusSource`.
 - [`aivi.gnome.settings`](/stdlib/settings) — GSettings schema, key, and value types.
 - [`aivi.gnome.onlineAccounts`](/stdlib/onlineAccounts) — desktop account and token records.
-- [`aivi.gnome.notifications`](/stdlib/notifications) — desktop notification payloads and responses.
+- [`aivi.gnome.notifications`](/stdlib/notifications) — desktop notification payloads, tasks, and response events.
 - [`aivi.clipboard`](/stdlib/clipboard) — clipboard content types and watcher shapes.
 - [`aivi.color`](/stdlib/color) — packed UI colors and channel helpers.
 - [`aivi.image`](/stdlib/image) — image data, metadata, and load errors.
