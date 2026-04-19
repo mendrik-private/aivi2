@@ -37,6 +37,7 @@ pub use cache::{
     compute_kernel_cache_key, decode_compiled_program_binary, decode_native_kernel_artifact_binary,
     decode_program_binary, decode_program_json, encode_compiled_program_binary,
     encode_native_kernel_artifact_binary, encode_program_binary, encode_program_json,
+    replace_cache_dir_override,
 };
 pub use codegen::{
     CodegenError, CodegenErrors, CompiledKernel, CompiledKernelArtifact, CompiledProgram,
@@ -44,7 +45,8 @@ pub use codegen::{
 };
 pub use engine::{
     BackendExecutableProgram, BackendExecutionEngine, BackendExecutionEngineHandle,
-    BackendExecutionEngineKind, BackendExecutionOptions,
+    BackendExecutionEngineKind, BackendExecutionOptions, BackendRuntimeKernelRef,
+    BackendRuntimeView,
 };
 pub use gc::{
     CommittedValueStore, InlineCommittedValueStore, MovingRuntimeValueStore, RuntimeGcHandle,
@@ -73,13 +75,13 @@ pub use layout::{
 pub use lower::{LoweringError, LoweringErrors, lower_module, lower_module_with_hir};
 pub use numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat};
 pub use program::{
-    DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode, DecodePlan,
-    DecodeStep, DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface,
+    BackendRuntimeMeta, DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode,
+    DecodePlan, DecodeStep, DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface,
     DomainDecodeSurfaceKind, FanoutCarrier, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
     ItemKind, NonSourceWakeup, NonSourceWakeupCause, Pipeline, PipelineOrigin, Program, Recurrence,
-    RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel,
-    SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding, SourceOptionKernel,
-    SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, RuntimeKernelMeta, SignalInfo,
+    SourceArgumentKernel, SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding,
+    SourceOptionKernel, SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
     SourceTeardownPolicy, Stage, StageKind, TemporalStage, TruthyFalsyBranch, TruthyFalsyStage,
 };
 pub use runtime::{

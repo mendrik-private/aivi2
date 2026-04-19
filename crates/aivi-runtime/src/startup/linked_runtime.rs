@@ -4,16 +4,30 @@ impl BackendLinkedRuntime {
     }
 
     pub fn backend(&self) -> &BackendProgram {
-        self.backend.as_ref()
+        self.backend
+            .as_program()
+            .expect("full backend program is unavailable in frozen bundle runtimes")
+            .as_ref()
     }
 
     pub fn backend_arc(&self) -> Arc<BackendProgram> {
-        self.backend.clone()
+        self.backend
+            .as_program()
+            .expect("full backend program is unavailable in frozen bundle runtimes")
+            .clone()
+    }
+
+    pub fn backend_payload(&self) -> &BackendRuntimePayload {
+        &self.backend
+    }
+
+    pub fn backend_view(&self) -> BackendRuntimeView<'_> {
+        self.backend.runtime_view()
     }
 
     fn executable_program(&self) -> aivi_backend::BackendExecutableProgram<'_> {
-        aivi_backend::BackendExecutableProgram::interpreted(self.backend.as_ref())
-            .with_native_kernels(self.native_kernels.as_ref())
+        self.backend
+            .executable_program(self.native_kernels.as_ref())
     }
 
     pub fn runtime(
@@ -182,8 +196,13 @@ impl BackendLinkedRuntime {
             &snapshots,
         )?;
         let runtime_globals = materialize_detached_globals(&globals);
-        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
-        let value = evaluator
+        let value = self
+            .executable_program()
+            .with_execution_options(aivi_backend::BackendExecutionOptions {
+                prefer_interpreter: true,
+                ..Default::default()
+            })
+            .create_engine()
             .evaluate_item(binding.backend_item, &runtime_globals)
             .map_err(|error| BackendRuntimeError::EvaluateTaskBody {
                 instance: binding.instance,
@@ -200,7 +219,7 @@ impl BackendLinkedRuntime {
         let mut temporal_states = self.temporal_states.clone();
         let mut pending_temporal_schedules = Vec::new();
         let mut evaluator = LinkedDerivedEvaluator {
-            backend: self.backend.as_ref(),
+            backend: &self.backend,
             native_kernels: self.native_kernels.as_ref(),
             signal_items_by_handle: &self.signal_items_by_handle,
             derived_signals: &self.derived_signals,
@@ -222,7 +241,7 @@ impl BackendLinkedRuntime {
             let committed = self.committed_signal_snapshots()?;
             let runtime_committed = materialize_detached_globals(&committed);
             let mut trigger_evaluator = LinkedDerivedEvaluator {
-                backend: self.backend.as_ref(),
+                backend: &self.backend,
                 native_kernels: self.native_kernels.as_ref(),
                 signal_items_by_handle: &self.signal_items_by_handle,
                 derived_signals: &self.derived_signals,
@@ -534,6 +553,7 @@ impl BackendLinkedRuntime {
             owner: binding.owner,
             backend_item: binding.backend_item,
             backend: self.backend.clone(),
+            native_kernels: self.native_kernels.clone(),
             globals,
             completion,
             db_commit_invalidation_sink: self.db_commit_invalidation_sink.clone(),
@@ -674,14 +694,14 @@ impl Drop for BackendLinkedRuntime {
     fn drop(&mut self) {
         // Remove all thread-local kernel plans for this runtime so stale compiled code cannot
         // survive into a new runtime that happens to occupy the same `BackendProgram` address.
-        let program_addr = Arc::as_ptr(&self.backend) as usize;
+        let program_addr = self.backend.cache_identity();
         // Also collect addresses for reactive-clause backends (which may differ from the main one).
         let mut addrs = std::collections::BTreeSet::new();
         addrs.insert(program_addr);
         // Also collect addresses for reactive-clause backends (which may differ from the main one).
         for clause in self.reactive_clauses.values() {
-            addrs.insert(Arc::as_ptr(&clause.compiled_guard.backend) as usize);
-            addrs.insert(Arc::as_ptr(&clause.compiled_body.backend) as usize);
+            addrs.insert(clause.compiled_guard.backend.cache_identity());
+            addrs.insert(clause.compiled_body.backend.cache_identity());
         }
         NATIVE_KERNEL_PLAN_CACHE.with(|cell| {
             cell.borrow_mut()

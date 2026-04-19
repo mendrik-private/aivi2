@@ -186,12 +186,16 @@ value screenView =
     );
 
     let entries = read_embedded_bundle_entries(&executable_path);
-    let run_artifact = entries
-        .get("run-artifact.bin")
-        .expect("embedded executable should carry the serialized run artifact");
+    let frozen_image = entries
+        .get("frozen-run-image.bin")
+        .expect("embedded executable should carry the frozen run image");
     assert!(
-        !run_artifact.is_empty(),
-        "expected non-empty binary run artifact payload"
+        !frozen_image.is_empty(),
+        "expected non-empty frozen run image payload"
+    );
+    assert!(
+        !entries.contains_key("run-artifact.bin"),
+        "embedded executable should no longer carry a standalone run artifact"
     );
     assert!(
         !entries.contains_key("run-artifact.json"),
@@ -203,20 +207,8 @@ value screenView =
         .cloned()
         .collect::<Vec<_>>();
     assert!(
-        payload_entries
-            .iter()
-            .all(|entry| !entry.ends_with(".json")),
-        "embedded executable should not keep JSON backend payloads, got: {payload_entries:?}"
-    );
-    assert!(
-        payload_entries.iter().any(|entry| entry.ends_with(".bin")),
-        "embedded executable should keep binary payloads, got: {payload_entries:?}"
-    );
-    assert!(
-        payload_entries
-            .iter()
-            .any(|entry| entry.starts_with("payloads/native-") && entry.ends_with(".bin")),
-        "embedded executable should emit native kernel sidecars, got: {payload_entries:?}"
+        payload_entries.is_empty(),
+        "embedded executable should inline generated payloads into the frozen image, got: {payload_entries:?}"
     );
     assert!(
         !entries.contains_key("main.aivi"),
@@ -271,8 +263,8 @@ export (Greeting)
     );
     let entries = read_embedded_bundle_entries(&executable_path);
     assert!(
-        entries.contains_key("run-artifact.bin"),
-        "embedded executable should carry a serialized run artifact"
+        entries.contains_key("frozen-run-image.bin"),
+        "embedded executable should carry a frozen run image"
     );
     assert!(
         !entries.contains_key("aivi.toml"),
@@ -308,12 +300,12 @@ fn build_accepts_snake_and_reversi_demos() {
         );
         let entries = read_embedded_bundle_entries(&executable_path);
         assert!(
-            entries.contains_key("run-artifact.bin"),
-            "expected {demo} run artifact to exist"
+            entries.contains_key("frozen-run-image.bin"),
+            "expected {demo} frozen run image to exist"
         );
         assert!(
-            entries.keys().any(|entry| entry.starts_with("payloads/")),
-            "expected {demo} payload directory to be embedded"
+            !entries.keys().any(|entry| entry.starts_with("payloads/")),
+            "expected {demo} generated payloads to be folded into the frozen run image"
         );
         assert!(
             entries.contains_key(".aivi-launch-cwd"),

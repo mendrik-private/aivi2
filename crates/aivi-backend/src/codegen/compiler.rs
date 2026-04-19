@@ -527,11 +527,11 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         // resolves to a domain `literal` member of type
                         // `Int -> DomainType`, so the carrier is Int by
                         // construction.
-                        if !self.is_named_domain_layout(expr.layout) {
+                        if !self.is_suffixed_integer_domain_layout(expr.layout) {
                             errors.push(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "suffixed integer literals require a named domain layout for Cranelift compilation",
+                                "suffixed integer literals require a representational Int-backed domain layout for Cranelift compilation",
                             ));
                         }
                     }
@@ -1336,6 +1336,12 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                     materialized.extend(arguments.iter().copied().skip(1));
                                     materialized
                                 }
+                                DirectApplyPlan::CallableValue { .. } => {
+                                    let mut materialized = Vec::with_capacity(arguments.len() + 1);
+                                    materialized.push(*callee);
+                                    materialized.extend(arguments.iter().copied());
+                                    materialized
+                                }
                                 _ => self.flatten_direct_apply_arguments(
                                     kernel,
                                     *callee,
@@ -1467,10 +1473,15 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                             .push(values.pop().expect("direct apply argument should exist"));
                     }
                     argument_values.reverse();
+                    let callable = match plan {
+                        DirectApplyPlan::CallableValue { .. } => Some(argument_values.remove(0)),
+                        _ => None,
+                    };
                     values.push(self.lower_direct_apply(
                         kernel_id,
                         expr,
                         plan,
+                        callable,
                         &argument_values,
                         builder,
                     )?);
@@ -4091,6 +4102,13 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                     arguments,
                 )
                 .map(DirectApplyPlan::Intrinsic),
+            KernelExprKind::Environment(_) => self.require_compilable_callable_value_call(
+                kernel_id,
+                expr_id,
+                callee,
+                arguments,
+                "environment callable",
+            ),
             KernelExprKind::ExecutableEvidence(item) => self
                 .require_compilable_item_call(kernel_id, expr_id, callee, *item, arguments),
             KernelExprKind::BuiltinClassMember(intrinsic) => self
@@ -5269,6 +5287,20 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         Ok((parameters, result_layout))
     }
 
+    fn require_compilable_callable_value_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        arguments: &[KernelExprId],
+        detail: &str,
+    ) -> Result<DirectApplyPlan, CodegenError> {
+        self.require_saturated_callable_call(kernel_id, expr_id, callee, arguments, detail)?;
+        Ok(DirectApplyPlan::CallableValue {
+            callee_layout: self.program.kernels()[kernel_id].exprs()[callee].layout,
+        })
+    }
+
     fn callable_signature(&self, layout: LayoutId) -> (Vec<LayoutId>, LayoutId) {
         let mut parameters = Vec::new();
         let mut result = layout;
@@ -5296,6 +5328,17 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 .map(|layout| &layout.kind),
             Some(LayoutKind::Domain { .. })
         )
+    }
+
+    fn is_suffixed_integer_domain_layout(&self, layout: LayoutId) -> bool {
+        match self.program.layouts().get(layout).map(|layout| &layout.kind) {
+            Some(LayoutKind::Domain { .. }) => true,
+            Some(LayoutKind::AnonymousDomain { carrier, .. }) => matches!(
+                self.program.layouts().get(*carrier).map(|layout| &layout.kind),
+                Some(LayoutKind::Primitive(PrimitiveType::Int))
+            ),
+            _ => false,
+        }
     }
 
     fn lower_domain_int_arithmetic(
@@ -6481,11 +6524,60 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         Ok(builder.block_params(done_block)[0])
     }
 
+    fn materialize_callable_signature(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callable_layout: LayoutId,
+        detail: &str,
+    ) -> Result<cranelift_codegen::ir::Signature, CodegenError> {
+        let (parameters, result_layout) = self.callable_signature(callable_layout);
+        if parameters.is_empty() {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} requires an arrow layout, found layout{callable_layout}=`{}`",
+                    self.program.layouts()[callable_layout]
+                ),
+            ));
+        }
+        let mut signature = self.module.make_signature();
+        for (index, layout) in parameters.iter().enumerate() {
+            let ty = self.materialize_signature_type(
+                kernel_id,
+                *layout,
+                self.program.layouts()[*layout].abi,
+                &format!("{detail} parameter {index}"),
+            )?;
+            signature.params.push(AbiParam::new(ty));
+        }
+        let result = self.materialize_signature_type(
+            kernel_id,
+            result_layout,
+            self.program.layouts()[result_layout].abi,
+            &format!("{detail} result"),
+        )?;
+        signature.returns.push(AbiParam::new(result));
+        Ok(signature)
+    }
+
+    fn lower_callable_descriptor_target(
+        &self,
+        descriptor: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        builder
+            .ins()
+            .load(self.pointer_type(), MemFlags::new(), descriptor, 0)
+    }
+
     fn lower_direct_apply(
         &mut self,
         kernel_id: KernelId,
         expr_id: KernelExprId,
         plan: DirectApplyPlan,
+        callable: Option<Value>,
         arguments: &[Value],
         builder: &mut FunctionBuilder<'_>,
     ) -> Result<Value, CodegenError> {
@@ -6528,6 +6620,27 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 let func_id = self.ensure_kernel_declared(body, KernelLinkage::Import)?;
                 let local = self.module.declare_func_in_func(func_id, builder.func);
                 Ok(builder.ins().func_addr(self.pointer_type(), local))
+            }
+            DirectApplyPlan::CallableValue { callee_layout } => {
+                let descriptor = callable.expect("callable value apply should materialize callee");
+                let signature = self.materialize_callable_signature(
+                    kernel_id,
+                    expr_id,
+                    callee_layout,
+                    "callable value apply",
+                )?;
+                let imported = builder.func.import_signature(signature);
+                let callee_ptr = self.lower_callable_descriptor_target(descriptor, builder);
+                let call = builder.ins().call_indirect(imported, callee_ptr, arguments);
+                let results = builder.inst_results(call);
+                match results {
+                    [result] => Ok(*result),
+                    _ => Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "callable value apply returned unexpected number of results",
+                    )),
+                }
             }
             DirectApplyPlan::SumConstruction {
                 variant_tag,
@@ -8925,6 +9038,11 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 })
             }
             AbiPassMode::ByValue => match &self.program.layouts()[layout].kind {
+                LayoutKind::Primitive(PrimitiveType::Unit) => Ok(AbiShape {
+                    ty: types::I8,
+                    size: 1,
+                    align: 1,
+                }),
                 LayoutKind::Primitive(PrimitiveType::Int) => Ok(AbiShape {
                     ty: types::I64,
                     size: 8,
@@ -9423,7 +9541,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         builder: &mut FunctionBuilder<'_>,
     ) -> Result<Value, CodegenError> {
         match truthy_constructor {
-            crate::BuiltinTerm::True => Ok(current),
+            crate::BuiltinTerm::True => Ok(builder.ins().icmp_imm(IntCC::NotEqual, current, 0)),
             crate::BuiltinTerm::Some => match self.option_codegen_contract(input_layout) {
                 Some(OptionCodegenContract::NicheReference) => {
                     Ok(builder.ins().icmp_imm(IntCC::NotEqual, current, 0))
@@ -9525,11 +9643,22 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 let n = lit.raw.parse::<i64>().unwrap_or(0);
                 Ok(builder.ins().icmp_imm(IntCC::Equal, current, n))
             }
-            crate::InlinePipePatternKind::Text(_s) => Err(CodegenError::UnsupportedLayout {
-                kernel: kernel_id,
-                layout: input_layout,
-                detail: "lazy JIT does not lower inline text literal patterns yet".into(),
-            }),
+            crate::InlinePipePatternKind::Text(text) => {
+                match &self.program.layouts()[input_layout].kind {
+                    LayoutKind::Primitive(PrimitiveType::Text)
+                        if self.program.layouts()[input_layout].abi == AbiPassMode::ByReference =>
+                    {
+                        let literal = self.materialize_text_constant(kernel_id, text.as_ref(), builder)?;
+                        Ok(self.lower_native_byte_sequence_equality(current, literal, builder))
+                    }
+                    _ => Err(CodegenError::UnsupportedLayout {
+                        kernel: kernel_id,
+                        layout: input_layout,
+                        detail: "lazy JIT does not lower inline text literal patterns for this layout yet"
+                            .into(),
+                    }),
+                }
+            }
             crate::InlinePipePatternKind::Constructor {
                 constructor,
                 arguments,
@@ -9573,6 +9702,15 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                                 LayoutKind::Option { element } => *element,
                                                 _ => input_layout,
                                             };
+                                        let some_block = builder.create_block();
+                                        let none_block = builder.create_block();
+                                        let merge_block = builder.create_block();
+                                        builder.append_block_param(merge_block, types::I8);
+                                        builder
+                                            .ins()
+                                            .brif(is_some, some_block, &[], none_block, &[]);
+
+                                        builder.switch_to_block(some_block);
                                         let sub_test = self.emit_pattern_test(
                                             kernel_id,
                                             current,
@@ -9581,13 +9719,6 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                             inline_subjects,
                                             builder,
                                         )?;
-                                        let is_some = if builder.func.dfg.value_type(is_some)
-                                            == types::I8
-                                        {
-                                            is_some
-                                        } else {
-                                            builder.ins().ireduce(types::I8, is_some)
-                                        };
                                         let sub_test = if builder.func.dfg.value_type(sub_test)
                                             == types::I8
                                         {
@@ -9595,7 +9726,17 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                         } else {
                                             builder.ins().ireduce(types::I8, sub_test)
                                         };
-                                        Ok(builder.ins().band(is_some, sub_test))
+                                        builder.ins().jump(merge_block, &[sub_test.into()]);
+                                        builder.seal_block(some_block);
+
+                                        builder.switch_to_block(none_block);
+                                        let no_match = builder.ins().iconst(types::I8, 0);
+                                        builder.ins().jump(merge_block, &[no_match.into()]);
+                                        builder.seal_block(none_block);
+
+                                        builder.switch_to_block(merge_block);
+                                        builder.seal_block(merge_block);
+                                        Ok(builder.block_params(merge_block)[0])
                                     }
                                     _ => Err(CodegenError::UnsupportedLayout {
                                         kernel: kernel_id,
@@ -9676,6 +9817,28 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                             None => Ok(builder.ins().iconst(types::I8, 1)),
                         }
                     }
+                    crate::InlinePipeConstructor::Builtin(crate::BuiltinTerm::True) => {
+                        if !arguments.is_empty() {
+                            return Err(CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail:
+                                    "lazy JIT only supports zero-argument True patterns".into(),
+                            });
+                        }
+                        Ok(builder.ins().icmp_imm(IntCC::Equal, current, 1))
+                    }
+                    crate::InlinePipeConstructor::Builtin(crate::BuiltinTerm::False) => {
+                        if !arguments.is_empty() {
+                            return Err(CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail:
+                                    "lazy JIT only supports zero-argument False patterns".into(),
+                            });
+                        }
+                        Ok(builder.ins().icmp_imm(IntCC::Equal, current, 0))
+                    }
                     crate::InlinePipeConstructor::Sum(handle) => {
                         let tag = match &self.program.layouts()[input_layout].kind {
                             LayoutKind::Sum(variants) => variants
@@ -9704,6 +9867,36 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                             )
                         }) {
                             Ok(combined)
+                        } else if let [sub_pat] = arguments.as_slice() {
+                            let payload_layout = crate::layout::variant_payload_layout(
+                                &self.program.layouts()[input_layout].kind,
+                                handle.variant_name.as_ref(),
+                            )
+                            .flatten()
+                            .ok_or_else(|| CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail: "lazy JIT expected a single payload layout for this constructor pattern"
+                                    .into(),
+                            })?;
+                            let payload_abi =
+                                self.field_abi_shape(kernel_id, payload_layout, "sum payload pattern")?;
+                            let payload =
+                                builder.ins().load(payload_abi.ty, MemFlags::new(), current, 8);
+                            let sub_test = self.emit_pattern_test(
+                                kernel_id,
+                                payload,
+                                sub_pat,
+                                payload_layout,
+                                inline_subjects,
+                                builder,
+                            )?;
+                            let sub_test = if builder.func.dfg.value_type(sub_test) == types::I8 {
+                                sub_test
+                            } else {
+                                builder.ins().ireduce(types::I8, sub_test)
+                            };
+                            Ok(builder.ins().band(combined, sub_test))
                         } else {
                             Err(CodegenError::UnsupportedLayout {
                                 kernel: kernel_id,
@@ -9768,7 +9961,6 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                             })
                         }
                     }
-                    _ => Ok(builder.ins().iconst(types::I8, 1)),
                 }
             }
             crate::InlinePipePatternKind::Tuple(sub_patterns) => {

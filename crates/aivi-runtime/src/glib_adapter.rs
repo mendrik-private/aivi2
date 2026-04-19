@@ -616,6 +616,10 @@ impl GlibLinkedRuntimeDriver {
         self.with_state(|state| state.linked.backend_arc())
     }
 
+    pub fn backend_program(&self) -> Option<Arc<aivi_backend::Program>> {
+        self.with_state(|state| state.linked.backend_payload().as_program().cloned())
+    }
+
     pub fn is_source_active(&self, instance: SourceInstanceId) -> bool {
         self.with_state(|state| state.linked.runtime().is_source_active(instance))
     }

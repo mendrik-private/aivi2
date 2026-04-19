@@ -16,12 +16,15 @@ use aivi_ffi_call::{
 
 use crate::{
     AbiPassMode, BackendExecutionEngine, BackendExecutionEngineKind, BackendExecutionOptions,
-    EvalFrame, EvaluationCallProfile, EvaluationError, ItemId, KernelEvaluationProfile,
-    KernelEvaluator, KernelExprId, KernelFingerprint, KernelId, LayoutId, LayoutKind,
-    NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program, RuntimeBigInt,
-    RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
-    RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
-    cache::{compile_kernel_jit_cached, instantiate_native_kernel_artifact},
+    BackendRuntimeMeta, EvalFrame, EvaluationCallProfile, EvaluationError, ItemId,
+    KernelEvaluationProfile, KernelEvaluator, KernelExprId, KernelFingerprint, KernelId, LayoutId,
+    LayoutKind, NativeKernelArtifact, NativeKernelArtifactSet, PrimitiveType, Program,
+    RuntimeBigInt, RuntimeCallable, RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
+    RuntimeRecordField, RuntimeValue, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
+    cache::{
+        compile_kernel_jit_cached, instantiate_native_kernel_artifact,
+        instantiate_native_kernel_artifact_for_runtime_meta,
+    },
     codegen::CompiledJitKernel,
     compute_kernel_fingerprint,
     program::ItemKind,
@@ -39,6 +42,15 @@ pub(crate) struct LazyJitExecutionEngine<'a> {
     kernel_plans: BTreeMap<KernelFingerprint, CachedKernelPlan>,
     jit_profile: Option<KernelEvaluationProfile>,
     combined_profile: Option<KernelEvaluationProfile>,
+}
+
+pub(crate) struct NativeOnlyExecutionEngine<'a> {
+    meta: &'a BackendRuntimeMeta,
+    native_artifacts: Option<&'a NativeKernelArtifactSet>,
+    last_kernel_call: Option<LastKernelCall>,
+    eval_trace: Vec<EvalFrame>,
+    kernel_plans: BTreeMap<KernelFingerprint, CachedKernelPlan>,
+    profile: Option<KernelEvaluationProfile>,
 }
 
 impl<'a> LazyJitExecutionEngine<'a> {
@@ -148,13 +160,80 @@ impl<'a> LazyJitExecutionEngine<'a> {
     }
 }
 
+impl<'a> NativeOnlyExecutionEngine<'a> {
+    pub(crate) fn new(
+        meta: &'a BackendRuntimeMeta,
+        native_artifacts: Option<&'a NativeKernelArtifactSet>,
+        options: BackendExecutionOptions,
+    ) -> Self {
+        Self::with_profile(meta, native_artifacts, options, false)
+    }
+
+    pub(crate) fn new_profiled(
+        meta: &'a BackendRuntimeMeta,
+        native_artifacts: Option<&'a NativeKernelArtifactSet>,
+        options: BackendExecutionOptions,
+    ) -> Self {
+        Self::with_profile(meta, native_artifacts, options, true)
+    }
+
+    fn with_profile(
+        meta: &'a BackendRuntimeMeta,
+        native_artifacts: Option<&'a NativeKernelArtifactSet>,
+        options: BackendExecutionOptions,
+        profiled: bool,
+    ) -> Self {
+        let mut engine = Self {
+            meta,
+            native_artifacts,
+            last_kernel_call: None,
+            eval_trace: Vec::new(),
+            kernel_plans: BTreeMap::new(),
+            profile: profiled.then(KernelEvaluationProfile::default),
+        };
+        if options.eagerly_compile_signals {
+            engine.prepare_signal_body_plans();
+        }
+        engine
+    }
+
+    fn record_kernel_profile(&mut self, kernel: KernelId, elapsed: Duration, cache_hit: bool) {
+        if let Some(profile) = &mut self.profile {
+            record_call(
+                profile.kernels.entry(kernel).or_default(),
+                elapsed,
+                cache_hit,
+            );
+        }
+    }
+
+    fn prepare_kernel_plan(&mut self, kernel_id: KernelId) -> KernelFingerprint {
+        let fingerprint = self.meta.kernels()[kernel_id].fingerprint;
+        self.kernel_plans.entry(fingerprint).or_insert_with(|| {
+            CachedKernelPlan::build_from_runtime_meta(self.meta, self.native_artifacts, kernel_id)
+        });
+        fingerprint
+    }
+
+    fn prepare_signal_body_plans(&mut self) {
+        let kernels = self
+            .meta
+            .items()
+            .iter()
+            .filter_map(|(_, item)| match &item.kind {
+                ItemKind::Signal(signal) => signal.body_kernel,
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for kernel_id in kernels {
+            self.prepare_kernel_plan(kernel_id);
+        }
+    }
+}
+
 impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
     fn kind(&self) -> BackendExecutionEngineKind {
         BackendExecutionEngineKind::Jit
-    }
-
-    fn program(&self) -> &Program {
-        self.program
     }
 
     fn profile(&self) -> Option<&KernelEvaluationProfile> {
@@ -223,7 +302,9 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                         globals,
                     )
                 }
-                CachedKernelPlan::Fallback => Err(CompiledKernelFailure::Fallback),
+                CachedKernelPlan::Fallback => Err(CompiledKernelFailure::Fallback(
+                    "kernel has no compiled native plan".into(),
+                )),
             }
         };
 
@@ -237,7 +318,7 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                 result
             }
             Err(CompiledKernelFailure::Evaluation(error)) => return Err(error),
-            Err(CompiledKernelFailure::Fallback) => {
+            Err(CompiledKernelFailure::Fallback(_detail)) => {
                 self.kernel_plans
                     .insert(fingerprint, CachedKernelPlan::Fallback);
                 let result = self.fallback.evaluate_kernel(
@@ -308,7 +389,9 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                     validate_compiled_inputs(compiled, None, environment)?;
                     execute_compiled_kernel(kernel_id, compiled, None, environment, globals)
                 }
-                CachedKernelPlan::Fallback => Err(CompiledKernelFailure::Fallback),
+                CachedKernelPlan::Fallback => Err(CompiledKernelFailure::Fallback(
+                    "kernel has no compiled native plan".into(),
+                )),
             }
         };
 
@@ -322,7 +405,7 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                 result
             }
             Err(CompiledKernelFailure::Evaluation(error)) => return Err(error),
-            Err(CompiledKernelFailure::Fallback) => {
+            Err(CompiledKernelFailure::Fallback(_)) => {
                 self.kernel_plans
                     .insert(fingerprint, CachedKernelPlan::Fallback);
                 let result =
@@ -505,6 +588,183 @@ impl TaskFunctionApplier for LazyJitExecutionEngine<'_> {
     }
 }
 
+impl BackendExecutionEngine for NativeOnlyExecutionEngine<'_> {
+    fn kind(&self) -> BackendExecutionEngineKind {
+        BackendExecutionEngineKind::Jit
+    }
+
+    fn profile(&self) -> Option<&KernelEvaluationProfile> {
+        self.profile.as_ref()
+    }
+
+    fn profile_snapshot(&self) -> Option<KernelEvaluationProfile> {
+        self.profile.clone()
+    }
+
+    fn eval_trace(&self) -> &[EvalFrame] {
+        &self.eval_trace
+    }
+
+    fn evaluate_kernel(
+        &mut self,
+        kernel_id: KernelId,
+        input_subject: Option<&RuntimeValue>,
+        environment: &[RuntimeValue],
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        let started_at = self.profile.as_ref().map(|_| Instant::now());
+        let kernel = self
+            .meta
+            .kernels()
+            .get(kernel_id)
+            .cloned()
+            .ok_or(EvaluationError::UnknownKernel { kernel: kernel_id })?;
+        if let Some((cached_result, cached_layout)) =
+            self.last_kernel_call.as_ref().and_then(|last| {
+                (last.kernel_id == kernel_id
+                    && last.input_subject.as_ref() == input_subject
+                    && last.environment.as_ref() == environment)
+                    .then(|| (last.result.clone(), last.result_layout))
+            })
+        {
+            self.record_kernel_profile(
+                kernel_id,
+                started_at.map_or(Duration::ZERO, |started| started.elapsed()),
+                true,
+            );
+            if cached_layout != kernel.result_layout {
+                return Err(EvaluationError::KernelResultLayoutMismatch {
+                    kernel: kernel_id,
+                    expected: kernel.result_layout,
+                    found: cached_result,
+                });
+            }
+            return Ok(cached_result);
+        }
+
+        let fingerprint = self.prepare_kernel_plan(kernel_id);
+        let plan = self
+            .kernel_plans
+            .get_mut(&fingerprint)
+            .expect("prepared plan should remain cached");
+        let result = match plan {
+            CachedKernelPlan::Compiled(compiled) => {
+                validate_compiled_inputs(compiled, input_subject, environment)?;
+                match execute_compiled_kernel(
+                    kernel_id,
+                    compiled,
+                    input_subject,
+                    environment,
+                    globals,
+                ) {
+                    Ok(result) => {
+                        self.record_kernel_profile(
+                            kernel_id,
+                            started_at.map_or(Duration::ZERO, |started| started.elapsed()),
+                            false,
+                        );
+                        result
+                    }
+                    Err(CompiledKernelFailure::Evaluation(error)) => return Err(error),
+                    Err(CompiledKernelFailure::Fallback(detail)) => {
+                        return Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+                            detail: format!(
+                                "built bundles cannot fall back to backend metadata execution for kernel {}: {}; rebuild with full `aivi run` if this path still needs interpretation",
+                                kernel_id.as_raw(),
+                                detail
+                            )
+                            .into_boxed_str(),
+                        });
+                    }
+                }
+            }
+            CachedKernelPlan::Fallback => {
+                return Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+                    detail: format!(
+                        "built bundles cannot evaluate kernel {} without native machine code; `aivi build` must reject this runtime path",
+                        kernel_id.as_raw()
+                    )
+                    .into_boxed_str(),
+                });
+            }
+        };
+
+        self.last_kernel_call = Some(LastKernelCall {
+            kernel_id,
+            input_subject: input_subject.cloned(),
+            environment: environment.to_vec().into_boxed_slice(),
+            result: result.clone(),
+            result_layout: kernel.result_layout,
+        });
+        Ok(result)
+    }
+
+    fn evaluate_signal_body_kernel(
+        &mut self,
+        kernel_id: KernelId,
+        environment: &[RuntimeValue],
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        self.evaluate_kernel(kernel_id, None, environment, globals)
+    }
+
+    fn subtract_runtime_values(
+        &self,
+        _kernel_id: KernelId,
+        _left: RuntimeValue,
+        _right: RuntimeValue,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+            detail: "built bundles do not support interpreted temporal subtraction without backend metadata"
+                .into(),
+        })
+    }
+
+    fn apply_runtime_callable(
+        &mut self,
+        _kernel_id: KernelId,
+        _callee: RuntimeValue,
+        _args: Vec<RuntimeValue>,
+        _globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+            detail:
+                "built bundles do not support runtime callable application without backend metadata"
+                    .into(),
+        })
+    }
+
+    fn evaluate_item(
+        &mut self,
+        item: ItemId,
+        _globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+            detail: format!(
+                "built bundles do not support backend item evaluation without native kernels (item {} `{}`)",
+                item.as_raw(),
+                self.meta.item_name(item)
+            )
+            .into_boxed_str(),
+        })
+    }
+}
+
+impl TaskFunctionApplier for NativeOnlyExecutionEngine<'_> {
+    fn apply_task_function(
+        &mut self,
+        _function: RuntimeValue,
+        _args: Vec<RuntimeValue>,
+        _globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        Err(EvaluationError::UnsupportedNativeOnlyRuntimeOperation {
+            detail:
+                "built bundles do not support task function composition without backend metadata"
+                    .into(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::LazyJitExecutionEngine;
@@ -679,16 +939,22 @@ fn execute_compiled_kernel(
             .iter_mut()
             .zip(plan.signal_slot_plans.iter())
         {
-            let value = globals
-                .get(&slot.item)
-                .ok_or(CompiledKernelFailure::Fallback)?;
+            let value = globals.get(&slot.item).ok_or_else(|| {
+                CompiledKernelFailure::Fallback(
+                    format!("missing signal slot global item {}", slot.item.as_raw())
+                        .into_boxed_str(),
+                )
+            })?;
             if !slot_plan.write_slot(
                 strip_signal_wrappers(value),
                 &mut slot.cell,
                 &mut arena_mut,
                 &mut hints,
             ) {
-                return Err(CompiledKernelFailure::Fallback);
+                return Err(CompiledKernelFailure::Fallback(
+                    format!("failed to marshal signal slot {}", slot.item.as_raw())
+                        .into_boxed_str(),
+                ));
             }
         }
         for (slot, slot_plan) in plan
@@ -697,16 +963,24 @@ fn execute_compiled_kernel(
             .iter_mut()
             .zip(plan.imported_item_slot_plans.iter())
         {
-            let value = globals
-                .get(&slot.item)
-                .ok_or(CompiledKernelFailure::Fallback)?;
+            let value = globals.get(&slot.item).ok_or_else(|| {
+                CompiledKernelFailure::Fallback(
+                    format!("missing imported item slot {}", slot.item.as_raw()).into_boxed_str(),
+                )
+            })?;
             if !slot_plan.write_slot(
                 strip_signal_wrappers(value),
                 &mut slot.cell,
                 &mut arena_mut,
                 &mut hints,
             ) {
-                return Err(CompiledKernelFailure::Fallback);
+                return Err(CompiledKernelFailure::Fallback(
+                    format!(
+                        "failed to marshal imported item slot {}",
+                        slot.item.as_raw()
+                    )
+                    .into_boxed_str(),
+                ));
             }
         }
     }
@@ -720,13 +994,23 @@ fn execute_compiled_kernel(
                 EvaluationError::MissingInputSubject { kernel: kernel_id },
             ))?;
             let Some(arg) = input_plan.pack_argument(value, &mut arena_mut, &mut hints) else {
-                return Err(CompiledKernelFailure::Fallback);
+                return Err(CompiledKernelFailure::Fallback(
+                    "failed to marshal native input subject".into(),
+                ));
             };
             args.push(arg);
         }
-        for (slot_plan, value) in plan.environment_plans.iter().zip(environment.iter()) {
+        for (index, (slot_plan, value)) in plan
+            .environment_plans
+            .iter()
+            .zip(environment.iter())
+            .enumerate()
+        {
             let Some(arg) = slot_plan.pack_argument(value, &mut arena_mut, &mut hints) else {
-                return Err(CompiledKernelFailure::Fallback);
+                return Err(CompiledKernelFailure::Fallback(
+                    format!("failed to marshal native environment argument {index}")
+                        .into_boxed_str(),
+                ));
             };
             args.push(arg);
         }
@@ -735,10 +1019,10 @@ fn execute_compiled_kernel(
     let call_result = with_active_arena(Rc::clone(&arena), || {
         plan.artifact.caller.call(plan.artifact.function, &args)
     })
-    .map_err(|_| CompiledKernelFailure::Fallback)?;
+    .map_err(|_| CompiledKernelFailure::Fallback("native call failed".into()))?;
     plan.result_plan
         .unpack_result(call_result, &hints)
-        .ok_or(CompiledKernelFailure::Fallback)
+        .ok_or_else(|| CompiledKernelFailure::Fallback("failed to unmarshal native result".into()))
 }
 
 enum CachedKernelPlan {
@@ -755,6 +1039,21 @@ impl CachedKernelPlan {
         let Some(compiled) =
             NativeKernelPlan::compile_with_native_artifacts(program, native_artifacts, kernel_id)
         else {
+            return Self::Fallback;
+        };
+        Self::Compiled(compiled)
+    }
+
+    fn build_from_runtime_meta(
+        meta: &BackendRuntimeMeta,
+        native_artifacts: Option<&NativeKernelArtifactSet>,
+        kernel_id: KernelId,
+    ) -> Self {
+        let Some(compiled) = NativeKernelPlan::from_runtime_meta_with_native_artifacts(
+            meta,
+            native_artifacts,
+            kernel_id,
+        ) else {
             return Self::Fallback;
         };
         Self::Compiled(compiled)
@@ -800,13 +1099,34 @@ impl NativeKernelPlan {
         Self::compile(program, kernel_id)
     }
 
+    pub fn from_runtime_meta_with_native_artifacts(
+        meta: &BackendRuntimeMeta,
+        native_artifacts: Option<&NativeKernelArtifactSet>,
+        kernel_id: KernelId,
+    ) -> Option<Self> {
+        let fingerprint = meta.kernels().get(kernel_id)?.fingerprint;
+        let artifact = native_artifacts.and_then(|artifacts| artifacts.get(fingerprint))?;
+        Self::from_native_artifact_for_runtime_meta(meta, kernel_id, artifact)
+    }
+
     pub fn from_native_artifact(
         program: &Program,
         kernel_id: KernelId,
         artifact: &NativeKernelArtifact,
     ) -> Option<Self> {
         let artifact = instantiate_native_kernel_artifact(program, kernel_id, artifact).ok()?;
-        Self::from_compiled_jit(program, kernel_id, artifact)
+        Self::from_compiled_jit_with_options(program, kernel_id, artifact, false)
+    }
+
+    pub fn from_native_artifact_for_runtime_meta(
+        meta: &BackendRuntimeMeta,
+        kernel_id: KernelId,
+        artifact: &NativeKernelArtifact,
+    ) -> Option<Self> {
+        let replay_program = meta.to_replay_program();
+        let artifact =
+            instantiate_native_kernel_artifact_for_runtime_meta(meta, kernel_id, artifact).ok()?;
+        Self::from_compiled_jit_with_options(&replay_program, kernel_id, artifact, true)
     }
 
     fn from_compiled_jit(
@@ -814,26 +1134,57 @@ impl NativeKernelPlan {
         kernel_id: KernelId,
         artifact: CompiledJitKernel,
     ) -> Option<Self> {
+        Self::from_compiled_jit_with_options(program, kernel_id, artifact, false)
+    }
+
+    fn from_compiled_jit_with_options(
+        program: &Program,
+        kernel_id: KernelId,
+        artifact: CompiledJitKernel,
+        decode_named_domain_as_int: bool,
+    ) -> Option<Self> {
         let kernel = &program.kernels()[kernel_id];
         let input_plan = match kernel.input_subject {
-            Some(layout) => Some(MarshalPlan::for_layout(program, layout)?),
+            Some(layout) => Some(MarshalPlan::for_layout_with_options(
+                program,
+                layout,
+                decode_named_domain_as_int,
+            )?),
             None => None,
         };
         let environment_plans = kernel
             .environment
             .iter()
-            .map(|layout| MarshalPlan::for_layout(program, *layout))
+            .map(|layout| {
+                MarshalPlan::for_layout_with_options(program, *layout, decode_named_domain_as_int)
+            })
             .collect::<Option<Vec<_>>>()?;
-        let result_plan = MarshalPlan::for_layout(program, kernel.result_layout)?;
+        let result_plan = MarshalPlan::for_layout_with_options(
+            program,
+            kernel.result_layout,
+            decode_named_domain_as_int,
+        )?;
         let signal_slot_plans = artifact
             .signal_slots
             .iter()
-            .map(|slot| MarshalPlan::for_layout(program, slot.layout))
+            .map(|slot| {
+                MarshalPlan::for_layout_with_options(
+                    program,
+                    slot.layout,
+                    decode_named_domain_as_int,
+                )
+            })
             .collect::<Option<Vec<_>>>()?;
         let imported_item_slot_plans = artifact
             .imported_item_slots
             .iter()
-            .map(|slot| MarshalPlan::for_layout(program, slot.layout))
+            .map(|slot| {
+                MarshalPlan::for_layout_with_options(
+                    program,
+                    slot.layout,
+                    decode_named_domain_as_int,
+                )
+            })
             .collect::<Option<Vec<_>>>()?;
         Some(Self {
             kernel_id,
@@ -871,7 +1222,7 @@ impl NativeKernelPlan {
             .map_err(NativeKernelExecutionError::Evaluation)?;
         match execute_compiled_kernel(self.kernel_id, self, input_subject, environment, globals) {
             Ok(value) => Ok(value),
-            Err(CompiledKernelFailure::Fallback) => {
+            Err(CompiledKernelFailure::Fallback(_detail)) => {
                 Err(NativeKernelExecutionError::FallbackRequired)
             }
             Err(CompiledKernelFailure::Evaluation(error)) => {
@@ -929,6 +1280,7 @@ struct OpaqueVariantPlan {
 
 #[derive(Clone)]
 enum MarshalPlanKind {
+    Unit,
     Int,
     Float,
     Bool,
@@ -972,7 +1324,14 @@ enum MarshalPlanKind {
         valid: Box<MarshalPlan>,
         invalid: Box<MarshalPlan>,
     },
+    Signal {
+        element: Box<MarshalPlan>,
+    },
     AnonymousDomain {
+        carrier: Box<MarshalPlan>,
+        surface_member: Box<str>,
+    },
+    RepresentationalDomain {
         carrier: Box<MarshalPlan>,
     },
     Opaque {
@@ -980,7 +1339,9 @@ enum MarshalPlanKind {
         type_name: Box<str>,
         variants: Vec<OpaqueVariantPlan>,
     },
-    Domain,
+    Domain {
+        decode_as_int: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -990,8 +1351,19 @@ struct MarshalPlan {
 
 impl MarshalPlan {
     fn for_layout(program: &Program, layout: LayoutId) -> Option<Self> {
-        let layout = program.layouts().get(layout)?;
-        let kind = match (&layout.abi, &layout.kind) {
+        Self::for_layout_with_options(program, layout, false)
+    }
+
+    fn for_layout_with_options(
+        program: &Program,
+        layout: LayoutId,
+        decode_named_domain_as_int: bool,
+    ) -> Option<Self> {
+        let layout_data = program.layouts().get(layout)?;
+        let kind = match (&layout_data.abi, &layout_data.kind) {
+            (AbiPassMode::ByValue, LayoutKind::Primitive(PrimitiveType::Unit)) => {
+                MarshalPlanKind::Unit
+            }
             (AbiPassMode::ByValue, LayoutKind::Primitive(PrimitiveType::Int)) => {
                 MarshalPlanKind::Int
             }
@@ -1013,6 +1385,13 @@ impl MarshalPlan {
             (AbiPassMode::ByReference, LayoutKind::Primitive(PrimitiveType::Bytes)) => {
                 MarshalPlanKind::Bytes
             }
+            (_, LayoutKind::Signal { element }) => MarshalPlanKind::Signal {
+                element: Box::new(Self::for_layout_with_options(
+                    program,
+                    *element,
+                    decode_named_domain_as_int,
+                )?),
+            },
             (AbiPassMode::ByValue, LayoutKind::Option { element }) => {
                 let payload = program.layouts().get(*element)?;
                 let kind = match (&payload.abi, &payload.kind) {
@@ -1035,11 +1414,16 @@ impl MarshalPlan {
                     return None;
                 }
                 MarshalPlanKind::NicheOption {
-                    payload: Box::new(Self::for_layout(program, *element)?),
+                    payload: Box::new(Self::for_layout_with_options(
+                        program,
+                        *element,
+                        decode_named_domain_as_int,
+                    )?),
                 }
             }
             (AbiPassMode::ByReference, LayoutKind::Tuple(elements)) => {
-                let (fields, size, align) = build_tuple_fields(program, elements)?;
+                let (fields, size, align) =
+                    build_tuple_fields_with_options(program, elements, decode_named_domain_as_int)?;
                 MarshalPlanKind::Tuple {
                     fields,
                     size,
@@ -1047,7 +1431,8 @@ impl MarshalPlan {
                 }
             }
             (AbiPassMode::ByReference, LayoutKind::Record(fields)) => {
-                let (fields, size, align) = build_record_fields(program, fields)?;
+                let (fields, size, align) =
+                    build_record_fields_with_options(program, fields, decode_named_domain_as_int)?;
                 MarshalPlanKind::Record {
                     fields,
                     size,
@@ -1055,36 +1440,77 @@ impl MarshalPlan {
                 }
             }
             (AbiPassMode::ByReference, LayoutKind::List { element }) => MarshalPlanKind::List {
-                element: Box::new(Self::for_layout(program, *element)?),
+                element: Box::new(Self::for_layout_with_options(
+                    program,
+                    *element,
+                    decode_named_domain_as_int,
+                )?),
                 element_size: cell_size_for_layout(program, *element)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Set { element }) => MarshalPlanKind::Set {
-                element: Box::new(Self::for_layout(program, *element)?),
+                element: Box::new(Self::for_layout_with_options(
+                    program,
+                    *element,
+                    decode_named_domain_as_int,
+                )?),
                 element_size: cell_size_for_layout(program, *element)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Map { key, value }) => MarshalPlanKind::Map {
-                key: Box::new(Self::for_layout(program, *key)?),
+                key: Box::new(Self::for_layout_with_options(
+                    program,
+                    *key,
+                    decode_named_domain_as_int,
+                )?),
                 key_size: cell_size_for_layout(program, *key)?,
-                value: Box::new(Self::for_layout(program, *value)?),
+                value: Box::new(Self::for_layout_with_options(
+                    program,
+                    *value,
+                    decode_named_domain_as_int,
+                )?),
                 value_size: cell_size_for_layout(program, *value)?,
             },
             (AbiPassMode::ByReference, LayoutKind::Result { error, value }) => {
                 MarshalPlanKind::Result {
-                    ok: Box::new(Self::for_layout(program, *value)?),
-                    err: Box::new(Self::for_layout(program, *error)?),
+                    ok: Box::new(Self::for_layout_with_options(
+                        program,
+                        *value,
+                        decode_named_domain_as_int,
+                    )?),
+                    err: Box::new(Self::for_layout_with_options(
+                        program,
+                        *error,
+                        decode_named_domain_as_int,
+                    )?),
                 }
             }
             (AbiPassMode::ByReference, LayoutKind::Validation { error, value }) => {
                 MarshalPlanKind::Validation {
-                    valid: Box::new(Self::for_layout(program, *value)?),
-                    invalid: Box::new(Self::for_layout(program, *error)?),
+                    valid: Box::new(Self::for_layout_with_options(
+                        program,
+                        *value,
+                        decode_named_domain_as_int,
+                    )?),
+                    invalid: Box::new(Self::for_layout_with_options(
+                        program,
+                        *error,
+                        decode_named_domain_as_int,
+                    )?),
                 }
             }
-            (AbiPassMode::ByReference, LayoutKind::AnonymousDomain { carrier, .. }) => {
-                MarshalPlanKind::AnonymousDomain {
-                    carrier: Box::new(Self::for_layout(program, *carrier)?),
-                }
-            }
+            (
+                AbiPassMode::ByReference,
+                LayoutKind::AnonymousDomain {
+                    carrier,
+                    surface_member,
+                },
+            ) => MarshalPlanKind::AnonymousDomain {
+                carrier: Box::new(Self::for_layout_with_options(
+                    program,
+                    *carrier,
+                    decode_named_domain_as_int,
+                )?),
+                surface_member: surface_member.clone(),
+            },
             (
                 AbiPassMode::ByReference,
                 LayoutKind::Opaque {
@@ -1113,15 +1539,34 @@ impl MarshalPlan {
                     })
                     .collect::<Option<Vec<_>>>()?,
             },
-            (AbiPassMode::ByReference, LayoutKind::Domain { .. }) => MarshalPlanKind::Domain,
+            (AbiPassMode::ByReference, LayoutKind::Domain { .. }) => MarshalPlanKind::Domain {
+                decode_as_int: decode_named_domain_as_int,
+            },
             _ => return None,
+        };
+        let kind = match (&layout_data.abi, &layout_data.kind) {
+            (AbiPassMode::ByReference, LayoutKind::Domain { .. }) => {
+                if let Some(carrier) = program.named_domain_carrier(layout) {
+                    MarshalPlanKind::RepresentationalDomain {
+                        carrier: Box::new(Self::for_layout_with_options(
+                            program,
+                            carrier,
+                            decode_named_domain_as_int,
+                        )?),
+                    }
+                } else {
+                    kind
+                }
+            }
+            _ => kind,
         };
         Some(Self { kind })
     }
 
     fn matches(&self, value: &RuntimeValue) -> bool {
         match (&self.kind, value) {
-            (MarshalPlanKind::Int, RuntimeValue::Int(_))
+            (MarshalPlanKind::Unit, RuntimeValue::Unit)
+            | (MarshalPlanKind::Int, RuntimeValue::Int(_))
             | (MarshalPlanKind::Float, RuntimeValue::Float(_))
             | (MarshalPlanKind::Bool, RuntimeValue::Bool(_))
             | (MarshalPlanKind::Decimal, RuntimeValue::Decimal(_))
@@ -1185,9 +1630,17 @@ impl MarshalPlan {
                 MarshalPlanKind::Validation { invalid, .. },
                 RuntimeValue::ValidationInvalid(value),
             ) => invalid.matches(value.as_ref()),
-            (MarshalPlanKind::AnonymousDomain { carrier }, value) => {
-                carrier.matches(value) || matches!(value, RuntimeValue::SuffixedInteger { .. })
+            (MarshalPlanKind::Signal { element }, value) => {
+                element.matches(strip_signal_wrappers(value))
             }
+            (
+                MarshalPlanKind::AnonymousDomain {
+                    carrier,
+                    surface_member: _,
+                },
+                value,
+            ) => carrier.matches(value) || matches!(value, RuntimeValue::SuffixedInteger { .. }),
+            (MarshalPlanKind::RepresentationalDomain { carrier }, value) => carrier.matches(value),
             (
                 MarshalPlanKind::Opaque {
                     item,
@@ -1209,7 +1662,7 @@ impl MarshalPlan {
                             )
                         })
             }
-            (MarshalPlanKind::Domain, value) => !matches!(value, RuntimeValue::Signal(_)),
+            (MarshalPlanKind::Domain { .. }, value) => !matches!(value, RuntimeValue::Signal(_)),
             _ => false,
         }
     }
@@ -1221,6 +1674,10 @@ impl MarshalPlan {
         hints: &mut PackedValueHints,
     ) -> Option<AbiValue> {
         match &self.kind {
+            MarshalPlanKind::Unit => match value {
+                RuntimeValue::Unit => Some(AbiValue::I8(0)),
+                _ => None,
+            },
             MarshalPlanKind::Int => match value {
                 RuntimeValue::Int(value) => Some(AbiValue::I64(*value)),
                 _ => None,
@@ -1260,6 +1717,7 @@ impl MarshalPlan {
 
     fn unpack_result(&self, value: AbiValue, hints: &PackedValueHints) -> Option<RuntimeValue> {
         match (&self.kind, value) {
+            (MarshalPlanKind::Unit, AbiValue::I8(_)) => Some(RuntimeValue::Unit),
             (MarshalPlanKind::Int, AbiValue::I64(value)) => Some(RuntimeValue::Int(value)),
             (MarshalPlanKind::Float, AbiValue::F64(value)) => {
                 Some(RuntimeValue::Float(RuntimeFloat::new(value)?))
@@ -1274,18 +1732,20 @@ impl MarshalPlan {
     }
 
     fn cell_size(&self) -> usize {
-        match self.kind {
+        match &self.kind {
             MarshalPlanKind::Int | MarshalPlanKind::Float => 8,
-            MarshalPlanKind::Bool => 1,
+            MarshalPlanKind::Unit | MarshalPlanKind::Bool => 1,
             MarshalPlanKind::InlineOption(_) => 16,
+            MarshalPlanKind::Signal { element } => element.cell_size(),
             _ => std::mem::size_of::<usize>(),
         }
     }
 
     fn cell_align(&self) -> usize {
-        match self.kind {
-            MarshalPlanKind::Bool => 1,
+        match &self.kind {
+            MarshalPlanKind::Unit | MarshalPlanKind::Bool => 1,
             MarshalPlanKind::InlineOption(_) => 16,
+            MarshalPlanKind::Signal { element } => element.cell_align(),
             _ => self.cell_size().max(1),
         }
     }
@@ -1297,6 +1757,10 @@ impl MarshalPlan {
         hints: &mut PackedValueHints,
     ) -> Option<Vec<u8>> {
         match &self.kind {
+            MarshalPlanKind::Unit => match value {
+                RuntimeValue::Unit => Some(vec![0]),
+                _ => None,
+            },
             MarshalPlanKind::Int => match value {
                 RuntimeValue::Int(value) => Some(value.to_ne_bytes().to_vec()),
                 _ => None,
@@ -1312,12 +1776,16 @@ impl MarshalPlan {
             MarshalPlanKind::InlineOption(kind) => {
                 Some(pack_inline_option(*kind, value)?.to_ne_bytes().to_vec())
             }
+            MarshalPlanKind::Signal { element } => {
+                element.encode_cell_bytes(strip_signal_wrappers(value), arena, hints)
+            }
             _ => Some(pointer_bytes(self.pack_reference(value, arena, hints)?)),
         }
     }
 
     fn decode_cell_bytes(&self, bytes: &[u8], hints: &PackedValueHints) -> Option<RuntimeValue> {
         match &self.kind {
+            MarshalPlanKind::Unit => Some(RuntimeValue::Unit),
             MarshalPlanKind::Int => Some(RuntimeValue::Int(i64::from_ne_bytes(
                 bytes.try_into().ok()?,
             ))),
@@ -1328,6 +1796,7 @@ impl MarshalPlan {
             MarshalPlanKind::InlineOption(kind) => {
                 unpack_inline_option(*kind, u128::from_ne_bytes(bytes.try_into().ok()?))
             }
+            MarshalPlanKind::Signal { element } => element.decode_cell_bytes(bytes, hints),
             _ => self.unpack_reference(pointer_from_bytes(bytes)?, hints),
         }
     }
@@ -1466,14 +1935,30 @@ impl MarshalPlan {
                 arena,
                 hints,
             )?,
-            MarshalPlanKind::AnonymousDomain { carrier } => match value {
+            MarshalPlanKind::Signal { element } => {
+                return element.pack_reference(strip_signal_wrappers(value), arena, hints);
+            }
+            MarshalPlanKind::AnonymousDomain {
+                carrier,
+                surface_member: _,
+            } => match value {
                 RuntimeValue::SuffixedInteger { raw, .. } => {
                     let parsed = raw.parse::<i64>().ok()?;
-                    pack_int_reference(parsed, arena)
+                    pack_domain_carrier_reference(
+                        carrier,
+                        &RuntimeValue::Int(parsed),
+                        arena,
+                        hints,
+                    )?
                 }
-                value if carrier.matches(value) => carrier.pack_reference(value, arena, hints)?,
+                value if carrier.matches(value) => {
+                    pack_domain_carrier_reference(carrier, value, arena, hints)?
+                }
                 _ => return None,
             },
+            MarshalPlanKind::RepresentationalDomain { carrier } => {
+                pack_domain_carrier_reference(carrier, value, arena, hints)?
+            }
             MarshalPlanKind::Opaque {
                 item,
                 type_name,
@@ -1500,8 +1985,9 @@ impl MarshalPlan {
                 encoded[8..8 + payload.len()].copy_from_slice(&payload);
                 arena.store_raw_bytes_aligned(&encoded, 8)
             }
-            MarshalPlanKind::Domain => pack_erased_domain_value(value, arena)?,
-            MarshalPlanKind::Int
+            MarshalPlanKind::Domain { .. } => pack_erased_domain_value(value, arena, hints)?,
+            MarshalPlanKind::Unit
+            | MarshalPlanKind::Int
             | MarshalPlanKind::Float
             | MarshalPlanKind::Bool
             | MarshalPlanKind::InlineOption(_) => return None,
@@ -1621,8 +2107,19 @@ impl MarshalPlan {
             MarshalPlanKind::Validation { valid, invalid } => {
                 unpack_tagged_payload(pointer, valid, invalid, RuntimeValueTag::Validation, hints)
             }
-            MarshalPlanKind::AnonymousDomain { carrier } => {
-                carrier.unpack_reference(pointer, hints)
+            MarshalPlanKind::Signal { element } => element.unpack_reference(pointer, hints),
+            MarshalPlanKind::AnonymousDomain {
+                carrier,
+                surface_member,
+            } => match unpack_domain_carrier_value(carrier, pointer, hints)? {
+                RuntimeValue::Int(raw) => Some(RuntimeValue::SuffixedInteger {
+                    raw: raw.to_string().into_boxed_str(),
+                    suffix: surface_member.clone(),
+                }),
+                other => Some(other),
+            },
+            MarshalPlanKind::RepresentationalDomain { carrier } => {
+                unpack_domain_carrier_value(carrier, pointer, hints)
             }
             MarshalPlanKind::Opaque {
                 item,
@@ -1645,13 +2142,49 @@ impl MarshalPlan {
                     fields,
                 }))
             }
-            MarshalPlanKind::Domain => None,
-            MarshalPlanKind::Int
+            MarshalPlanKind::Domain { decode_as_int } => {
+                if !decode_as_int {
+                    return None;
+                }
+                let bytes = read_marshaled_field(pointer, 0, 8)?;
+                Some(RuntimeValue::Int(i64::from_ne_bytes(
+                    bytes.as_ref().try_into().ok()?,
+                )))
+            }
+            MarshalPlanKind::Unit
+            | MarshalPlanKind::Int
             | MarshalPlanKind::Float
             | MarshalPlanKind::Bool
             | MarshalPlanKind::InlineOption(_) => None,
         }
     }
+}
+
+fn pack_domain_carrier_reference(
+    carrier: &MarshalPlan,
+    value: &RuntimeValue,
+    arena: &mut AllocationArena,
+    hints: &mut PackedValueHints,
+) -> Option<*const c_void> {
+    if !carrier.matches(value) {
+        return None;
+    }
+    if let Some(pointer) = carrier.pack_reference(value, arena, hints) {
+        return Some(pointer);
+    }
+    let bytes = carrier.encode_cell_bytes(value, arena, hints)?;
+    Some(arena.store_raw_bytes_aligned(&bytes, carrier.cell_align()))
+}
+
+fn unpack_domain_carrier_value(
+    carrier: &MarshalPlan,
+    pointer: *const c_void,
+    hints: &PackedValueHints,
+) -> Option<RuntimeValue> {
+    carrier.unpack_reference(pointer, hints).or_else(|| {
+        let bytes = read_marshaled_field(pointer, 0, carrier.cell_size())?;
+        carrier.decode_cell_bytes(bytes.as_ref(), hints)
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1660,15 +2193,20 @@ enum RuntimeValueTag {
     Validation,
 }
 
-fn build_tuple_fields(
+fn build_tuple_fields_with_options(
     program: &Program,
     elements: &[LayoutId],
+    decode_named_domain_as_int: bool,
 ) -> Option<(Vec<AggregateFieldPlan>, usize, usize)> {
     let mut fields = Vec::with_capacity(elements.len());
     let mut offset = 0usize;
     let mut max_align = 1usize;
     for layout in elements {
-        let plan = Box::new(MarshalPlan::for_layout(program, *layout)?);
+        let plan = Box::new(MarshalPlan::for_layout_with_options(
+            program,
+            *layout,
+            decode_named_domain_as_int,
+        )?);
         let align = plan.cell_align();
         let size = plan.cell_size();
         max_align = max_align.max(align);
@@ -1679,15 +2217,20 @@ fn build_tuple_fields(
     Some((fields, offset, max_align))
 }
 
-fn build_record_fields(
+fn build_record_fields_with_options(
     program: &Program,
     fields: &[crate::RecordFieldLayout],
+    decode_named_domain_as_int: bool,
 ) -> Option<(Vec<RecordFieldPlan>, usize, usize)> {
     let mut plans = Vec::with_capacity(fields.len());
     let mut offset = 0usize;
     let mut max_align = 1usize;
     for field in fields {
-        let plan = Box::new(MarshalPlan::for_layout(program, field.layout)?);
+        let plan = Box::new(MarshalPlan::for_layout_with_options(
+            program,
+            field.layout,
+            decode_named_domain_as_int,
+        )?);
         let align = plan.cell_align();
         let size = plan.cell_size();
         max_align = max_align.max(align);
@@ -1888,29 +2431,184 @@ fn decode_opaque_variant_fields(
     }
 }
 
+fn pack_erased_domain_field(
+    value: &RuntimeValue,
+    arena: &mut AllocationArena,
+    hints: &mut PackedValueHints,
+) -> Option<(Vec<u8>, usize, usize)> {
+    match value {
+        RuntimeValue::Int(value) => Some((value.to_ne_bytes().to_vec(), 8, 8)),
+        RuntimeValue::Float(value) => Some((value.to_f64().to_bits().to_ne_bytes().to_vec(), 8, 8)),
+        RuntimeValue::Bool(value) => Some((vec![u8::from(*value)], 1, 1)),
+        RuntimeValue::SuffixedInteger { raw, .. } => {
+            let parsed = raw.parse::<i64>().ok()?;
+            Some((parsed.to_ne_bytes().to_vec(), 8, 8))
+        }
+        _ => {
+            let pointer = pack_erased_domain_value(value, arena, hints)?;
+            Some(((pointer as usize).to_ne_bytes().to_vec(), 8, 8))
+        }
+    }
+}
+
+fn align_marshaled_offset(offset: usize, align: usize) -> usize {
+    if align <= 1 {
+        offset
+    } else {
+        let mask = align - 1;
+        (offset + mask) & !mask
+    }
+}
+
 fn pack_erased_domain_value(
     value: &RuntimeValue,
     arena: &mut AllocationArena,
+    hints: &mut PackedValueHints,
 ) -> Option<*const c_void> {
-    match value {
-        RuntimeValue::Int(value) => Some(pack_int_reference(*value, arena)),
-        RuntimeValue::Float(value) => Some(pack_float_reference(*value, arena)),
-        RuntimeValue::Bool(value) => Some(pack_bool_reference(*value, arena)),
-        RuntimeValue::Text(value) => Some(encode_len_prefixed_bytes(value.as_bytes(), arena)),
-        RuntimeValue::Bytes(value) => Some(encode_len_prefixed_bytes(value.as_ref(), arena)),
+    let pointer = match value {
+        RuntimeValue::Int(value) => pack_int_reference(*value, arena),
+        RuntimeValue::Float(value) => pack_float_reference(*value, arena),
+        RuntimeValue::Bool(value) => pack_bool_reference(*value, arena),
+        RuntimeValue::Text(value) => encode_len_prefixed_bytes(value.as_bytes(), arena),
+        RuntimeValue::Bytes(value) => encode_len_prefixed_bytes(value.as_ref(), arena),
         RuntimeValue::Decimal(value) => {
-            Some(arena.store_raw_bytes_aligned(value.encode_constant_bytes().as_ref(), 16))
+            arena.store_raw_bytes_aligned(value.encode_constant_bytes().as_ref(), 16)
         }
         RuntimeValue::BigInt(value) => {
-            Some(arena.store_raw_bytes_aligned(value.encode_constant_bytes().as_ref(), 8))
+            arena.store_raw_bytes_aligned(value.encode_constant_bytes().as_ref(), 8)
         }
-        RuntimeValue::OptionNone => Some(ptr::null()),
-        RuntimeValue::OptionSome(value) => pack_erased_domain_value(value.as_ref(), arena),
+        RuntimeValue::OptionNone => return Some(ptr::null()),
+        RuntimeValue::OptionSome(value) => pack_erased_domain_value(value.as_ref(), arena, hints)?,
         RuntimeValue::SuffixedInteger { raw, .. } => {
-            Some(pack_int_reference(raw.parse::<i64>().ok()?, arena))
+            pack_int_reference(raw.parse::<i64>().ok()?, arena)
         }
-        _ => None,
-    }
+        RuntimeValue::Tuple(values) => {
+            let mut encoded = Vec::new();
+            let mut offset = 0usize;
+            let mut align = 1usize;
+            for value in values {
+                let (bytes, size, field_align) = pack_erased_domain_field(value, arena, hints)?;
+                offset = align_marshaled_offset(offset, field_align);
+                if encoded.len() < offset + size {
+                    encoded.resize(offset + size, 0);
+                }
+                encoded[offset..offset + size].copy_from_slice(&bytes);
+                offset += size;
+                align = align.max(field_align);
+            }
+            arena.store_raw_bytes_aligned(&encoded, align)
+        }
+        RuntimeValue::Record(values) => {
+            let mut encoded = Vec::new();
+            let mut offset = 0usize;
+            let mut align = 1usize;
+            for field in values {
+                let (bytes, size, field_align) =
+                    pack_erased_domain_field(&field.value, arena, hints)?;
+                offset = align_marshaled_offset(offset, field_align);
+                if encoded.len() < offset + size {
+                    encoded.resize(offset + size, 0);
+                }
+                encoded[offset..offset + size].copy_from_slice(&bytes);
+                offset += size;
+                align = align.max(field_align);
+            }
+            arena.store_raw_bytes_aligned(&encoded, align)
+        }
+        RuntimeValue::List(values) => {
+            let mut encoded = Vec::new();
+            let mut element_size = 0usize;
+            for value in values {
+                let (bytes, size, _) = pack_erased_domain_field(value, arena, hints)?;
+                if element_size == 0 {
+                    element_size = size;
+                } else if size != element_size {
+                    return None;
+                }
+                encoded.extend_from_slice(&bytes);
+            }
+            encode_marshaled_sequence(values.len(), element_size, &encoded, arena)?
+        }
+        RuntimeValue::Set(values) => {
+            let mut encoded = Vec::new();
+            let mut element_size = 0usize;
+            for value in values {
+                let (bytes, size, _) = pack_erased_domain_field(value, arena, hints)?;
+                if element_size == 0 {
+                    element_size = size;
+                } else if size != element_size {
+                    return None;
+                }
+                encoded.extend_from_slice(&bytes);
+            }
+            encode_marshaled_sequence(values.len(), element_size, &encoded, arena)?
+        }
+        RuntimeValue::Map(entries) => {
+            let mut encoded = Vec::new();
+            let mut key_size = 0usize;
+            let mut value_size = 0usize;
+            for (key, value) in entries.iter() {
+                let (key_bytes, found_key_size, _) = pack_erased_domain_field(key, arena, hints)?;
+                if key_size == 0 {
+                    key_size = found_key_size;
+                } else if found_key_size != key_size {
+                    return None;
+                }
+                let (value_bytes, found_value_size, _) =
+                    pack_erased_domain_field(value, arena, hints)?;
+                if value_size == 0 {
+                    value_size = found_value_size;
+                } else if found_value_size != value_size {
+                    return None;
+                }
+                encoded.extend_from_slice(&key_bytes);
+                encoded.extend_from_slice(&value_bytes);
+            }
+            encode_marshaled_map(entries.len(), key_size, value_size, &encoded, arena)?
+        }
+        RuntimeValue::Sum(sum) => {
+            let tag = crate::layout::opaque_variant_tag(sum.variant_name.as_ref());
+            let encoded = match sum.fields.as_slice() {
+                [] => {
+                    let mut encoded = vec![0u8; 8];
+                    encoded[..8].copy_from_slice(&tag.to_ne_bytes());
+                    encoded
+                }
+                [field] => {
+                    let (payload, size, _) = pack_erased_domain_field(field, arena, hints)?;
+                    let mut encoded = vec![0u8; 8 + size];
+                    encoded[..8].copy_from_slice(&tag.to_ne_bytes());
+                    encoded[8..8 + size].copy_from_slice(&payload);
+                    encoded
+                }
+                fields => {
+                    let mut payload = Vec::new();
+                    let mut offset = 0usize;
+                    let mut align = 1usize;
+                    for field in fields {
+                        let (bytes, size, field_align) =
+                            pack_erased_domain_field(field, arena, hints)?;
+                        offset = align_marshaled_offset(offset, field_align);
+                        if payload.len() < offset + size {
+                            payload.resize(offset + size, 0);
+                        }
+                        payload[offset..offset + size].copy_from_slice(&bytes);
+                        offset += size;
+                        align = align.max(field_align);
+                    }
+                    let payload_ptr = arena.store_raw_bytes_aligned(&payload, align.max(1));
+                    let mut encoded = vec![0u8; 16];
+                    encoded[..8].copy_from_slice(&tag.to_ne_bytes());
+                    encoded[8..16].copy_from_slice(&(payload_ptr as usize).to_ne_bytes());
+                    encoded
+                }
+            };
+            arena.store_raw_bytes_aligned(&encoded, 8)
+        }
+        _ => return None,
+    };
+    hints.remember(pointer, value);
+    Some(pointer)
 }
 
 #[derive(Clone)]
@@ -1924,7 +2622,7 @@ struct LastKernelCall {
 
 enum CompiledKernelFailure {
     Evaluation(EvaluationError),
-    Fallback,
+    Fallback(Box<str>),
 }
 
 fn decode_text(pointer: *const c_void) -> Option<RuntimeValue> {

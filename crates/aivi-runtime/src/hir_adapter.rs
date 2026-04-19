@@ -6,8 +6,9 @@ use std::{
 };
 
 use aivi_backend::{
-    CommittedValueStore, InlineCommittedValueStore, ItemId as BackendItemId,
-    Program as BackendProgram, lower_module_with_hir as lower_backend_module, validate_program,
+    BackendExecutableProgram, BackendRuntimeMeta, BackendRuntimeView, CommittedValueStore,
+    InlineCommittedValueStore, ItemId as BackendItemId, Program as BackendProgram,
+    lower_module_with_hir as lower_backend_module, validate_program,
 };
 use aivi_base::SourceSpan;
 use aivi_core::{RuntimeFragmentSpec, lower_runtime_fragment};
@@ -498,6 +499,8 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     let mut clause_bindings = Vec::with_capacity(signal.reactive_updates.len());
                     let mut clause_specs = Vec::with_capacity(signal.reactive_updates.len());
                     for (clause_index, update) in signal.reactive_updates.iter().enumerate() {
+                        let trigger_parameter_items =
+                            update.trigger_source.into_iter().collect::<Vec<_>>();
                         let trigger_signal = match update.trigger_source {
                             Some(source_item) => match public_signals.get(&source_item).copied() {
                                 Some(signal) => Some(signal),
@@ -546,6 +549,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 &signal_bool_type,
                                 guard_name.clone(),
                                 &public_signals,
+                                &[],
                                 ReactiveFragmentRole::Guard,
                             )
                             .or_else(|_| {
@@ -557,6 +561,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                     &bool_type,
                                     guard_name,
                                     &public_signals,
+                                    &[],
                                     ReactiveFragmentRole::Guard,
                                 )
                             })
@@ -569,6 +574,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 &bool_type,
                                 guard_name,
                                 &public_signals,
+                                &[],
                                 ReactiveFragmentRole::Guard,
                             )
                         } {
@@ -600,6 +606,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 &signal_body_type,
                                 body_name.clone(),
                                 &public_signals,
+                                trigger_parameter_items.as_slice(),
                                 ReactiveFragmentRole::Body,
                             )
                             .or_else(|_| {
@@ -611,6 +618,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                     &body_type,
                                     body_name,
                                     &public_signals,
+                                    trigger_parameter_items.as_slice(),
                                     ReactiveFragmentRole::Body,
                                 )
                             })
@@ -623,6 +631,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 &body_type,
                                 body_name,
                                 &public_signals,
+                                trigger_parameter_items.as_slice(),
                                 ReactiveFragmentRole::Body,
                             )
                         } {
@@ -637,10 +646,17 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             }
                         };
                         let mut guard_dependencies = guard_fragment
+                            .parameter_signals
+                            .iter()
+                            .copied()
+                            .collect::<Vec<_>>();
+                        for signal in guard_fragment
                             .required_signals
                             .iter()
                             .map(|signal| signal.signal)
-                            .collect::<Vec<_>>();
+                        {
+                            push_unique_signal(&mut guard_dependencies, signal);
+                        }
                         if guard_dependencies.is_empty() {
                             guard_dependencies = collect_direct_signal_dependencies(
                                 self.module,
@@ -649,6 +665,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             );
                         }
                         let mut body_dependencies = signal_pipeline_dependencies.clone();
+                        for signal in &body_fragment.parameter_signals {
+                            push_unique_signal(&mut body_dependencies, *signal);
+                        }
                         for signal in &body_fragment.required_signals {
                             push_unique_signal(&mut body_dependencies, signal.signal);
                         }
@@ -1367,6 +1386,47 @@ pub enum HirSignalBindingKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackendRuntimePayload {
+    Program(Arc<BackendProgram>),
+    Meta(Arc<BackendRuntimeMeta>),
+}
+
+impl BackendRuntimePayload {
+    pub fn runtime_view(&self) -> BackendRuntimeView<'_> {
+        match self {
+            Self::Program(program) => BackendRuntimeView::Program(program.as_ref()),
+            Self::Meta(meta) => BackendRuntimeView::Meta(meta.as_ref()),
+        }
+    }
+
+    pub fn as_program(&self) -> Option<&Arc<BackendProgram>> {
+        match self {
+            Self::Program(program) => Some(program),
+            Self::Meta(_) => None,
+        }
+    }
+
+    pub fn executable_program<'a>(
+        &'a self,
+        native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
+    ) -> BackendExecutableProgram<'a> {
+        match self {
+            Self::Program(program) => BackendExecutableProgram::interpreted(program.as_ref())
+                .with_native_kernels(native_kernels),
+            Self::Meta(meta) => BackendExecutableProgram::from_runtime_meta(meta.as_ref())
+                .with_native_kernels(native_kernels),
+        }
+    }
+
+    pub fn cache_identity(&self) -> usize {
+        match self {
+            Self::Program(program) => Arc::as_ptr(program) as usize,
+            Self::Meta(meta) => Arc::as_ptr(meta) as usize ^ 1usize,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirReactiveUpdateBinding {
     pub span: SourceSpan,
     pub keyword_span: SourceSpan,
@@ -1384,9 +1444,10 @@ pub struct HirReactiveUpdateBinding {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirCompiledRuntimeExpr {
-    pub backend: Arc<BackendProgram>,
+    pub backend: BackendRuntimePayload,
     pub native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     pub entry_item: BackendItemId,
+    pub parameter_signals: Box<[SignalHandle]>,
     pub required_signals: Box<[HirCompiledRuntimeExprSignal]>,
 }
 
@@ -2288,16 +2349,41 @@ fn compile_runtime_expr_fragment(
     expected: &hir::GateType,
     name: Box<str>,
     public_signals: &BTreeMap<hir::ItemId, SignalHandle>,
+    extra_parameter_items: &[hir::ItemId],
     role: ReactiveFragmentRole,
 ) -> Result<HirCompiledRuntimeExpr, HirRuntimeAdapterError> {
-    let body = hir::elaborate_runtime_expr_with_env(module, expr, &[], Some(expected)).map_err(
-        |blocked| role.blocked_error(owner, clause_span, blocked.blockers.into_boxed_slice()),
+    let parameter_specs = collect_fragment_parameter_specs(
+        module,
+        owner,
+        clause_span,
+        expr,
+        public_signals,
+        extra_parameter_items,
+        role,
     )?;
+    let parameters = parameter_specs
+        .iter()
+        .map(|spec| spec.parameter.clone())
+        .collect::<Vec<_>>();
+    let expected = match (!parameter_specs.is_empty(), expected) {
+        (true, hir::GateType::Signal(payload)) => payload.as_ref(),
+        _ => expected,
+    };
+    let body = hir::elaborate_runtime_expr_fragment_with_env(
+        module,
+        owner,
+        expr,
+        &parameters,
+        Some(expected),
+    )
+    .map_err(|blocked| {
+        role.blocked_error(owner, clause_span, blocked.blockers.into_boxed_slice())
+    })?;
     let fragment = RuntimeFragmentSpec {
         name: name.clone(),
         owner,
         body_expr: expr,
-        parameters: Vec::new(),
+        parameters,
         body,
     };
     let lowered = lower_runtime_fragment(module, &fragment).map_err(|error| {
@@ -2327,7 +2413,7 @@ fn compile_runtime_expr_fragment(
             message: error.to_string().into_boxed_str(),
         }
     })?;
-    let backend = lower_backend_module(&lambda, module).map_err(|error| {
+    let mut backend = lower_backend_module(&lambda, module).map_err(|error| {
         HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
             owner,
             clause_span,
@@ -2336,6 +2422,7 @@ fn compile_runtime_expr_fragment(
             message: error.to_string().into_boxed_str(),
         }
     })?;
+    rewrite_fragment_signal_parameters(&mut backend, name.as_ref(), &parameter_specs);
     validate_program(&backend).map_err(|error| {
         HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
             owner,
@@ -2367,11 +2454,162 @@ fn compile_runtime_expr_fragment(
         public_signals,
     )?;
     Ok(HirCompiledRuntimeExpr {
-        backend: Arc::new(backend),
+        backend: BackendRuntimePayload::Program(Arc::new(backend)),
         native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
         entry_item,
+        parameter_signals: parameter_specs
+            .into_iter()
+            .map(|spec| spec.signal)
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
         required_signals,
     })
+}
+
+#[derive(Clone)]
+struct FragmentParameterSpec {
+    signal: SignalHandle,
+    signal_name: Box<str>,
+    parameter: hir::GeneralExprParameter,
+}
+
+fn collect_fragment_parameter_specs(
+    module: &hir::Module,
+    owner: hir::ItemId,
+    clause_span: SourceSpan,
+    expr: hir::ExprId,
+    public_signals: &BTreeMap<hir::ItemId, SignalHandle>,
+    extra_parameter_items: &[hir::ItemId],
+    role: ReactiveFragmentRole,
+) -> Result<Vec<FragmentParameterSpec>, HirRuntimeAdapterError> {
+    let mut dependencies = hir::collect_signal_dependencies_for_expr(module, expr);
+    dependencies.extend_from_slice(extra_parameter_items);
+    let mut next_binding_raw = 0x4000_0000u32;
+    let mut seen = BTreeSet::new();
+    let mut specs = Vec::new();
+    for dependency in dependencies {
+        if !seen.insert(dependency) {
+            continue;
+        }
+        let Some(hir::Item::Signal(signal_item)) = module.items().get(dependency) else {
+            continue;
+        };
+        let Some(&signal) = public_signals.get(&dependency) else {
+            return Err(
+                HirRuntimeAdapterError::ReactiveUpdateFragmentUnknownSignal {
+                    owner,
+                    clause_span,
+                    role: role.label(),
+                    dependency,
+                },
+            );
+        };
+        let Some(payload_ty) = fragment_parameter_type(module, signal_item) else {
+            return Err(HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+                owner,
+                clause_span,
+                role: role.label(),
+                stage: "typed HIR",
+                message: format!(
+                    "reactive fragment dependency `{}` has no signal payload type",
+                    signal_item.name.text()
+                )
+                .into_boxed_str(),
+            });
+        };
+        specs.push(FragmentParameterSpec {
+            signal,
+            signal_name: signal_item.name.text().into(),
+            parameter: hir::GeneralExprParameter {
+                binding: hir::BindingId::from_raw(next_binding_raw),
+                span: signal_item.name.span(),
+                name: signal_item.name.text().into(),
+                ty: payload_ty,
+                kind: hir::GeneralExprParameterKind::Ordinary,
+            },
+        });
+        next_binding_raw = next_binding_raw.saturating_add(1);
+    }
+    Ok(specs)
+}
+
+fn fragment_parameter_type(
+    module: &hir::Module,
+    signal_item: &hir::SignalItem,
+) -> Option<hir::GateType> {
+    hir::signal_payload_type(module, signal_item).or_else(|| {
+        signal_item.body.and_then(|body| {
+            hir::elaborate_runtime_expr_with_env(module, body, &[], None)
+                .ok()
+                .map(|expr| match expr.ty {
+                    hir::GateType::Signal(payload) => *payload,
+                    other => other,
+                })
+        })
+    })
+}
+
+fn rewrite_fragment_signal_parameters(
+    backend: &mut BackendProgram,
+    entry_name: &str,
+    parameter_specs: &[FragmentParameterSpec],
+) {
+    if parameter_specs.is_empty() {
+        return;
+    }
+    let Some((_, entry_item)) = backend
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| (item.name.as_ref() == entry_name).then_some((item, item_id)))
+    else {
+        return;
+    };
+    let entry_parameters = backend.items()[entry_item].parameters.clone();
+    let mut parameter_items = BTreeMap::new();
+    for (index, spec) in parameter_specs.iter().enumerate() {
+        let Some((item_id, _item)) = backend
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == spec.signal_name.as_ref())
+        else {
+            continue;
+        };
+        let Some(&layout) = entry_parameters.get(index) else {
+            continue;
+        };
+        parameter_items.insert(
+            item_id,
+            (aivi_backend::EnvSlotId::from_raw(index as u32), layout),
+        );
+    }
+    if parameter_items.is_empty() {
+        return;
+    }
+    let kernel_count = backend.kernels().len();
+    for kernel_index in 0..kernel_count {
+        let kernel_id = aivi_backend::KernelId::from_raw(kernel_index as u32);
+        let Some(kernel) = backend.kernels_mut().get_mut(kernel_id) else {
+            continue;
+        };
+        kernel
+            .global_items
+            .retain(|item_id| !parameter_items.contains_key(item_id));
+        let expr_count = kernel.exprs().len();
+        for expr_index in 0..expr_count {
+            let expr_id = aivi_backend::KernelExprId::from_raw(expr_index as u32);
+            let Some(expr) = kernel.exprs_mut().get_mut(expr_id) else {
+                continue;
+            };
+            let aivi_backend::KernelExprKind::Item(item_id) = expr.kind.clone() else {
+                continue;
+            };
+            let Some(&(slot, layout)) = parameter_items.get(&item_id) else {
+                continue;
+            };
+            expr.kind = aivi_backend::KernelExprKind::Environment(slot);
+            expr.layout = layout;
+        }
+    }
 }
 
 fn collect_required_fragment_signal_bindings(

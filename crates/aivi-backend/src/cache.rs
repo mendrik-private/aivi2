@@ -15,19 +15,21 @@ use std::{
     hash::{Hash, Hasher},
     io::{Cursor, Read},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use cranelift_codegen::binemit::Reloc;
 use rustc_hash::FxHasher;
 
 use crate::{
-    CodegenErrors, CompiledKernel, CompiledKernelArtifact, CompiledProgram, KernelFingerprint,
-    KernelId,
+    BackendRuntimeMeta, CodegenErrors, CompiledKernel, CompiledKernelArtifact, CompiledProgram,
+    KernelFingerprint, KernelId,
     codegen::{
         CachedJitCallableDescriptor, CachedJitCompiledKernel, CachedJitDataSlot,
         CachedJitFunctionTarget, CachedJitKernelArtifact, CachedJitLiteralData, CachedJitReloc,
         CachedJitRelocTarget, compile_kernel, compile_kernel_jit_with_cache_artifact,
         compile_program, compute_kernel_fingerprint, instantiate_cached_jit_kernel,
+        instantiate_cached_jit_kernel_for_replay,
     },
     program::Program,
 };
@@ -102,7 +104,7 @@ pub fn compile_native_kernel_artifact(
 ) -> Result<Option<NativeKernelArtifact>, CodegenErrors> {
     let artifact = match compile_kernel_jit_with_cache_artifact(program, kernel_id) {
         Ok((_, artifact)) => artifact,
-        Err(_) => None,
+        Err(_error) => None,
     };
     Ok(artifact.map(NativeKernelArtifact))
 }
@@ -115,12 +117,34 @@ pub fn decode_native_kernel_artifact_binary(bytes: &[u8]) -> Option<NativeKernel
     deserialize_cached_jit_artifact(bytes).map(NativeKernelArtifact)
 }
 
+static CACHE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+fn cache_dir_override() -> &'static Mutex<Option<PathBuf>> {
+    CACHE_DIR_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+pub fn replace_cache_dir_override(path: Option<PathBuf>) -> Option<PathBuf> {
+    let mut override_path = cache_dir_override()
+        .lock()
+        .expect("backend cache dir override mutex should not be poisoned");
+    std::mem::replace(&mut *override_path, path)
+}
+
 pub(crate) fn instantiate_native_kernel_artifact(
     program: &Program,
     kernel_id: KernelId,
     artifact: &NativeKernelArtifact,
 ) -> Result<crate::codegen::CompiledJitKernel, CodegenErrors> {
     instantiate_cached_jit_kernel(program, kernel_id, &artifact.0)
+}
+
+pub(crate) fn instantiate_native_kernel_artifact_for_runtime_meta(
+    meta: &BackendRuntimeMeta,
+    kernel_id: KernelId,
+    artifact: &NativeKernelArtifact,
+) -> Result<crate::codegen::CompiledJitKernel, CodegenErrors> {
+    let replay_program = meta.to_replay_program();
+    instantiate_cached_jit_kernel_for_replay(&replay_program, kernel_id, &artifact.0)
 }
 
 /// Magic bytes: ASCII "AIVI" + format version byte.
@@ -294,6 +318,13 @@ fn native_codegen_target_identity() -> String {
 }
 
 fn cache_dir() -> Option<PathBuf> {
+    if let Some(path) = cache_dir_override()
+        .lock()
+        .expect("backend cache dir override mutex should not be poisoned")
+        .clone()
+    {
+        return Some(path);
+    }
     let base = env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
@@ -1315,6 +1346,1223 @@ fun underAssets:Text = segment:Text=> join "/tmp/assets" segment
     }
 
     #[test]
+    fn cached_jit_callable_env_text_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-callable-env-text-roundtrip.aivi",
+            r#"
+type (Int -> Text) -> Int -> Text
+func applyText = render value => render value
+
+type Int -> Text
+func fixedLabel = value => "done"
+
+value rendered:Text = applyText fixedLabel 41
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "callable env text kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled callable env text kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact)
+                .expect("serialized callable env text artifact should replay into a live kernel");
+
+            assert_eq!(
+                call_pointer_text(&compiled.caller, compiled.function, &[]),
+                "done"
+            );
+            assert_eq!(
+                call_pointer_text(&replayed.caller, replayed.function, &[]),
+                "done"
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_callable_env_list_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-callable-env-list-roundtrip.aivi",
+            r#"
+type (Int -> List Int) -> Int -> List Int
+func applyList = render value => render value
+
+type Int -> List Int
+func makePair = value => [value, value + 1]
+
+value rendered:List Int = applyList makePair 41
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "callable env list kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled callable env list kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact)
+                .expect("serialized callable env list artifact should replay into a live kernel");
+
+            assert_eq!(
+                call_i64_sequence(&compiled.caller, compiled.function, &[]),
+                vec![41, 42]
+            );
+            assert_eq!(
+                call_i64_sequence(&replayed.caller, replayed.function, &[]),
+                vec![41, 42]
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_range_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-range-roundtrip.aivi",
+            r#"
+value rendered:List Int = __aivi_list_range 3
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered)
+                .expect("list range kernel should compile and persist a replayable artifact");
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list range kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact)
+                .expect("serialized list range artifact should replay into a live kernel");
+
+            assert_eq!(
+                call_i64_sequence(&compiled.caller, compiled.function, &[]),
+                vec![0, 1, 2]
+            );
+            assert_eq!(
+                call_i64_sequence(&replayed.caller, replayed.function, &[]),
+                vec![0, 1, 2]
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_flat_map_text_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-flat-map-text-roundtrip.aivi",
+            r#"
+type Int -> List Text
+func labels = value => ["L", "R"]
+
+value rendered:List Text = __aivi_list_flatMap labels (__aivi_list_range 3)
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "list flatMap text kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list flatMap text kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact)
+                .expect("serialized list flatMap text artifact should replay into a live kernel");
+
+            assert_eq!(
+                call_text_sequence(&compiled.caller, compiled.function, &[]),
+                vec!["L", "R", "L", "R", "L", "R"]
+            );
+            assert_eq!(
+                call_text_sequence(&replayed.caller, replayed.function, &[]),
+                vec!["L", "R", "L", "R", "L", "R"]
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_flat_map_partial_text_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-flat-map-partial-text-roundtrip.aivi",
+            r#"
+type Text -> Int -> List Text
+func makeRow = prefix value => [prefix, prefix]
+
+value rendered:List Text = __aivi_list_flatMap (makeRow "X") (__aivi_list_range 2)
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "list flatMap partial text kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list flatMap partial text kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact).expect(
+                "serialized list flatMap partial text artifact should replay into a live kernel",
+            );
+
+            assert_eq!(
+                call_text_sequence(&compiled.caller, compiled.function, &[]),
+                vec!["X", "X", "X", "X"]
+            );
+            assert_eq!(
+                call_text_sequence(&replayed.caller, replayed.function, &[]),
+                vec!["X", "X", "X", "X"]
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_flat_map_partial_record_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-flat-map-partial-record-roundtrip.aivi",
+            r#"
+type Tile = {
+    label: Text
+}
+
+type Text -> Int -> List Tile
+func makeRow = prefix value => [
+    { label: prefix },
+    { label: prefix }
+]
+
+value rendered:List Tile = __aivi_list_flatMap (makeRow "X") (__aivi_list_range 2)
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "list flatMap partial record kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list flatMap partial record kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact).expect(
+                "serialized list flatMap partial record artifact should replay into a live kernel",
+            );
+
+            assert!(call_list_pointer_is_non_null(
+                &compiled.caller,
+                compiled.function,
+                &[]
+            ));
+            assert!(call_list_pointer_is_non_null(
+                &replayed.caller,
+                replayed.function,
+                &[]
+            ));
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_map_partial_record_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-map-partial-record-roundtrip.aivi",
+            r#"
+type Tile = {
+    label: Text
+}
+
+type Text -> Text -> Text -> Int -> Tile
+func makeTile = left middle right value => {
+    label: left
+}
+
+value rendered:List Tile = __aivi_list_map (makeTile "L" "M" "R") (__aivi_list_range 2)
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "list map partial record kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list map partial record kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact).expect(
+                "serialized list map partial record artifact should replay into a live kernel",
+            );
+
+            assert!(call_list_pointer_is_non_null(
+                &compiled.caller,
+                compiled.function,
+                &[]
+            ));
+            assert!(call_list_pointer_is_non_null(
+                &replayed.caller,
+                replayed.function,
+                &[]
+            ));
+        });
+    }
+
+    #[test]
+    fn cached_jit_list_find_option_pipe_artifact_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-list-find-option-pipe-roundtrip.aivi",
+            r#"
+type Entry = {
+    cell: Int,
+    asset: Text
+}
+
+type Int -> Entry -> Bool
+func matchesCell = target entry => entry.cell == target
+
+type Int -> List Entry -> Option Entry
+func findEntry = target entries => __aivi_list_find (matchesCell target) entries
+
+value rendered:Text = findEntry 2 [
+    { cell: 1, asset: "a" },
+    { cell: 2, asset: "b" }
+]
+ ||> Some entry -> entry.asset
+ ||> None       -> "missing"
+"#,
+        );
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "list find option pipe kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled list find option pipe kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact).expect(
+                "serialized list find option pipe artifact should replay into a live kernel",
+            );
+
+            assert_eq!(
+                call_pointer_text(&compiled.caller, compiled.function, &[]),
+                "b"
+            );
+            assert_eq!(
+                call_pointer_text(&replayed.caller, replayed.function, &[]),
+                "b"
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_render_board_tiles_with_literal_cells_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-render-board-tiles-literal-cells-roundtrip.aivi",
+            r#"
+type Cell = Cell Int Int
+type TCell = (Cell, Text)
+type RenderTile = {
+    id: Int,
+    column: Int,
+    row: Int,
+    asset: Text
+}
+
+value boardW = 3
+value boardH = 2
+
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
+
+type Cell -> Cell -> Bool
+func sameCellFn = left right => left == right
+
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells =>
+    __aivi_list_find (cellEntryMatches target) snakeCells
+
+type List TCell -> Cell -> Option Text
+func findSnakeAsset = snakeCells target => findSnakeAssetEntry target snakeCells
+ ||> Some (_, asset) -> Some asset
+ ||> None            -> None
+
+type Text -> Cell -> Cell -> Text
+func foodOrEmptyAsset = assetRoot target food => target == food
+ ||> True  -> "mouse.png"
+ ||> False -> "empty.png"
+
+type Text -> List TCell -> Cell -> Cell -> Text
+func tileAssetFor = assetRoot snakeCells food target => findSnakeAsset snakeCells target
+ ||> Some asset -> asset
+ ||> None       -> foodOrEmptyAsset assetRoot target food
+
+type Int -> Int -> Text -> RenderTile
+func renderTile = x y asset => {
+    id: y * boardW + x,
+    column: x,
+    row: y,
+    asset: asset
+}
+
+type Text -> List TCell -> Cell -> Int -> Int -> RenderTile
+func renderBoardTileAt = assetRoot snakeCells food y x =>
+    renderTile x y (tileAssetFor assetRoot snakeCells food (Cell x y))
+
+type Text -> List TCell -> Cell -> Int -> (List RenderTile)
+func renderBoardRow = assetRoot snakeCells food y =>
+    __aivi_list_map (renderBoardTileAt assetRoot snakeCells food y) (__aivi_list_range boardW)
+
+type Text -> Cell -> List TCell -> (List RenderTile)
+func renderBoardTilesWithList = assetRoot food snakeCells =>
+    __aivi_list_flatMap (renderBoardRow assetRoot snakeCells food) (__aivi_list_range boardH)
+
+value tileAt00:Text =
+    tileAssetFor "assets" [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ] (Cell 1 1) (Cell 0 0)
+
+value tileAt10:Text =
+    tileAssetFor "assets" [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ] (Cell 1 1) (Cell 1 0)
+
+value tileAt20:Text =
+    tileAssetFor "assets" [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ] (Cell 1 1) (Cell 2 0)
+
+value tileAt11:Text =
+    tileAssetFor "assets" [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ] (Cell 1 1) (Cell 1 1)
+
+value emptyAssetDirect:Text =
+    foodOrEmptyAsset "assets" (Cell 2 0) (Cell 1 1)
+
+value foodAssetDirect:Text =
+    foodOrEmptyAsset "assets" (Cell 1 1) (Cell 1 1)
+
+value unequalCells:Bool =
+    Cell 2 0 == Cell 1 1
+
+value equalCells:Bool =
+    Cell 1 1 == Cell 1 1
+
+value unequalCellsViaCall:Bool =
+    sameCellFn (Cell 2 0) (Cell 1 1)
+
+value directFalsePipe:Text =
+    False
+     ||> True  -> "yes"
+     ||> False -> "no"
+
+value row0:List RenderTile =
+    renderBoardRow "assets" [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ] (Cell 1 1) 0
+
+value rendered:List RenderTile =
+    renderBoardTilesWithList "assets" (Cell 1 1) [
+        (Cell 0 0, "head.png"),
+        (Cell 1 0, "body.png")
+    ]
+"#,
+        );
+
+        with_temp_cache_dir(|cache_root| {
+            let tile = backend.items()[find_item(&backend, "tileAt00")]
+                .body
+                .expect("tileAt00 should lower into a body kernel");
+            let compiled_tile = compile_kernel_jit_cached_in_dir(cache_root, &backend, tile)
+                .expect("tileAt00 should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_tile.caller, compiled_tile.function, &[]),
+                "head.png"
+            );
+
+            let tile = backend.items()[find_item(&backend, "tileAt10")]
+                .body
+                .expect("tileAt10 should lower into a body kernel");
+            let compiled_tile = compile_kernel_jit_cached_in_dir(cache_root, &backend, tile)
+                .expect("tileAt10 should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_tile.caller, compiled_tile.function, &[]),
+                "body.png"
+            );
+
+            let tile = backend.items()[find_item(&backend, "tileAt20")]
+                .body
+                .expect("tileAt20 should lower into a body kernel");
+            let compiled_tile = compile_kernel_jit_cached_in_dir(cache_root, &backend, tile)
+                .expect("tileAt20 should compile and persist a replayable artifact");
+            let equal = backend.items()[find_item(&backend, "unequalCells")]
+                .body
+                .expect("unequalCells should lower into a body kernel");
+            let compiled_equal = compile_kernel_jit_cached_in_dir(cache_root, &backend, equal)
+                .expect("unequalCells should compile and persist a replayable artifact");
+            assert_eq!(
+                call_i64_value(&compiled_equal.caller, compiled_equal.function, &[]),
+                AbiValue::I8(0)
+            );
+            let equal = backend.items()[find_item(&backend, "equalCells")]
+                .body
+                .expect("equalCells should lower into a body kernel");
+            let compiled_equal = compile_kernel_jit_cached_in_dir(cache_root, &backend, equal)
+                .expect("equalCells should compile and persist a replayable artifact");
+            assert_eq!(
+                call_i64_value(&compiled_equal.caller, compiled_equal.function, &[]),
+                AbiValue::I8(1)
+            );
+            let equal = backend.items()[find_item(&backend, "unequalCellsViaCall")]
+                .body
+                .expect("unequalCellsViaCall should lower into a body kernel");
+            let compiled_equal = compile_kernel_jit_cached_in_dir(cache_root, &backend, equal)
+                .expect("unequalCellsViaCall should compile and persist a replayable artifact");
+            assert_eq!(
+                call_i64_value(&compiled_equal.caller, compiled_equal.function, &[]),
+                AbiValue::I8(0)
+            );
+            let direct = backend.items()[find_item(&backend, "directFalsePipe")]
+                .body
+                .expect("directFalsePipe should lower into a body kernel");
+            let compiled_direct = compile_kernel_jit_cached_in_dir(cache_root, &backend, direct)
+                .expect("directFalsePipe should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_direct.caller, compiled_direct.function, &[]),
+                "no"
+            );
+            let direct = backend.items()[find_item(&backend, "emptyAssetDirect")]
+                .body
+                .expect("emptyAssetDirect should lower into a body kernel");
+            let compiled_direct = compile_kernel_jit_cached_in_dir(cache_root, &backend, direct)
+                .expect("emptyAssetDirect should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_direct.caller, compiled_direct.function, &[]),
+                "empty.png"
+            );
+            let direct = backend.items()[find_item(&backend, "foodAssetDirect")]
+                .body
+                .expect("foodAssetDirect should lower into a body kernel");
+            let compiled_direct = compile_kernel_jit_cached_in_dir(cache_root, &backend, direct)
+                .expect("foodAssetDirect should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_direct.caller, compiled_direct.function, &[]),
+                "mouse.png"
+            );
+            assert_eq!(
+                call_pointer_text(&compiled_tile.caller, compiled_tile.function, &[]),
+                "empty.png"
+            );
+
+            let tile = backend.items()[find_item(&backend, "tileAt11")]
+                .body
+                .expect("tileAt11 should lower into a body kernel");
+            let compiled_tile = compile_kernel_jit_cached_in_dir(cache_root, &backend, tile)
+                .expect("tileAt11 should compile and persist a replayable artifact");
+            assert_eq!(
+                call_pointer_text(&compiled_tile.caller, compiled_tile.function, &[]),
+                "mouse.png"
+            );
+
+            let row = backend.items()[find_item(&backend, "row0")]
+                .body
+                .expect("row0 should lower into a body kernel");
+            let compiled_row = compile_kernel_jit_cached_in_dir(cache_root, &backend, row)
+                .expect("row0 should compile and persist a replayable artifact");
+            assert!(call_list_pointer_is_non_null(
+                &compiled_row.caller,
+                compiled_row.function,
+                &[]
+            ));
+
+            let rendered = backend.items()[find_item(&backend, "rendered")]
+                .body
+                .expect("rendered should lower into a body kernel");
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered).expect(
+                "literal snake-cells board renderer should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled literal snake-cells board renderer should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact).expect(
+                "serialized literal snake-cells board renderer should replay into a live kernel",
+            );
+
+            assert!(call_list_pointer_is_non_null(
+                &compiled.caller,
+                compiled.function,
+                &[]
+            ));
+            assert!(call_list_pointer_is_non_null(
+                &replayed.caller,
+                replayed.function,
+                &[]
+            ));
+        });
+    }
+
+    #[test]
+    fn cached_jit_snake_direction_assets_replay_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-snake-direction-assets-roundtrip.aivi",
+            r#"
+type Direction =
+  | North
+  | South
+  | East
+  | West
+
+type Cell = Cell Int Int
+type CPair = (Cell, Cell)
+type QPair = (CPair, CPair)
+
+domain Snake over (List Cell) = {
+    type fromCells : (List Cell) -> Snake
+    fromCells = cells => cells
+
+    type cells : Snake -> (List Cell)
+    cells = snake => snake
+}
+
+type Direction -> Text
+func dirAssetSlug = arg1 => arg1
+ ||> North -> "north"
+ ||> South -> "south"
+ ||> East  -> "east"
+ ||> West  -> "west"
+
+type Cell -> Cell -> (Int, Int)
+func delta = from to => (from, to)
+ ||> (Cell fromX fromY, Cell toX toY) -> (toX - fromX, toY - fromY)
+
+type Cell -> Cell -> Direction
+func directionFromTo = from to => delta from to
+ ||> (0, -1) -> North
+ ||> (0, 1)  -> South
+ ||> (1, 0)  -> East
+ ||> _       -> West
+
+type Text -> Direction -> Direction -> Text
+func middleAssetFor = assetRoot first second => (first, second)
+ ||> (East, West)   -> "body_horizontal.png"
+ ||> (West, East)   -> "body_horizontal.png"
+ ||> (East, East)   -> "body_horizontal.png"
+ ||> (West, West)   -> "body_horizontal.png"
+ ||> (North, South) -> "body_vertical.png"
+ ||> (South, North) -> "body_vertical.png"
+ ||> (North, North) -> "body_vertical.png"
+ ||> (South, South) -> "body_vertical.png"
+ ||> (North, East)  -> "curve_ne.png"
+ ||> (East, North)  -> "curve_ne.png"
+ ||> (North, West)  -> "curve_nw.png"
+ ||> (West, North)  -> "curve_nw.png"
+ ||> (South, East)  -> "curve_se.png"
+ ||> (East, South)  -> "curve_se.png"
+ ||> (South, West)  -> "curve_sw.png"
+ ||> (West, South)  -> "curve_sw.png"
+
+type Text -> QPair -> Text
+func windowAssetName = assetRoot win => win
+ ||> ((prev, cur), (_, next)) -> middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next)
+
+value dirEastSlug:Text =
+    dirAssetSlug (directionFromTo (Cell 0 0) (Cell 1 0))
+
+value dirNorthSlug:Text =
+    dirAssetSlug (directionFromTo (Cell 1 1) (Cell 1 0))
+
+value middleHorizontal:Text =
+    middleAssetFor "assets" East East
+
+value middleFromWindow:Text =
+    windowAssetName "assets" ((Cell 0 0, Cell 1 0), (Cell 1 0, Cell 2 0))
+"#,
+        );
+
+        with_temp_cache_dir(|cache_root| {
+            for (name, expected) in [
+                ("dirEastSlug", "east"),
+                ("dirNorthSlug", "north"),
+                ("middleHorizontal", "body_horizontal.png"),
+                ("middleFromWindow", "body_horizontal.png"),
+            ] {
+                let kernel = backend.items()[find_item(&backend, name)]
+                    .body
+                    .unwrap_or_else(|| panic!("{name} should lower into a body kernel"));
+                let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, kernel)
+                    .unwrap_or_else(|_| {
+                        panic!("{name} should compile and persist a replayable artifact")
+                    });
+                let fingerprint = compute_kernel_fingerprint(&backend, kernel);
+                let artifact =
+                    load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                        .unwrap_or_else(|| panic!("{name} should write a disk artifact"));
+                let replayed = instantiate_cached_jit_kernel(&backend, kernel, &artifact)
+                    .unwrap_or_else(|_| panic!("{name} serialized artifact should replay"));
+
+                assert_eq!(
+                    call_pointer_text(&compiled.caller, compiled.function, &[]),
+                    expected
+                );
+                assert_eq!(
+                    call_pointer_text(&replayed.caller, replayed.function, &[]),
+                    expected
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn cached_jit_snake_asset_list_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-snake-asset-list-roundtrip.aivi",
+            r#"
+type Direction =
+  | North
+  | South
+  | East
+  | West
+
+type Cell = Cell Int Int
+type CPair = (Cell, Cell)
+type QPair = (CPair, CPair)
+
+domain Snake over (List Cell) = {
+    type fromCells : (List Cell) -> Snake
+    fromCells = cells => cells
+
+    type cells : Snake -> (List Cell)
+    cells = snake => snake
+}
+
+type Direction -> Text
+func dirAssetSlug = arg1 => arg1
+ ||> North -> "north"
+ ||> South -> "south"
+ ||> East  -> "east"
+ ||> West  -> "west"
+
+type Cell -> Cell -> (Int, Int)
+func delta = from to => (from, to)
+ ||> (Cell fromX fromY, Cell toX toY) -> (toX - fromX, toY - fromY)
+
+type Cell -> Cell -> Direction
+func directionFromTo = from to => delta from to
+ ||> (0, -1) -> North
+ ||> (0, 1)  -> South
+ ||> (1, 0)  -> East
+ ||> _       -> West
+
+type Text -> Direction -> Text
+func headAssetFor = assetRoot dir =>
+    dirAssetSlug dir
+
+type Text -> Direction -> Text
+func tailAssetFor = assetRoot dir =>
+    dirAssetSlug dir
+
+type Text -> Direction -> Direction -> Text
+func middleAssetFor = assetRoot first second => (first, second)
+ ||> (East, West)   -> "body_horizontal.png"
+ ||> (West, East)   -> "body_horizontal.png"
+ ||> (East, East)   -> "body_horizontal.png"
+ ||> (West, West)   -> "body_horizontal.png"
+ ||> (North, South) -> "body_vertical.png"
+ ||> (South, North) -> "body_vertical.png"
+ ||> (North, North) -> "body_vertical.png"
+ ||> (South, South) -> "body_vertical.png"
+ ||> (North, East)  -> "curve_ne.png"
+ ||> (East, North)  -> "curve_ne.png"
+ ||> (North, West)  -> "curve_nw.png"
+ ||> (West, North)  -> "curve_nw.png"
+ ||> (South, East)  -> "curve_se.png"
+ ||> (East, South)  -> "curve_se.png"
+ ||> (South, West)  -> "curve_sw.png"
+ ||> (West, South)  -> "curve_sw.png"
+
+type AdjacentPairState = (
+    Cell,
+    List CPair
+)
+
+type AdjacentPairState -> List CPair
+func adjacentPairStatePairs = state => state
+ ||> (_, pairs) -> pairs
+
+type AdjacentPairState -> Cell -> AdjacentPairState
+func adjacentPairStep = state current => state
+ ||> (previous, pairs) -> (current, append pairs [(previous, current)])
+
+type Cell -> List Cell -> List CPair
+func adjacentPairsFromFirstCell = first rest => rest
+  |> reduce adjacentPairStep (first, [])
+  |> adjacentPairStatePairs
+
+type List Cell -> List CPair
+func adjacentPairs = cells => cells
+ ||> []               -> []
+ ||> [first, ...rest] -> adjacentPairsFromFirstCell first rest
+
+type MiddleWindowState = (
+    CPair,
+    List QPair
+)
+
+type MiddleWindowState -> List QPair
+func middleWindowStateWindows = state => state
+ ||> (_, windows) -> windows
+
+type MiddleWindowState -> CPair -> MiddleWindowState
+func middleWindowStep = state pair => state
+ ||> (previous, windows) -> (pair, append windows [(previous, pair)])
+
+type CPair -> List CPair -> List QPair
+func middleWindowsFromFirstPair = first rest => rest
+  |> reduce middleWindowStep (first, [])
+  |> middleWindowStateWindows
+
+type List CPair -> List QPair
+func middleWindowsFromPairs = pairs => pairs
+ ||> []               -> []
+ ||> [first, ...rest] -> middleWindowsFromFirstPair first rest
+
+type List CPair -> Option CPair
+func firstCellPair = pairs => pairs
+ ||> [first, ..._] -> Some first
+ ||> []            -> None
+
+type CPair -> CPair -> CPair
+func keepLastCellPair = ignored pair =>
+    pair
+
+type List CPair -> Option CPair
+func lastCellPair = pairs => pairs
+ ||> []               -> None
+ ||> [first, ...rest] -> lastCellPairFromFirst first rest
+
+type CPair -> List CPair -> CPair
+func lastCellPairValueFromFirst = first rest => rest
+  |> reduce keepLastCellPair first
+
+type CPair -> List CPair -> Option CPair
+func lastCellPairFromFirst = first rest =>
+    Some (lastCellPairValueFromFirst first rest)
+
+type Direction -> List CPair -> Direction
+func headDirFromPairs = dir pairs => firstCellPair pairs
+ ||> Some (head, neck) -> directionFromTo neck head
+ ||> None              -> dir
+
+type Text -> QPair -> Text
+func windowAssetName = assetRoot win => win
+ ||> ((prev, cur), (_, next)) -> middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next)
+
+type Text -> Option CPair -> List Text
+func tailAssetEntries = assetRoot tailPair => tailPair
+ ||> Some (prev, tail) -> [tailAssetFor assetRoot (directionFromTo prev tail)]
+ ||> None              -> []
+
+type Text -> Direction -> List Cell -> List Text
+func snakeAssetNames = assetRoot dir cells => cells
+ ||> [] -> []
+ ||> [head, ...rest] -> append (append [headAssetFor assetRoot (headDirFromPairs dir (adjacentPairsFromFirstCell head rest))] (map (windowAssetName assetRoot) (middleWindowsFromPairs (adjacentPairsFromFirstCell head rest)))) (tailAssetEntries assetRoot (lastCellPair (adjacentPairsFromFirstCell head rest)))
+
+value snakeAssets:List Text =
+    snakeAssetNames "assets" East [Cell 0 0, Cell 1 0, Cell 2 0]
+
+value snakeDomain:Snake =
+    fromCells [Cell 0 0, Cell 1 0, Cell 2 0]
+
+value snakeAssetsFromDomain:List Text =
+    snakeAssetNames "assets" East snakeDomain.cells
+"#,
+        );
+
+        with_temp_cache_dir(|cache_root| {
+            for name in ["snakeAssets", "snakeAssetsFromDomain"] {
+                let snake_assets = backend.items()[find_item(&backend, name)]
+                    .body
+                    .unwrap_or_else(|| panic!("{name} should lower into a body kernel"));
+                let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, snake_assets)
+                    .unwrap_or_else(|_| {
+                        panic!("{name} should compile and persist a replayable artifact")
+                    });
+                let fingerprint = compute_kernel_fingerprint(&backend, snake_assets);
+                let artifact =
+                    load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                        .unwrap_or_else(|| panic!("{name} should write a disk artifact"));
+                let replayed = instantiate_cached_jit_kernel(&backend, snake_assets, &artifact)
+                    .unwrap_or_else(|_| panic!("{name} serialized artifact should replay"));
+
+                assert_eq!(
+                    call_text_sequence(&compiled.caller, compiled.function, &[]),
+                    vec!["west", "body_horizontal.png", "east"]
+                );
+                assert_eq!(
+                    call_text_sequence(&replayed.caller, replayed.function, &[]),
+                    vec!["west", "body_horizontal.png", "east"]
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn cached_jit_large_board_renderer_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-large-board-renderer-roundtrip.aivi",
+            r#"
+type Cell = Cell Int Int
+type TCell = (Cell, Text)
+type RenderTile = {
+    id: Int,
+    column: Int,
+    row: Int,
+    asset: Text
+}
+
+value boardW = 15
+value boardH = 15
+
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
+
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells =>
+    __aivi_list_find (cellEntryMatches target) snakeCells
+
+type List TCell -> Cell -> Option Text
+func findSnakeAsset = snakeCells target => findSnakeAssetEntry target snakeCells
+ ||> Some (_, asset) -> Some asset
+ ||> None            -> None
+
+type Text -> Cell -> Cell -> Text
+func foodOrEmptyAsset = assetRoot target food => target == food
+ ||> True  -> "mouse.png"
+ ||> False -> "empty.png"
+
+type Text -> List TCell -> Cell -> Cell -> Text
+func tileAssetFor = assetRoot snakeCells food target => findSnakeAsset snakeCells target
+ ||> Some asset -> asset
+ ||> None       -> foodOrEmptyAsset assetRoot target food
+
+type Int -> Int -> Text -> RenderTile
+func renderTile = x y asset => {
+    id: y * boardW + x,
+    column: x,
+    row: y,
+    asset: asset
+}
+
+type Text -> List TCell -> Cell -> Int -> Int -> RenderTile
+func renderBoardTileAt = assetRoot snakeCells food y x =>
+    renderTile x y (tileAssetFor assetRoot snakeCells food (Cell x y))
+
+type Text -> List TCell -> Cell -> Int -> (List RenderTile)
+func renderBoardRow = assetRoot snakeCells food y =>
+    __aivi_list_map (renderBoardTileAt assetRoot snakeCells food y) (__aivi_list_range boardW)
+
+type Text -> Cell -> List TCell -> (List RenderTile)
+func renderBoardTilesWithList = assetRoot food snakeCells =>
+    __aivi_list_flatMap (renderBoardRow assetRoot snakeCells food) (__aivi_list_range boardH)
+
+value rendered:List RenderTile =
+    renderBoardTilesWithList "assets" (Cell 2 6) [
+        (Cell 6 10, "assets/head_east.png"),
+        (Cell 5 10, "assets/body_horizontal.png"),
+        (Cell 4 10, "assets/tail_west.png")
+    ]
+"#,
+        );
+
+        let rendered = backend.items()[find_item(&backend, "rendered")]
+            .body
+            .expect("rendered should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, rendered)
+                .expect("large board renderer should compile and persist a replayable artifact");
+            let fingerprint = compute_kernel_fingerprint(&backend, rendered);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled large board renderer should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, rendered, &artifact)
+                .expect("serialized large board renderer should replay into a live kernel");
+
+            assert!(call_list_pointer_is_non_null(
+                &compiled.caller,
+                compiled.function,
+                &[]
+            ));
+            assert!(call_list_pointer_is_non_null(
+                &replayed.caller,
+                replayed.function,
+                &[]
+            ));
+        });
+    }
+
+    #[test]
+    fn cached_jit_tcell_list_append_find_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-tcell-list-append-find-roundtrip.aivi",
+            r#"
+type Cell = Cell Int Int
+type TCell = (Cell, Text)
+
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
+
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells =>
+    __aivi_list_find (cellEntryMatches target) snakeCells
+
+value produced:List TCell =
+    append [(Cell 1 1, "head.png")] [(Cell 2 2, "tail.png")]
+
+value lookup:Text =
+    findSnakeAssetEntry (Cell 2 2) produced
+     ||> Some (_, asset) -> asset
+     ||> None            -> "missing"
+"#,
+        );
+
+        let lookup = backend.items()[find_item(&backend, "lookup")]
+            .body
+            .expect("lookup should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, lookup).expect(
+                "TCell append/find kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, lookup);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled TCell append/find kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, lookup, &artifact)
+                .expect("serialized TCell append/find artifact should replay into a live kernel");
+
+            assert_eq!(
+                call_pointer_text(&compiled.caller, compiled.function, &[]),
+                "tail.png"
+            );
+            assert_eq!(
+                call_pointer_text(&replayed.caller, replayed.function, &[]),
+                "tail.png"
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_snake_tcell_pipeline_replays_after_disk_roundtrip() {
+        let backend = lower_text(
+            "cache-jit-snake-tcell-pipeline-roundtrip.aivi",
+            r#"
+type Direction =
+  | North
+  | South
+  | East
+  | West
+
+type Cell = Cell Int Int
+type TCell = (Cell, Text)
+type CPair = (Cell, Cell)
+type QPair = (CPair, CPair)
+
+type Direction -> Text
+func dirAssetSlug = arg1 => arg1
+ ||> North -> "north"
+ ||> South -> "south"
+ ||> East  -> "east"
+ ||> West  -> "west"
+
+type Cell -> Cell -> (Int, Int)
+func delta = from to => (from, to)
+ ||> (Cell fromX fromY, Cell toX toY) -> (toX - fromX, toY - fromY)
+
+type Cell -> Cell -> Direction
+func directionFromTo = from to => delta from to
+ ||> (0, -1) -> North
+ ||> (0, 1)  -> South
+ ||> (1, 0)  -> East
+ ||> _       -> West
+
+type Text -> Direction -> Text
+func headAssetFor = assetRoot dir =>
+    "head_{dirAssetSlug dir}.png"
+
+type Text -> Direction -> Text
+func tailAssetFor = assetRoot dir =>
+    "tail_{dirAssetSlug dir}.png"
+
+type Text -> Direction -> Direction -> Text
+func middleAssetFor = assetRoot first second => (first, second)
+ ||> (East, West)   -> "body_horizontal.png"
+ ||> (West, East)   -> "body_horizontal.png"
+ ||> (East, East)   -> "body_horizontal.png"
+ ||> (West, West)   -> "body_horizontal.png"
+ ||> (North, South) -> "body_vertical.png"
+ ||> (South, North) -> "body_vertical.png"
+ ||> (North, North) -> "body_vertical.png"
+ ||> (South, South) -> "body_vertical.png"
+ ||> (North, East)  -> "curve_ne.png"
+ ||> (East, North)  -> "curve_ne.png"
+ ||> (North, West)  -> "curve_nw.png"
+ ||> (West, North)  -> "curve_nw.png"
+ ||> (South, East)  -> "curve_se.png"
+ ||> (East, South)  -> "curve_se.png"
+ ||> (South, West)  -> "curve_sw.png"
+ ||> (West, South)  -> "curve_sw.png"
+
+type AdjacentPairState = (
+    Cell,
+    List CPair
+)
+
+type AdjacentPairState -> List CPair
+func adjacentPairStatePairs = state => state
+ ||> (_, pairs) -> pairs
+
+type AdjacentPairState -> Cell -> AdjacentPairState
+func adjacentPairStep = state current => state
+ ||> (previous, pairs) -> (current, append pairs [(previous, current)])
+
+type Cell -> List Cell -> List CPair
+func adjacentPairsFromFirstCell = first rest => rest
+  |> reduce adjacentPairStep (first, [])
+  |> adjacentPairStatePairs
+
+type List Cell -> List CPair
+func adjacentPairs = cells => cells
+ ||> []               -> []
+ ||> [first, ...rest] -> adjacentPairsFromFirstCell first rest
+
+type MiddleWindowState = (
+    CPair,
+    List QPair
+)
+
+type MiddleWindowState -> List QPair
+func middleWindowStateWindows = state => state
+ ||> (_, windows) -> windows
+
+type MiddleWindowState -> CPair -> MiddleWindowState
+func middleWindowStep = state pair => state
+ ||> (previous, windows) -> (pair, append windows [(previous, pair)])
+
+type CPair -> List CPair -> List QPair
+func middleWindowsFromFirstPair = first rest => rest
+  |> reduce middleWindowStep (first, [])
+  |> middleWindowStateWindows
+
+type List CPair -> List QPair
+func middleWindowsFromPairs = pairs => pairs
+ ||> []               -> []
+ ||> [first, ...rest] -> middleWindowsFromFirstPair first rest
+
+type List CPair -> Option CPair
+func firstCellPair = pairs => pairs
+ ||> [first, ..._] -> Some first
+ ||> []            -> None
+
+type CPair -> CPair -> CPair
+func keepLastCellPair = ignored pair =>
+    pair
+
+type List CPair -> Option CPair
+func lastCellPair = pairs => pairs
+ ||> []               -> None
+ ||> [first, ...rest] -> lastCellPairFromFirst first rest
+
+type CPair -> List CPair -> CPair
+func lastCellPairValueFromFirst = first rest => rest
+  |> reduce keepLastCellPair first
+
+type CPair -> List CPair -> Option CPair
+func lastCellPairFromFirst = first rest =>
+    Some (lastCellPairValueFromFirst first rest)
+
+type Direction -> List CPair -> Direction
+func headDirFromPairs = dir pairs => firstCellPair pairs
+ ||> Some (head, neck) -> directionFromTo neck head
+ ||> None              -> dir
+
+type Text -> QPair -> TCell
+func windowCellAsset = assetRoot win => win
+ ||> ((prev, cur), (_, next)) -> (cur, middleAssetFor assetRoot (directionFromTo cur prev) (directionFromTo cur next))
+
+type Text -> Option CPair -> List TCell
+func tailCellEntries = assetRoot tailPair => tailPair
+ ||> Some (prev, tail) -> [(tail, tailAssetFor assetRoot (directionFromTo prev tail))]
+ ||> None              -> []
+
+type Text -> Direction -> List Cell -> List TCell
+func snakeCellAssets = assetRoot dir cells => cells
+ ||> [] -> []
+ ||> [head, ...rest] -> append (append [(head, headAssetFor assetRoot (headDirFromPairs dir (adjacentPairsFromFirstCell head rest)))] (map (windowCellAsset assetRoot) (middleWindowsFromPairs (adjacentPairsFromFirstCell head rest)))) (tailCellEntries assetRoot (lastCellPair (adjacentPairsFromFirstCell head rest)))
+
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
+
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells =>
+    __aivi_list_find (cellEntryMatches target) snakeCells
+
+value lookup:Text =
+    findSnakeAssetEntry (Cell 4 10) (snakeCellAssets "assets" East [Cell 6 10, Cell 5 10, Cell 4 10])
+     ||> Some (_, asset) -> asset
+     ||> None            -> "missing"
+"#,
+        );
+
+        let lookup = backend.items()[find_item(&backend, "lookup")]
+            .body
+            .expect("lookup should lower into a body kernel");
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, lookup).expect(
+                "snake TCell pipeline kernel should compile and persist a replayable artifact",
+            );
+            let fingerprint = compute_kernel_fingerprint(&backend, lookup);
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
+                .expect("compiled snake TCell pipeline kernel should write a disk artifact");
+            let replayed = instantiate_cached_jit_kernel(&backend, lookup, &artifact).expect(
+                "serialized snake TCell pipeline artifact should replay into a live kernel",
+            );
+
+            assert_eq!(
+                call_pointer_text(&compiled.caller, compiled.function, &[]),
+                "tail_west.png"
+            );
+            assert_eq!(
+                call_pointer_text(&replayed.caller, replayed.function, &[]),
+                "tail_west.png"
+            );
+        });
+    }
+
+    #[test]
     fn cached_jit_collection_artifact_replays_after_disk_roundtrip() {
         let backend = lower_text(
             "cache-jit-collections-roundtrip.aivi",
@@ -1661,6 +2909,20 @@ fun passMaybeBool:(Option Bool) = value:(Option Bool)=>    value
     ) -> String {
         String::from_utf8(call_pointer_bytes(caller, function, args).into_vec())
             .expect("helper-backed text kernel should return utf-8")
+    }
+
+    fn call_list_pointer_is_non_null(
+        caller: &FunctionCaller,
+        function: *const u8,
+        args: &[AbiValue],
+    ) -> bool {
+        let arena = Rc::new(RefCell::new(AllocationArena::new()));
+        let value = with_active_arena(Rc::clone(&arena), || caller.call(function, args))
+            .expect("list kernel should execute inside an active arena");
+        let AbiValue::Pointer(list_ptr) = value else {
+            panic!("expected pointer ABI value from list kernel, found {value:?}");
+        };
+        !list_ptr.is_null()
     }
 
     fn text_abi_bytes(text: &str) -> Box<[u8]> {

@@ -5,8 +5,12 @@ use aivi_core::Arena;
 use aivi_hir::ItemId as HirItemId;
 
 use crate::{
-    DecodePlanId, DecodeStepId, ItemId, KernelId, LayoutId, PipelineId, SourceId,
-    kernel::{BuiltinTerm, Kernel, describe_expr_kind},
+    CallingConvention, DecodePlanId, DecodeStepId, EnvSlotId, ItemId, KernelFingerprint, KernelId,
+    LayoutId, PipelineId, SourceId,
+    kernel::{
+        BuiltinTerm, Kernel, KernelExpr, KernelExprKind, KernelOrigin, KernelOriginKind,
+        describe_expr_kind,
+    },
     layout::{Layout, PrimitiveType},
 };
 
@@ -22,6 +26,31 @@ pub struct Program {
     /// that have compiled bodies. Populated during backend lowering for fast dispatch.
     #[serde(with = "domain_member_items_serde")]
     domain_member_items: HashMap<(HirItemId, usize), ItemId>,
+    /// Maps each concrete named-domain layout to the concrete layout of its erased carrier.
+    #[serde(with = "named_domain_carriers_serde")]
+    named_domain_carriers: HashMap<LayoutId, LayoutId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeKernelMeta {
+    pub fingerprint: KernelFingerprint,
+    pub origin_item: ItemId,
+    pub input_subject: Option<LayoutId>,
+    pub environment: Vec<LayoutId>,
+    pub result_layout: LayoutId,
+    pub convention: CallingConvention,
+    pub global_items: Vec<ItemId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BackendRuntimeMeta {
+    items: Arena<ItemId, Item>,
+    pipelines: Arena<PipelineId, Pipeline>,
+    kernels: Arena<KernelId, RuntimeKernelMeta>,
+    layouts: Arena<LayoutId, Layout>,
+    sources: Arena<SourceId, SourcePlan>,
+    #[serde(with = "named_domain_carriers_serde")]
+    named_domain_carriers: HashMap<LayoutId, LayoutId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -29,6 +58,12 @@ struct DomainMemberItemWire {
     domain: HirItemId,
     member_index: usize,
     item: ItemId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct NamedDomainCarrierWire {
+    domain_layout: LayoutId,
+    carrier_layout: LayoutId,
 }
 
 mod domain_member_items_serde {
@@ -81,6 +116,54 @@ mod domain_member_items_serde {
     }
 }
 
+mod named_domain_carriers_serde {
+    use std::collections::HashMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+
+    use crate::LayoutId;
+
+    use super::NamedDomainCarrierWire;
+
+    pub fn serialize<S>(
+        value: &HashMap<LayoutId, LayoutId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut entries = value
+            .iter()
+            .map(|(&domain_layout, &carrier_layout)| NamedDomainCarrierWire {
+                domain_layout,
+                carrier_layout,
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.domain_layout.as_raw());
+        entries.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<LayoutId, LayoutId>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<NamedDomainCarrierWire>::deserialize(deserializer)?;
+        let mut map = HashMap::with_capacity(entries.len());
+        for entry in entries {
+            if map
+                .insert(entry.domain_layout, entry.carrier_layout)
+                .is_some()
+            {
+                return Err(D::Error::custom(format!(
+                    "duplicate named-domain carrier mapping for layout{}",
+                    entry.domain_layout
+                )));
+            }
+        }
+        Ok(map)
+    }
+}
+
 impl Default for Program {
     fn default() -> Self {
         Self {
@@ -91,6 +174,7 @@ impl Default for Program {
             sources: Arena::new(),
             decode_plans: Arena::new(),
             domain_member_items: HashMap::new(),
+            named_domain_carriers: HashMap::new(),
         }
     }
 }
@@ -164,8 +248,126 @@ impl Program {
         &mut self.domain_member_items
     }
 
+    pub fn named_domain_carrier(&self, layout: LayoutId) -> Option<LayoutId> {
+        self.named_domain_carriers.get(&layout).copied()
+    }
+
+    pub fn register_named_domain_carrier(&mut self, layout: LayoutId, carrier: LayoutId) {
+        let prior = self.named_domain_carriers.insert(layout, carrier);
+        debug_assert!(prior.is_none_or(|existing| existing == carrier));
+    }
+
     pub fn pretty(&self) -> String {
         format!("{self}")
+    }
+}
+
+impl BackendRuntimeMeta {
+    pub fn items(&self) -> &Arena<ItemId, Item> {
+        &self.items
+    }
+
+    pub fn pipelines(&self) -> &Arena<PipelineId, Pipeline> {
+        &self.pipelines
+    }
+
+    pub fn kernels(&self) -> &Arena<KernelId, RuntimeKernelMeta> {
+        &self.kernels
+    }
+
+    pub fn layouts(&self) -> &Arena<LayoutId, Layout> {
+        &self.layouts
+    }
+
+    pub fn layouts_mut(&mut self) -> &mut Arena<LayoutId, Layout> {
+        &mut self.layouts
+    }
+
+    pub fn sources(&self) -> &Arena<SourceId, SourcePlan> {
+        &self.sources
+    }
+
+    pub fn named_domain_carrier(&self, layout: LayoutId) -> Option<LayoutId> {
+        self.named_domain_carriers.get(&layout).copied()
+    }
+
+    pub fn item_name(&self, item: ItemId) -> &str {
+        &self.items[item].name
+    }
+
+    pub fn to_replay_program(&self) -> Program {
+        let mut kernels = Arena::new();
+        for (kernel_id, kernel) in self.kernels.iter() {
+            let mut exprs = Arena::new();
+            let root = exprs
+                .alloc(KernelExpr {
+                    span: SourceSpan::new(aivi_base::FileId::new(0), aivi_base::Span::default()),
+                    layout: kernel.result_layout,
+                    kind: KernelExprKind::Environment(EnvSlotId::from_raw(0)),
+                })
+                .expect("replay kernel expression arena should not overflow");
+            let inserted = kernels
+                .alloc(Kernel::new(
+                    KernelOrigin {
+                        item: kernel.origin_item,
+                        span: SourceSpan::new(
+                            aivi_base::FileId::new(0),
+                            aivi_base::Span::default(),
+                        ),
+                        kind: KernelOriginKind::ItemBody {
+                            item: kernel.origin_item,
+                        },
+                    },
+                    kernel.input_subject,
+                    Vec::new(),
+                    kernel.environment.clone(),
+                    kernel.result_layout,
+                    kernel.convention.clone(),
+                    kernel.global_items.clone(),
+                    root,
+                    exprs,
+                ))
+                .expect("replay kernel arena should not overflow");
+            debug_assert_eq!(inserted, kernel_id);
+        }
+        Program {
+            items: self.items.clone(),
+            pipelines: self.pipelines.clone(),
+            kernels,
+            layouts: self.layouts.clone(),
+            sources: self.sources.clone(),
+            decode_plans: Arena::new(),
+            domain_member_items: HashMap::new(),
+            named_domain_carriers: self.named_domain_carriers.clone(),
+        }
+    }
+}
+
+impl From<&Program> for BackendRuntimeMeta {
+    fn from(program: &Program) -> Self {
+        let mut kernels = Arena::new();
+        for (kernel_id, kernel) in program.kernels().iter() {
+            let inserted = kernels
+                .alloc(RuntimeKernelMeta {
+                    fingerprint: crate::compute_kernel_fingerprint(program, kernel_id),
+                    origin_item: kernel.origin.item,
+                    input_subject: kernel.input_subject,
+                    environment: kernel.environment.clone(),
+                    result_layout: kernel.result_layout,
+                    convention: kernel.convention.clone(),
+                    global_items: kernel.global_items.clone(),
+                })
+                .expect("runtime kernel metadata arena should not overflow");
+            debug_assert_eq!(inserted, kernel_id);
+        }
+        Self {
+            items: program.items.clone(),
+            pipelines: program.pipelines.clone(),
+            kernels,
+            layouts: program.layouts.clone(),
+            sources: program.sources.clone(),
+            named_domain_carriers: program.named_domain_carriers.clone(),
+        }
     }
 }
 

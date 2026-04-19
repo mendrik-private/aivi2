@@ -283,7 +283,7 @@ fn build_markup_bundle(
     println!("  embedded files: {}", summary.embedded_file_count);
     println!("  companion files: {}", summary.companion_file_count);
     println!(
-        "build packages the current AIVI runtime plus a serialized source-free run artifact into a single runnable executable."
+        "build packages the current AIVI runtime plus an embedded source-free app bundle into a single runnable executable."
     );
     Ok(ExitCode::SUCCESS)
 }
@@ -317,7 +317,11 @@ fn write_run_executable(
         let bundle_root = staging_guard.path().join("bundle");
         fs::create_dir_all(&bundle_root)
             .map_err(|error| format!("failed to create {}: {error}", bundle_root.display()))?;
-        write_serialized_run_artifact_bundle(&bundle_root, artifact)?;
+        if cfg!(test) {
+            write_frozen_run_image_bundle_without_native_kernels(&bundle_root, artifact)?;
+        } else {
+            write_frozen_run_image_bundle(&bundle_root, artifact)?;
+        }
         let workspace_layout = discover_workspace_embedding_layout(source_path);
         if !workspace_layout.launch_cwd.as_os_str().is_empty() {
             fs::create_dir_all(bundle_root.join(&workspace_layout.launch_cwd)).map_err(|error| {
@@ -606,7 +610,7 @@ fn maybe_run_embedded_build_output(arguments: &[OsString]) -> Result<Option<Exit
         return Ok(None);
     };
     let decoded = decode_embedded_bundle(&executable, &bundle)?;
-    let artifact = load_serialized_run_artifact_from_bundle_entries(&decoded.generated_entries, None)?;
+    let artifact = load_embedded_run_artifact(&decoded.generated_entries, None)?;
     let launch_cwd = read_embedded_launch_cwd_from_entries(&decoded.generated_entries)?
         .map(|relative| decoded.extracted_root.path().join(relative))
         .unwrap_or_else(|| decoded.extracted_root.path().to_path_buf());
@@ -623,6 +627,17 @@ fn maybe_run_embedded_build_output(arguments: &[OsString]) -> Result<Option<Exit
         |_| {},
     )?;
     Ok(Some(exit))
+}
+
+fn load_embedded_run_artifact(
+    entries: &BTreeMap<PathBuf, Vec<u8>>,
+    requested_view: Option<&str>,
+) -> Result<RunArtifact, String> {
+    let frozen_image_key = PathBuf::from(FROZEN_RUN_IMAGE_FILE_NAME);
+    if let Some(image_bytes) = entries.get(&frozen_image_key) {
+        return load_frozen_run_image_from_bytes(image_bytes, requested_view);
+    }
+    load_serialized_run_artifact_from_bundle_entries(entries, requested_view)
 }
 
 fn load_serialized_run_artifact_from_bundle_entries(
@@ -993,6 +1008,9 @@ fn decode_embedded_bundle(
 }
 
 fn should_keep_embedded_entry_in_memory(relative: &Path) -> bool {
+    if relative == Path::new(FROZEN_RUN_IMAGE_FILE_NAME) {
+        return true;
+    }
     if relative == Path::new(RUN_ARTIFACT_FILE_NAME) {
         return true;
     }
@@ -1291,7 +1309,7 @@ OPTIONS:
 
     -o, --output <executable>   (required)
             Output path for the packaged executable. The file will be
-            directly runnable and contains the serialized app bundle.
+            directly runnable and contains the embedded app bundle.
 
     --view <name>
             Dot-separated module path to the view entry point
@@ -1299,7 +1317,7 @@ OPTIONS:
 
 DESCRIPTION:
     Validates the same runnable surface as `aivi run` and packages the
-    current runtime binary plus a serialized source-free run artifact
+    current runtime binary plus an embedded source-free app bundle
     into a single runnable executable.
 
     This is the current runnable deployment path. It is distinct from

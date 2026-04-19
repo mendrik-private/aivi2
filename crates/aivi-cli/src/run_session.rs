@@ -238,14 +238,23 @@ struct RunSessionScheduleState {
 
 struct RunSessionState {
     view_name: Box<str>,
-    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
-    executor: GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
+    kind: RunSessionKind,
     driver: GlibLinkedRuntimeDriver,
-    hydration: RunHydrationCoordinator,
     required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     main_context_requests: MainContextRequestQueue<RunSessionState>,
     main_loop: glib::MainLoop,
     lifecycle: RunSessionLifecycle,
+}
+
+struct RunGtkSessionState {
+    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
+    executor: GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
+    hydration: RunHydrationCoordinator,
+}
+
+enum RunSessionKind {
+    Gtk(Box<RunGtkSessionState>),
+    HeadlessTask,
 }
 
 impl Default for RunLaunchConfig {
@@ -397,6 +406,10 @@ impl<'a> RunSessionAccess<'a> {
         self.session.lifecycle.phase()
     }
 
+    pub(super) fn runtime_error(&self) -> Option<&str> {
+        self.session.lifecycle.runtime_error()
+    }
+
     pub(super) fn driver(&self) -> GlibLinkedRuntimeDriver {
         self.session.driver.clone()
     }
@@ -404,7 +417,12 @@ impl<'a> RunSessionAccess<'a> {
     pub(super) fn executor_mut(
         &mut self,
     ) -> &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue> {
-        &mut self.session.executor
+        match &mut self.session.kind {
+            RunSessionKind::Gtk(state) => &mut state.executor,
+            RunSessionKind::HeadlessTask => {
+                panic!("headless run sessions do not expose a GTK executor")
+            }
+        }
     }
 
     pub(super) fn collect_root_windows(&self) -> Result<Vec<gtk::Window>, String> {
@@ -412,15 +430,28 @@ impl<'a> RunSessionAccess<'a> {
     }
 
     pub(super) fn latest_requested_hydration(&self) -> Option<u64> {
-        self.session.hydration.latest_requested()
+        match &self.session.kind {
+            RunSessionKind::Gtk(state) => state.hydration.latest_requested(),
+            RunSessionKind::HeadlessTask => None,
+        }
     }
 
     pub(super) fn latest_applied_hydration(&self) -> Option<u64> {
-        self.session.hydration.latest_applied()
+        match &self.session.kind {
+            RunSessionKind::Gtk(state) => state.hydration.latest_applied(),
+            RunSessionKind::HeadlessTask => None,
+        }
     }
 
     pub(super) fn queued_message_count(&self) -> usize {
         self.session.driver.queued_message_count()
+    }
+
+    pub(super) fn has_pending_gtk_events(&self) -> bool {
+        match &self.session.kind {
+            RunSessionKind::Gtk(state) => state.executor.host().has_pending_events(),
+            RunSessionKind::HeadlessTask => false,
+        }
     }
 
     pub(super) fn outcome_count(&self) -> usize {
@@ -437,9 +468,14 @@ impl<'a> RunSessionAccess<'a> {
 
     pub(super) fn request_current_hydration(&mut self) -> Result<(), String> {
         let required_signal_globals = self.session.required_signal_globals.clone();
-        self.session
-            .hydration
-            .request_current(&self.session.driver, &required_signal_globals)
+        match &mut self.session.kind {
+            RunSessionKind::Gtk(state) => state
+                .hydration
+                .request_current(&self.session.driver, &required_signal_globals),
+            RunSessionKind::HeadlessTask => {
+                Err("headless run sessions do not use GTK hydration".to_owned())
+            }
+        }
     }
 
     pub(super) fn quit(&mut self) {
@@ -676,6 +712,10 @@ impl RunSessionLifecycle {
         self.runtime_error.is_some()
     }
 
+    fn runtime_error(&self) -> Option<&str> {
+        self.runtime_error.as_deref()
+    }
+
     fn mark_running(&mut self) {
         if !matches!(self.phase, RunSessionPhase::Stopped) {
             self.phase = RunSessionPhase::Running;
@@ -730,98 +770,72 @@ impl RunSessionState {
     }
 
     fn process_pending_work(&mut self) -> Result<(), String> {
-        let queued_events = self.executor.host_mut().drain_events();
-        if !queued_events.is_empty() {
-            let mut sink = RunEventSink {
-                driver: &self.driver,
-                executor: &self.executor,
-                handlers: &self.event_handlers,
-            };
-            for event in queued_events {
-                self.executor
-                    .dispatch_event(event.route, event.value, &mut sink)
-                    .map_err(|error| {
-                        format!("failed to dispatch GTK event {}: {error}", event.route)
-                    })?;
-            }
-        }
-        let queued_window_keys = self.executor.host_mut().drain_window_key_events();
-        for event in queued_window_keys {
-            for publication in self
-                .driver
-                .collect_window_key_publications(event.name.as_ref(), event.repeated)
-            {
-                // Queue key publications ahead of older timer work, then process a single
-                // isolated tick so the turn becomes visible without collapsing already
-                // queued timer movement into the same frame.
-                self.driver
-                    .queue_publication_now_isolated_budgeted(publication)
-                    .map_err(|error| format!("failed to queue window key publication: {error}"))?;
-            }
-        }
-        for is_dark in self.executor.host_mut().drain_dark_mode_events() {
-            self.driver.dispatch_dark_mode_changed(is_dark);
-        }
-        for text in self.executor.host_mut().drain_clipboard_events() {
-            self.driver.dispatch_clipboard_changed(text);
-        }
-        for (width, height) in self.executor.host_mut().drain_window_size_events() {
-            self.driver.dispatch_window_size_changed(width, height);
-        }
-        for focused in self.executor.host_mut().drain_window_focus_events() {
-            self.driver.dispatch_window_focus_changed(focused);
-        }
-        let failures = self.driver.drain_failures();
-        if !failures.is_empty() {
-            let source_map = self.driver.build_source_map();
-            let graph = self.driver.signal_graph();
-            let backend = self.driver.backend();
-            let mut rendered = String::from("live runtime failed during `aivi run`:\n");
-            for failure in &failures {
-                match failure {
-                    GlibLinkedRuntimeFailure::Tick(error) => {
-                        let diagnostics = render_runtime_error(
-                            error,
-                            &source_map,
-                            &graph,
-                            Some(backend.as_ref()),
-                        );
-                        for diag in &diagnostics {
-                            rendered.push_str(&format!("  error: {}\n", diag.message));
-                            for note in &diag.notes {
-                                rendered.push_str(&format!("  note: {note}\n"));
-                            }
-                            for help in &diag.help {
-                                rendered.push_str(&format!("  help: {help}\n"));
-                            }
-                        }
-                    }
-                    other => {
-                        rendered.push_str("  ");
-                        rendered.push_str(&other.to_string());
-                        rendered.push('\n');
+        match &mut self.kind {
+            RunSessionKind::Gtk(state) => {
+                let queued_events = state.executor.host_mut().drain_events();
+                if !queued_events.is_empty() {
+                    let mut sink = RunEventSink {
+                        driver: &self.driver,
+                        executor: &state.executor,
+                        handlers: &state.event_handlers,
+                    };
+                    for event in queued_events {
+                        state
+                            .executor
+                            .dispatch_event(event.route, event.value, &mut sink)
+                            .map_err(|error| {
+                                format!("failed to dispatch GTK event {}: {error}", event.route)
+                            })?;
                     }
                 }
+                let queued_window_keys = state.executor.host_mut().drain_window_key_events();
+                for event in queued_window_keys {
+                    for publication in self
+                        .driver
+                        .collect_window_key_publications(event.name.as_ref(), event.repeated)
+                    {
+                        self.driver
+                            .queue_publication_now_isolated_budgeted(publication)
+                            .map_err(|error| {
+                                format!("failed to queue window key publication: {error}")
+                            })?;
+                    }
+                }
+                for is_dark in state.executor.host_mut().drain_dark_mode_events() {
+                    self.driver.dispatch_dark_mode_changed(is_dark);
+                }
+                for text in state.executor.host_mut().drain_clipboard_events() {
+                    self.driver.dispatch_clipboard_changed(text);
+                }
+                for (width, height) in state.executor.host_mut().drain_window_size_events() {
+                    self.driver.dispatch_window_size_changed(width, height);
+                }
+                for focused in state.executor.host_mut().drain_window_focus_events() {
+                    self.driver.dispatch_window_focus_changed(focused);
+                }
+                let failures = self.driver.drain_failures();
+                if !failures.is_empty() {
+                    return Err(render_run_runtime_failures(&self.driver, &failures));
+                }
+                self.driver.drain_outcomes();
+                let required_signal_globals = self.required_signal_globals.clone();
+                let latest_requested = state.hydration.latest_requested();
+                state
+                    .hydration
+                    .request_current(&self.driver, &required_signal_globals)?;
+                if state.hydration.latest_requested() != latest_requested {
+                    state.hydration.apply_ready_immediate(&mut state.executor)?;
+                }
+                state.hydration.apply_ready(&mut state.executor)?;
             }
-            return Err(rendered);
+            RunSessionKind::HeadlessTask => {
+                let failures = self.driver.drain_failures();
+                if !failures.is_empty() {
+                    return Err(render_run_runtime_failures(&self.driver, &failures));
+                }
+                self.driver.drain_outcomes();
+            }
         }
-        // Some runtime changes (notably timer-driven signal-only transitions) can advance the
-        // view state without surfacing new outcomes here. Always re-check the projected hydration
-        // globals; duplicate requests are suppressed by HydrationRevisionState.
-        self.driver.drain_outcomes();
-        let required_signal_globals = self.required_signal_globals.clone();
-        let latest_requested = self.hydration.latest_requested();
-        self.hydration
-            .request_current(&self.driver, &required_signal_globals)?;
-        if self.hydration.latest_requested() != latest_requested {
-            // Try to apply immediately: hydration is fast, so the background thread
-            // typically responds within microseconds, collapsing the two-cycle pipeline.
-            self.hydration.apply_ready_immediate(&mut self.executor)?;
-        }
-        // Always drain completed hydration responses. Hot sources like timers can keep producing
-        // outcomes every cycle, and restricting apply_ready to the no-outcomes branch starves the
-        // GTK tree even after the worker finishes planning a newer revision.
-        self.hydration.apply_ready(&mut self.executor)?;
         self.drain_main_context_requests();
         Ok(())
     }
@@ -836,7 +850,10 @@ impl RunSessionState {
     }
 
     fn collect_root_windows(&self) -> Result<Vec<gtk::Window>, String> {
-        let root_handles = self.executor.root_widgets().map_err(|error| {
+        let RunSessionKind::Gtk(state) = &self.kind else {
+            return Ok(Vec::new());
+        };
+        let root_handles = state.executor.root_widgets().map_err(|error| {
             format!(
                 "failed to collect root widgets for run view `{}`: {error}",
                 self.view_name
@@ -851,7 +868,7 @@ impl RunSessionState {
         root_handles
             .into_iter()
             .map(|handle| {
-                let widget = self.executor.host().widget(&handle).ok_or_else(|| {
+                let widget = state.executor.host().widget(&handle).ok_or_else(|| {
                     format!(
                         "run view `{}` lost GTK root widget {:?} before presentation",
                         self.view_name, handle
@@ -867,6 +884,39 @@ impl RunSessionState {
             })
             .collect()
     }
+}
+
+fn render_run_runtime_failures(
+    driver: &GlibLinkedRuntimeDriver,
+    failures: &[GlibLinkedRuntimeFailure],
+) -> String {
+    let source_map = driver.build_source_map();
+    let graph = driver.signal_graph();
+    let backend = driver.backend();
+    let mut rendered = String::from("live runtime failed during `aivi run`:\n");
+    for failure in failures {
+        match failure {
+            GlibLinkedRuntimeFailure::Tick(error) => {
+                let diagnostics =
+                    render_runtime_error(error, &source_map, &graph, Some(backend.as_ref()));
+                for diag in &diagnostics {
+                    rendered.push_str(&format!("  error: {}\n", diag.message));
+                    for note in &diag.notes {
+                        rendered.push_str(&format!("  note: {note}\n"));
+                    }
+                    for help in &diag.help {
+                        rendered.push_str(&format!("  help: {help}\n"));
+                    }
+                }
+            }
+            other => {
+                rendered.push_str("  ");
+                rendered.push_str(&other.to_string());
+                rendered.push('\n');
+            }
+        }
+    }
+    rendered
 }
 
 fn run_hydration_worker_loop(
@@ -968,33 +1018,31 @@ where
 {
     let startup_started = Instant::now();
     let mut startup_metrics = RunStartupMetrics::default();
-
-    let gtk_init_started = Instant::now();
-    gtk::init()
-        .map_err(|error| format!("failed to initialize GTK for {}: {error}", path.display()))?;
-    let gtk_init = gtk_init_started.elapsed();
-    record_startup_stage(
-        &mut startup_metrics,
-        RunStartupStage::GtkInit,
-        gtk_init,
-        startup_started.elapsed(),
-        &mut on_stage_completed,
-    );
     let RunArtifact {
         view_name,
-        patterns,
-        bridge,
-        hydration_inputs,
+        kind,
         required_signal_globals,
         runtime_assembly,
         runtime_link,
         backend,
         backend_native_kernels,
-        event_handlers,
         stub_signal_defaults,
     } = artifact;
+    if matches!(kind, RunArtifactKind::Gtk(_)) {
+        let gtk_init_started = Instant::now();
+        gtk::init()
+            .map_err(|error| format!("failed to initialize GTK for {}: {error}", path.display()))?;
+        let gtk_init = gtk_init_started.elapsed();
+        record_startup_stage(
+            &mut startup_metrics,
+            RunStartupStage::GtkInit,
+            gtk_init,
+            startup_started.elapsed(),
+            &mut on_stage_completed,
+        );
+    }
     let runtime_link_started = Instant::now();
-    let linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels(
+    let linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
         runtime_assembly,
         backend.clone(),
         backend_native_kernels.clone(),
@@ -1004,7 +1052,15 @@ where
         let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
-            rendered.push_str(&render_backend_runtime_link_error(error, None, &backend));
+            if let Some(program) = backend.as_program() {
+                rendered.push_str(&render_backend_runtime_link_error(
+                    error,
+                    None,
+                    program.as_ref(),
+                ));
+            } else {
+                rendered.push_str(&error.to_string());
+            }
             rendered.push('\n');
         }
         rendered
@@ -1056,15 +1112,6 @@ where
     }
 
     let main_loop = glib::MainLoop::new(Some(&context), false);
-    let executor =
-        GtkRuntimeExecutor::new(bridge.clone(), GtkConcreteHost::<RunHostValue>::default())
-            .map_err(|error| {
-                format!(
-                    "failed to mount GTK view `{}` from {}: {error}",
-                    view_name,
-                    path.display()
-                )
-            })?;
     let main_context_requests = MainContextRequestQueue::new();
     let control = RunSessionControl {
         context: context.clone(),
@@ -1072,54 +1119,78 @@ where
         request_tx: main_context_requests.sender(),
         notifier: session_notifier.clone(),
     };
-    let startup_manual_sources = hold_startup_timer_sources(&driver)?;
+    let (session_kind, startup_manual_sources) = match kind {
+        RunArtifactKind::Gtk(surface) => {
+            let executor = GtkRuntimeExecutor::new(
+                surface.bridge.clone(),
+                GtkConcreteHost::<RunHostValue>::default(),
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to mount GTK view `{}` from {}: {error}",
+                    view_name,
+                    path.display()
+                )
+            })?;
+            let startup_manual_sources = Some(hold_startup_timer_sources(&driver)?);
+            (
+                RunSessionKind::Gtk(Box::new(RunGtkSessionState {
+                    event_handlers: surface.event_handlers,
+                    executor,
+                    hydration: RunHydrationCoordinator::new(
+                        Arc::new(RunHydrationStaticState {
+                            view_name: view_name.clone(),
+                            patterns: surface.patterns,
+                            bridge: surface.bridge,
+                            inputs: surface.hydration_inputs,
+                        }),
+                        session_notifier.clone(),
+                    ),
+                })),
+                startup_manual_sources,
+            )
+        }
+        RunArtifactKind::HeadlessTask { .. } => (RunSessionKind::HeadlessTask, None),
+    };
     let schedule_state = RunSessionScheduleState::default();
     let session = Rc::new(RefCell::new(RunSessionState {
         view_name: view_name.clone(),
-        event_handlers,
-        executor,
+        kind: session_kind,
         driver,
-        hydration: RunHydrationCoordinator::new(
-            Arc::new(RunHydrationStaticState {
-                view_name: view_name.clone(),
-                patterns,
-                bridge,
-                inputs: hydration_inputs,
-            }),
-            session_notifier,
-        ),
         required_signal_globals,
         main_context_requests,
         main_loop: main_loop.clone(),
         lifecycle: RunSessionLifecycle::new(),
     }));
     {
-        let weak_session = Rc::downgrade(&session);
-        let schedule_state = schedule_state.clone();
-        session
-            .borrow_mut()
-            .executor
-            .host_mut()
-            .set_event_notifier(Some(Rc::new(move || {
-                let Some(session) = weak_session.upgrade() else {
-                    return;
-                };
-                let mut borrowed = match session.try_borrow_mut() {
-                    Ok(session) => session,
-                    Err(_) => {
-                        schedule_run_session(&session, &schedule_state);
+        let mut borrowed = session.borrow_mut();
+        if let RunSessionKind::Gtk(state) = &mut borrowed.kind {
+            let weak_session = Rc::downgrade(&session);
+            let schedule_state = schedule_state.clone();
+            state
+                .executor
+                .host_mut()
+                .set_event_notifier(Some(Rc::new(move || {
+                    let Some(session) = weak_session.upgrade() else {
+                        return;
+                    };
+                    let mut borrowed = match session.try_borrow_mut() {
+                        Ok(session) => session,
+                        Err(_) => {
+                            schedule_run_session(&session, &schedule_state);
+                            return;
+                        }
+                    };
+                    if borrowed.lifecycle.has_runtime_error()
+                        || matches!(borrowed.lifecycle.phase(), RunSessionPhase::Stopped)
+                    {
                         return;
                     }
-                };
-                if borrowed.lifecycle.has_runtime_error()
-                    || matches!(borrowed.lifecycle.phase(), RunSessionPhase::Stopped)
-                {
-                    return;
-                }
-                if let Err(error) = borrowed.process_pending_work() {
-                    borrowed.fail(error);
-                }
-            })));
+                    if let Err(error) = borrowed.process_pending_work() {
+                        borrowed.fail(error);
+                    }
+                })));
+        }
     }
     {
         let weak_session = Rc::downgrade(&session);
@@ -1145,7 +1216,12 @@ where
                     borrowed.fail(error);
                     return;
                 }
-                if borrowed.hydration.latest_applied() != borrowed.hydration.latest_requested() {
+                let should_rerun = matches!(
+                    &borrowed.kind,
+                    RunSessionKind::Gtk(state)
+                        if state.hydration.latest_applied() != state.hydration.latest_requested()
+                );
+                if should_rerun {
                     drop(borrowed);
                     schedule_run_session(&session, &schedule_state);
                 }
@@ -1170,10 +1246,12 @@ where
         session.process_pending_work().map_err(|error| {
             format!("failed to start run view `{}`: {error}", session.view_name)
         })?;
-        if session.hydration.latest_requested().is_none() {
-            let driver = session.driver.clone();
-            let required_signal_globals = session.required_signal_globals.clone();
-            session
+        let driver = session.driver.clone();
+        let required_signal_globals = session.required_signal_globals.clone();
+        if let RunSessionKind::Gtk(state) = &mut session.kind
+            && state.hydration.latest_requested().is_none()
+        {
+            state
                 .hydration
                 .request_current(&driver, &required_signal_globals)
                 .map_err(|error| {
@@ -1189,21 +1267,28 @@ where
         startup_started.elapsed(),
         &mut on_stage_completed,
     );
-    let initial_hydration_wait_started = Instant::now();
-    while {
-        let session = session.borrow();
-        session.hydration.latest_applied().is_none() && !session.lifecycle.has_runtime_error()
-    } {
-        context.iteration(true);
+    if matches!(&session.borrow().kind, RunSessionKind::Gtk(_)) {
+        let initial_hydration_wait_started = Instant::now();
+        while {
+            let session = session.borrow();
+            matches!(
+                &session.kind,
+                RunSessionKind::Gtk(state)
+                    if state.hydration.latest_applied().is_none()
+                        && !session.lifecycle.has_runtime_error()
+            )
+        } {
+            context.iteration(true);
+        }
+        let initial_hydration_wait = initial_hydration_wait_started.elapsed();
+        record_startup_stage(
+            &mut startup_metrics,
+            RunStartupStage::InitialHydrationWait,
+            initial_hydration_wait,
+            startup_started.elapsed(),
+            &mut on_stage_completed,
+        );
     }
-    let initial_hydration_wait = initial_hydration_wait_started.elapsed();
-    record_startup_stage(
-        &mut startup_metrics,
-        RunStartupStage::InitialHydrationWait,
-        initial_hydration_wait,
-        startup_started.elapsed(),
-        &mut on_stage_completed,
-    );
     {
         let mut session = session.borrow_mut();
         if let Some(error) = session.lifecycle.take_runtime_error() {
@@ -1213,16 +1298,21 @@ where
             ));
         }
     }
-    let root_window_collection_started = Instant::now();
-    let root_windows = session.borrow().collect_root_windows()?;
-    let root_window_collection = root_window_collection_started.elapsed();
-    record_startup_stage(
-        &mut startup_metrics,
-        RunStartupStage::RootWindowCollection,
-        root_window_collection,
-        startup_started.elapsed(),
-        &mut on_stage_completed,
-    );
+    let root_windows = if matches!(&session.borrow().kind, RunSessionKind::Gtk(_)) {
+        let root_window_collection_started = Instant::now();
+        let root_windows = session.borrow().collect_root_windows()?;
+        let root_window_collection = root_window_collection_started.elapsed();
+        record_startup_stage(
+            &mut startup_metrics,
+            RunStartupStage::RootWindowCollection,
+            root_window_collection,
+            startup_started.elapsed(),
+            &mut on_stage_completed,
+        );
+        root_windows
+    } else {
+        Vec::new()
+    };
     session.borrow_mut().lifecycle.mark_running();
 
     Ok(RunSessionHarness {
@@ -1231,7 +1321,7 @@ where
         control,
         root_windows,
         startup_metrics,
-        startup_manual_sources: RefCell::new(Some(startup_manual_sources)),
+        startup_manual_sources: RefCell::new(startup_manual_sources),
     })
 }
 
@@ -1253,18 +1343,26 @@ where
         &mut on_progress,
     )?;
 
-    println!(
-        "running GTK view `{}` from {}",
-        harness.view_name(),
-        path.display()
-    );
-
-    harness.install_quit_on_last_window_close();
-    let present_started = Instant::now();
-    harness.present_root_windows()?;
-    let startup_metrics = harness
-        .startup_metrics()
-        .with_window_presentation(present_started.elapsed());
+    let startup_metrics = if harness.root_windows().is_empty() {
+        println!(
+            "running headless entry `{}` from {}",
+            harness.view_name(),
+            path.display()
+        );
+        harness.startup_metrics()
+    } else {
+        println!(
+            "running GTK view `{}` from {}",
+            harness.view_name(),
+            path.display()
+        );
+        harness.install_quit_on_last_window_close();
+        let present_started = Instant::now();
+        harness.present_root_windows()?;
+        harness
+            .startup_metrics()
+            .with_window_presentation(present_started.elapsed())
+    };
     on_started(&startup_metrics);
     harness.run_main_loop()?;
     Ok(ExitCode::SUCCESS)
@@ -3020,6 +3118,41 @@ export main
         assert_ne!(
             restarted_board, game_over_board,
             "restart should replace the game-over board with a fresh starting board"
+        );
+
+        harness.shutdown();
+    }
+
+    #[gtk::test]
+    fn headless_run_session_starts_without_gtk_windows_and_activates_sources() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        let artifact = prepare_run_from_text(
+            "headless-run.aivi",
+            r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+value main : Task Text Unit =
+    stdoutWrite ""
+"#,
+        );
+        let path = Path::new("headless-run.aivi");
+        let harness =
+            start_run_session_with_launch_config(path, artifact, RunLaunchConfig::default())
+                .expect("headless run session should start without GTK setup");
+
+        assert!(
+            harness.root_windows().is_empty(),
+            "headless runs should not materialize GTK root windows"
+        );
+        let cwd = runtime_text(&named_signal_value_for(&harness, "cwd"), "cwd");
+        assert!(
+            cwd.contains(std::path::MAIN_SEPARATOR),
+            "headless runs should activate immediate process sources"
         );
 
         harness.shutdown();

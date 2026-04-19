@@ -383,9 +383,8 @@ impl<'a> RunFragmentCompiler<'a> {
             .entry(unit.execution_cache_key)
             .or_insert_with(|| {
                 Arc::new(RunFragmentExecutionUnit::new(
-                    unit.backend.clone(),
+                    aivi_runtime::hir_adapter::BackendRuntimePayload::Program(unit.backend.clone()),
                     Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
-                    unit.execution_cache_key,
                 ))
             })
             .clone();
@@ -1223,21 +1222,30 @@ fn evaluate_compiled_run_fragment<'a>(
                 })
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
-    let result = if args.is_empty() {
+    let item = fragment
+        .execution
+        .backend_view()
+        .item(fragment.item)
+        .ok_or_else(|| {
+            format!(
+                "compiled runtime fragment {} references missing backend item {}",
+                fragment.expr.as_raw(),
+                fragment.item.as_raw()
+            )
+        })?;
+    let result = if let Some(kernel) = item.body {
+        evaluator
+            .evaluate_kernel(kernel, None, &args, &required_globals)
+            .map_err(|error| format!("{error}"))
+    } else if args.is_empty() {
         evaluator
             .evaluate_item(fragment.item, &required_globals)
             .map_err(|error| format!("{error}"))
     } else {
-        let item = &fragment.execution.backend().items()[fragment.item];
-        let kernel = item.body.ok_or_else(|| {
-            format!(
-                "compiled runtime fragment {} has no executable body",
-                fragment.expr.as_raw()
-            )
-        })?;
-        evaluator
-            .evaluate_kernel(kernel, None, &args, &required_globals)
-            .map_err(|error| format!("{error}"))
+        Err(format!(
+            "compiled runtime fragment {} has no executable body",
+            fragment.expr.as_raw()
+        ))
     };
     if let Some(started_at) = started_at {
         profiler.record_fragment(fragment, started_at.elapsed());

@@ -22,7 +22,7 @@ use serde_json::{Value as JsonValue, json};
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const HOST_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const HYDRATION_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
-const HYDRATION_SETTLE_GRACE: Duration = Duration::from_millis(20);
+const HYDRATION_SETTLE_GRACE: Duration = Duration::from_millis(100);
 
 type HostTask = Box<dyn FnOnce(&mut McpHostState) + Send + 'static>;
 
@@ -208,8 +208,10 @@ impl McpHostState {
         };
         let runtime = session.harness.with_access(|access| SessionRuntimeStatus {
             phase: phase_label(access.phase()).to_owned(),
+            runtime_error: access.runtime_error().map(str::to_owned),
             latest_requested_hydration: access.latest_requested_hydration(),
             latest_applied_hydration: access.latest_applied_hydration(),
+            pending_gtk_events: access.has_pending_gtk_events(),
             queued_messages: access.queued_message_count(),
             queued_outcomes: access.outcome_count(),
             queued_failures: access.failure_count(),
@@ -228,6 +230,7 @@ impl McpHostState {
             active_entry_path: Some(session.path.display().to_string()),
             active_view: Some(session.view_name.clone()),
             phase: Some(runtime.phase),
+            runtime_error: runtime.runtime_error,
             root_window_count: session.harness.root_windows().len(),
             latest_requested_hydration: runtime.latest_requested_hydration,
             latest_applied_hydration: runtime.latest_applied_hydration,
@@ -252,6 +255,7 @@ impl McpHostState {
             active_entry_path: None,
             active_view: None,
             phase: None,
+            runtime_error: None,
             root_window_count: 0,
             latest_requested_hydration: None,
             latest_applied_hydration: None,
@@ -458,9 +462,11 @@ impl McpHostState {
             }
         }
         self.process_context_work();
-        session
-            .harness
-            .with_access(|access| access.process_pending_work())?;
+        session.harness.with_access(|access| {
+            access.process_pending_work()?;
+            let _ = access.request_current_hydration();
+            Ok::<(), String>(())
+        })?;
         self.settle_session()?;
         let elapsed_us = started_at.elapsed().as_micros() as u64;
         let after = self.list_signals(ListSignalsArgs::default())?;
@@ -493,8 +499,10 @@ impl McpHostState {
                 access.process_pending_work()?;
                 Ok::<SessionRuntimeStatus, String>(SessionRuntimeStatus {
                     phase: phase_label(access.phase()).to_owned(),
+                    runtime_error: access.runtime_error().map(str::to_owned),
                     latest_requested_hydration: access.latest_requested_hydration(),
                     latest_applied_hydration: access.latest_applied_hydration(),
+                    pending_gtk_events: access.has_pending_gtk_events(),
                     queued_messages: access.queued_message_count(),
                     queued_outcomes: access.outcome_count(),
                     queued_failures: access.failure_count(),
@@ -2274,6 +2282,7 @@ struct SessionStatus {
     active_entry_path: Option<String>,
     active_view: Option<String>,
     phase: Option<String>,
+    runtime_error: Option<String>,
     root_window_count: usize,
     latest_requested_hydration: Option<u64>,
     latest_applied_hydration: Option<u64>,
@@ -2287,8 +2296,10 @@ struct SessionStatus {
 
 struct SessionRuntimeStatus {
     phase: String,
+    runtime_error: Option<String>,
     latest_requested_hydration: Option<u64>,
     latest_applied_hydration: Option<u64>,
+    pending_gtk_events: bool,
     queued_messages: usize,
     queued_outcomes: usize,
     queued_failures: usize,
@@ -2318,7 +2329,7 @@ impl SessionRuntimeStatus {
     }
 
     fn runtime_idle(&self) -> bool {
-        self.queued_messages == 0 && self.queued_outcomes == 0
+        self.queued_messages == 0 && self.queued_outcomes == 0 && !self.pending_gtk_events
     }
 }
 
@@ -3064,7 +3075,6 @@ mod tests {
                 repeated: None,
             })
             .expect("clicking a legal reversi move should settle fully in MCP");
-
         assert!(
             result
                 .session

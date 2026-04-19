@@ -243,9 +243,12 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
         mut self,
         requested_kernel: KernelId,
         artifact: &CachedJitKernelArtifact,
+        expected_kernel_ids: Option<Vec<KernelId>>,
     ) -> Result<CompiledJitKernel, CodegenErrors> {
-        let kernel_ids =
-            jit_dependency_kernel_ids(self.program, requested_kernel).map_err(wrap_one)?;
+        let kernel_ids = match expected_kernel_ids {
+            Some(kernel_ids) => kernel_ids,
+            None => jit_dependency_kernel_ids(self.program, requested_kernel).map_err(wrap_one)?,
+        };
         if artifact.requested_kernel != requested_kernel
             || artifact
                 .kernels
@@ -416,7 +419,7 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
         &self,
         target: &ModuleRelocTarget,
     ) -> Option<CachedJitRelocTarget> {
-        match target {
+        let cached = match target {
             ModuleRelocTarget::User {
                 namespace: 0,
                 index,
@@ -442,7 +445,8 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
                 Some(CachedJitRelocTarget::KnownSymbol(symbol.to_string().into()))
             }
             ModuleRelocTarget::User { .. } => None,
-        }
+        };
+        cached
     }
 
     fn cacheable_jit_function_target(&self, func_id: FuncId) -> Option<CachedJitFunctionTarget> {

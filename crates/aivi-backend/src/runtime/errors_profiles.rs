@@ -161,6 +161,9 @@ pub enum EvaluationError {
         left: RuntimeValue,
         right: RuntimeValue,
     },
+    UnsupportedNativeOnlyRuntimeOperation {
+        detail: Box<str>,
+    },
 }
 
 impl fmt::Display for EvaluationError {
@@ -353,6 +356,7 @@ impl fmt::Display for EvaluationError {
                 f,
                 "kernel {kernel} cannot compare `{left}` and `{right}` structurally in the current runtime slice"
             ),
+            Self::UnsupportedNativeOnlyRuntimeOperation { detail } => f.write_str(detail),
         }
     }
 }
@@ -444,4 +448,3 @@ impl KernelEvaluationProfile {
         }
     }
 }
-

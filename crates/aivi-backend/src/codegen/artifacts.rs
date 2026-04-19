@@ -1,5 +1,5 @@
 /// Stable content fingerprint for one backend kernel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct KernelFingerprint(u64);
 
 impl KernelFingerprint {
@@ -219,4 +219,3 @@ struct JitLiteralDataRecord {
 }
 
 pub type CodegenErrors = aivi_base::ErrorCollection<CodegenError>;
-

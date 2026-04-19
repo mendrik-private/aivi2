@@ -28,6 +28,39 @@ type ImapEvent =
   | FolderChanged Text
   | SyncCompleted
 
+type ImapHeader = {
+    uid: Int,
+    subject: Text,
+    from: Text,
+    date: Text,
+    messageId: Text,
+    flags: List ImapFlag,
+    preview: Text,
+    rawHeader: Text
+}
+
+type ImapSnapshot = {
+    accountId: Text,
+    mailbox: Text,
+    highestUid: Option Int,
+    messages: List ImapHeader
+}
+
+type ImapLiveEvent = {
+    accountId: Text,
+    mailbox: Text,
+    event: ImapEvent
+}
+
+type ImapBody = {
+    accountId: Text,
+    mailbox: Text,
+    uid: Int,
+    text: Text,
+    html: Text,
+    raw: Text
+}
+
 type ImapTask A = (Task ImapError A)
 
-export (ImapError, ImapAuthFailed, ImapConnectionFailed, FolderNotFound, ImapProtocolError, SyncState, ImapFolder, ImapFlag, Seen, Answered, Flagged, Draft, ImapEvent, NewMessage, MessageFlagChanged, FolderChanged, SyncCompleted, ImapTask)
+export (ImapError, ImapAuthFailed, ImapConnectionFailed, FolderNotFound, ImapProtocolError, SyncState, ImapFolder, ImapFlag, Seen, Answered, Flagged, Draft, ImapEvent, NewMessage, MessageFlagChanged, FolderChanged, SyncCompleted, ImapHeader, ImapSnapshot, ImapLiveEvent, ImapBody, ImapTask)

@@ -12,7 +12,7 @@ struct LinkArtifacts {
 
 struct LinkBuilder<'a> {
     assembly: &'a HirRuntimeAssembly,
-    backend: &'a BackendProgram,
+    backend: BackendRuntimeView<'a>,
     backend_native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
     errors: Vec<BackendRuntimeLinkError>,
     hir_to_backend: BTreeMap<hir::ItemId, BackendItemId>,
@@ -30,7 +30,7 @@ struct LinkBuilder<'a> {
 impl<'a> LinkBuilder<'a> {
     fn new(
         assembly: &'a HirRuntimeAssembly,
-        backend: &'a BackendProgram,
+        backend: BackendRuntimeView<'a>,
         backend_native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
         seed: &BackendRuntimeLinkSeed,
     ) -> Self {
@@ -121,7 +121,7 @@ impl<'a> LinkBuilder<'a> {
                     });
                 continue;
             };
-            let Some(backend_item) = self.backend.items().get(backend_owner) else {
+            let Some(backend_item) = self.backend.item(backend_owner) else {
                 self.errors
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: source.owner });
                 continue;
@@ -142,7 +142,10 @@ impl<'a> LinkBuilder<'a> {
                     });
                 continue;
             };
-            let backend_source = &self.backend.sources()[backend_source_id];
+            let backend_source = self
+                .backend
+                .source(backend_source_id)
+                .expect("linked runtime source should exist");
             if backend_source.instance.as_raw() != source.spec.instance.as_raw() {
                 self.errors
                     .push(BackendRuntimeLinkError::SourceInstanceMismatch {
@@ -212,7 +215,7 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingRuntimeOwner { owner: task.owner });
                 continue;
             };
-            let Some(item) = self.backend.items().get(backend_item) else {
+            let Some(item) = self.backend.item(backend_item) else {
                 self.errors
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: task.owner });
                 continue;
@@ -259,7 +262,10 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: binding.item });
                 continue;
             };
-            let item = &self.backend.items()[backend_item];
+            let item = self
+                .backend
+                .item(backend_item)
+                .expect("linked runtime item should exist");
             let BackendItemKind::Signal(info) = &item.kind else {
                 self.errors
                     .push(BackendRuntimeLinkError::BackendItemNotSignal {
@@ -343,7 +349,7 @@ impl<'a> LinkBuilder<'a> {
                 let Some(&backend_item) = self.hir_to_backend.get(&binding.table_item) else {
                     continue;
                 };
-                let Some(item) = self.backend.items().get(backend_item) else {
+                let Some(item) = self.backend.item(backend_item) else {
                     continue;
                 };
                 let Some(body) = item.body else {
@@ -376,7 +382,10 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: binding.item });
                 continue;
             };
-            let item = &self.backend.items()[backend_item];
+            let item = self
+                .backend
+                .item(backend_item)
+                .expect("linked runtime item should exist");
             let BackendItemKind::Signal(info) = &item.kind else {
                 self.errors
                     .push(BackendRuntimeLinkError::BackendItemNotSignal {
@@ -389,7 +398,13 @@ impl<'a> LinkBuilder<'a> {
                 .pipelines
                 .iter()
                 .copied()
-                .find(|&pid| self.backend.pipelines()[pid].recurrence.is_some())
+                .find(|&pid| {
+                    self.backend
+                        .pipeline(pid)
+                        .expect("linked runtime pipeline should exist")
+                        .recurrence
+                        .is_some()
+                })
             {
                 let Some(recurrence_binding) = self
                     .assembly
@@ -414,7 +429,10 @@ impl<'a> LinkBuilder<'a> {
                     continue;
                 };
 
-                let recurrence = self.backend.pipelines()[pipeline_id]
+                let recurrence = self
+                    .backend
+                    .pipeline(pipeline_id)
+                    .expect("selected recurrence pipeline should exist")
                     .recurrence
                     .as_ref()
                     .expect("selected recurrence pipeline should carry recurrence metadata");
@@ -604,12 +622,18 @@ impl<'a> LinkBuilder<'a> {
         let mut kernel_queue = kernels.to_vec();
         let mut visited_items = BTreeSet::new();
         while let Some(kernel_id) = kernel_queue.pop() {
-            let kernel = &self.backend.kernels()[kernel_id];
-            for &item_id in &kernel.global_items {
+            let kernel = self
+                .backend
+                .kernel(kernel_id)
+                .expect("linked runtime kernel should exist");
+            for &item_id in kernel.global_items {
                 if !visited_items.insert(item_id) {
                     continue;
                 }
-                let item = &self.backend.items()[item_id];
+                let item = self
+                    .backend
+                    .item(item_id)
+                    .expect("linked runtime item should exist");
                 match item.kind {
                     BackendItemKind::Signal(_) => {
                         required.insert(item_id);
@@ -644,12 +668,18 @@ impl<'a> LinkBuilder<'a> {
         let mut kernels = vec![root];
         let mut visited_items = BTreeSet::new();
         while let Some(kernel_id) = kernels.pop() {
-            let kernel = &self.backend.kernels()[kernel_id];
-            for item_id in &kernel.global_items {
+            let kernel = self
+                .backend
+                .kernel(kernel_id)
+                .expect("linked runtime kernel should exist");
+            for item_id in kernel.global_items {
                 if !visited_items.insert(*item_id) {
                     continue;
                 }
-                let item = &self.backend.items()[*item_id];
+                let item = self
+                    .backend
+                    .item(*item_id)
+                    .expect("linked runtime item should exist");
                 match item.kind {
                     BackendItemKind::Signal(_) => {
                         required.insert(*item_id);
@@ -683,12 +713,18 @@ impl<'a> LinkBuilder<'a> {
         let mut kernels = kernels;
         let mut visited_items = BTreeSet::new();
         while let Some(kernel_id) = kernels.pop() {
-            let kernel = &self.backend.kernels()[kernel_id];
-            for item_id in &kernel.global_items {
+            let kernel = self
+                .backend
+                .kernel(kernel_id)
+                .expect("linked runtime kernel should exist");
+            for item_id in kernel.global_items {
                 if !visited_items.insert(*item_id) {
                     continue;
                 }
-                let item = &self.backend.items()[*item_id];
+                let item = self
+                    .backend
+                    .item(*item_id)
+                    .expect("linked runtime item should exist");
                 match item.kind {
                     BackendItemKind::Signal(_) => {
                         required.insert(*item_id);
@@ -715,7 +751,7 @@ impl<'a> LinkBuilder<'a> {
 
     fn kernel_eval_lane(
         &self,
-        backend: &BackendProgram,
+        backend: BackendRuntimeView<'_>,
         native_kernels: &aivi_backend::NativeKernelArtifactSet,
         kernel: Option<KernelId>,
         dependency_layouts: &[aivi_backend::LayoutId],
@@ -726,11 +762,23 @@ impl<'a> LinkBuilder<'a> {
         if !native_kernel_plans_enabled() {
             return LinkedEvalLane::Fallback;
         }
-        let Some(native_plan) = aivi_backend::NativeKernelPlan::compile_with_native_artifacts(
-            backend,
-            Some(native_kernels),
-            kernel,
-        ) else {
+        let native_plan = match backend {
+            BackendRuntimeView::Program(program) => {
+                aivi_backend::NativeKernelPlan::compile_with_native_artifacts(
+                    program,
+                    Some(native_kernels),
+                    kernel,
+                )
+            }
+            BackendRuntimeView::Meta(meta) => {
+                aivi_backend::NativeKernelPlan::from_runtime_meta_with_native_artifacts(
+                    meta,
+                    Some(native_kernels),
+                    kernel,
+                )
+            }
+        };
+        let Some(native_plan) = native_plan else {
             return LinkedEvalLane::Fallback;
         };
         LinkedEvalLane::Native(LinkedNativeKernelEval {
@@ -743,14 +791,14 @@ impl<'a> LinkBuilder<'a> {
     fn fragment_eval_lane(&self, fragment: &HirCompiledRuntimeExpr) -> LinkedEvalLane {
         let Some(kernel) = fragment
             .backend
-            .items()
-            .get(fragment.entry_item)
+            .runtime_view()
+            .item(fragment.entry_item)
             .and_then(|item| item.body)
         else {
             return LinkedEvalLane::Fallback;
         };
         self.kernel_eval_lane(
-            fragment.backend.as_ref(),
+            fragment.backend.runtime_view(),
             fragment.native_kernels.as_ref(),
             Some(kernel),
             &[],
@@ -764,7 +812,10 @@ impl<'a> LinkBuilder<'a> {
     ) -> Vec<SignalHandle> {
         let mut kernels = Vec::new();
         for &pipeline_id in pipeline_ids {
-            let pipeline = &self.backend.pipelines()[pipeline_id];
+            let pipeline = self
+                .backend
+                .pipeline(pipeline_id)
+                .expect("linked runtime pipeline should exist");
             for stage in &pipeline.stages {
                 match &stage.kind {
                     BackendStageKind::Gate(BackendGateStage::Ordinary {
@@ -828,7 +879,10 @@ impl<'a> LinkBuilder<'a> {
         let mut helpers = Vec::new();
         let mut inputs = binding.temporal_helper_inputs().iter().copied();
         for (pipeline_position, &pipeline_id) in item.pipelines.iter().enumerate() {
-            let pipeline = &self.backend.pipelines()[pipeline_id];
+            let pipeline = self
+                .backend
+                .pipeline(pipeline_id)
+                .expect("linked runtime pipeline should exist");
             for (stage_offset, stage) in pipeline.stages.iter().enumerate() {
                 let needs_helper = matches!(
                     stage.kind,
@@ -864,7 +918,10 @@ impl<'a> LinkBuilder<'a> {
     fn supported_body_backed_derived_signal_pipelines(&self, item: &aivi_backend::Item) -> bool {
         item.body.is_some()
             && item.pipelines.iter().copied().all(|pipeline_id| {
-                let pipeline = &self.backend.pipelines()[pipeline_id];
+                let pipeline = self
+                    .backend
+                    .pipeline(pipeline_id)
+                    .expect("linked runtime pipeline should exist");
                 // Recurrence pipelines require scheduler wakeup infrastructure
                 // that is not yet wired; keep them as an explicit boundary.
                 pipeline.recurrence.is_none()
@@ -883,7 +940,10 @@ impl<'a> LinkBuilder<'a> {
     fn supported_body_backed_reactive_signal_pipelines(&self, item: &aivi_backend::Item) -> bool {
         item.body.is_some()
             && item.pipelines.iter().copied().all(|pipeline_id| {
-                let pipeline = &self.backend.pipelines()[pipeline_id];
+                let pipeline = self
+                    .backend
+                    .pipeline(pipeline_id)
+                    .expect("linked runtime pipeline should exist");
                 pipeline.recurrence.is_none()
                     && pipeline.stages.iter().all(|stage| {
                         matches!(

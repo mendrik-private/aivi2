@@ -34,9 +34,11 @@ pub enum BuiltinSourceProvider {
     PathTempDir,
     DbConnect,
     DbLive,
+    GoaMailAccounts,
     DbusOwnName,
     DbusSignal,
     DbusMethod,
+    DbusEmit,
     WindowKeyDown,
     GtkDarkMode,
     GtkClipboard,
@@ -56,7 +58,7 @@ pub enum BuiltinSourceProvider {
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 42] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -78,9 +80,11 @@ impl BuiltinSourceProvider {
         Self::PathTempDir,
         Self::DbConnect,
         Self::DbLive,
+        Self::GoaMailAccounts,
         Self::DbusOwnName,
         Self::DbusSignal,
         Self::DbusMethod,
+        Self::DbusEmit,
         Self::WindowKeyDown,
         Self::GtkDarkMode,
         Self::GtkClipboard,
@@ -122,9 +126,11 @@ impl BuiltinSourceProvider {
             "path.tempDir" => Some(Self::PathTempDir),
             "db.connect" => Some(Self::DbConnect),
             "db.live" => Some(Self::DbLive),
+            "goa.mailAccounts" => Some(Self::GoaMailAccounts),
             "dbus.ownName" => Some(Self::DbusOwnName),
             "dbus.signal" => Some(Self::DbusSignal),
             "dbus.method" => Some(Self::DbusMethod),
+            "dbus.emit" => Some(Self::DbusEmit),
             "window.keyDown" => Some(Self::WindowKeyDown),
             "gtk.darkMode" => Some(Self::GtkDarkMode),
             "clipboard.changed" => Some(Self::GtkClipboard),
@@ -168,9 +174,11 @@ impl BuiltinSourceProvider {
             Self::PathTempDir => "path.tempDir",
             Self::DbConnect => "db.connect",
             Self::DbLive => "db.live",
+            Self::GoaMailAccounts => "goa.mailAccounts",
             Self::DbusOwnName => "dbus.ownName",
             Self::DbusSignal => "dbus.signal",
             Self::DbusMethod => "dbus.method",
+            Self::DbusEmit => "dbus.emit",
             Self::WindowKeyDown => "window.keyDown",
             Self::GtkDarkMode => "gtk.darkMode",
             Self::GtkClipboard => "clipboard.changed",
@@ -246,6 +254,9 @@ impl BuiltinSourceProvider {
             Self::DbLive => {
                 SourceContract::new(self, db_live_options(), DB_LIVE_RECURRENCE, HTTP_LIFECYCLE)
             }
+            Self::GoaMailAccounts => {
+                SourceContract::new(self, &NO_OPTIONS, GOA_RECURRENCE, STREAM_LIFECYCLE)
+            }
             Self::DbusOwnName => {
                 SourceContract::new(self, dbus_name_options(), DBUS_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -261,6 +272,9 @@ impl BuiltinSourceProvider {
                 DBUS_RECURRENCE,
                 STREAM_LIFECYCLE,
             ),
+            Self::DbusEmit => {
+                SourceContract::new(self, dbus_emit_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -274,15 +288,24 @@ impl BuiltinSourceProvider {
                 // clipboard change. Publishes once at activation with current clipboard text.
                 SourceContract::new(self, &NO_OPTIONS, DARK_MODE_RECURRENCE, STREAM_LIFECYCLE)
             }
-            Self::ImapConnect => {
-                SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STREAM_LIFECYCLE)
-            }
-            Self::ImapIdle => {
-                SourceContract::new(self, &NO_OPTIONS, FS_WATCH_RECURRENCE, STREAM_LIFECYCLE)
-            }
-            Self::ImapFetchBody => {
-                SourceContract::new(self, &NO_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
-            }
+            Self::ImapConnect => SourceContract::new(
+                self,
+                imap_connect_options(),
+                HTTP_RECURRENCE,
+                HTTP_LIFECYCLE,
+            ),
+            Self::ImapIdle => SourceContract::new(
+                self,
+                imap_idle_options(),
+                IMAP_IDLE_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
+            Self::ImapFetchBody => SourceContract::new(
+                self,
+                imap_fetch_body_options(),
+                HTTP_RECURRENCE,
+                HTTP_LIFECYCLE,
+            ),
             Self::SmtpSend => {
                 SourceContract::new(self, &NO_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
@@ -1010,6 +1033,78 @@ fn dbus_method_options() -> &'static [SourceOptionContract] {
     })
 }
 
+static DBUS_EMIT_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn dbus_emit_options() -> &'static [SourceOptionContract] {
+    DBUS_EMIT_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new("address", SourceContractType::text()),
+            SourceOptionContract::new("interface", SourceContractType::text()),
+            SourceOptionContract::new("member", SourceContractType::text()),
+            SourceOptionContract::new("body", SourceContractType::text()),
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
+static IMAP_CONNECT_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn imap_connect_options() -> &'static [SourceOptionContract] {
+    IMAP_CONNECT_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("mailbox", SourceContractType::text()),
+            SourceOptionContract::new("limit", SourceContractType::int()),
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
+static IMAP_IDLE_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn imap_idle_options() -> &'static [SourceOptionContract] {
+    IMAP_IDLE_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("mailbox", SourceContractType::text()),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
+static IMAP_FETCH_BODY_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn imap_fetch_body_options() -> &'static [SourceOptionContract] {
+    IMAP_FETCH_BODY_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
 static WINDOW_OPTIONS: [SourceOptionContract; 3] = [
     SourceOptionContract::new("capture", SourceContractType::bool()),
     SourceOptionContract::new("repeat", SourceContractType::bool()),
@@ -1043,7 +1138,15 @@ const PROCESS_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::n
 );
 const DB_LIVE_RECURRENCE: SourceRecurrenceContract =
     SourceRecurrenceContract::new(None, &DB_LIVE_WAKEUP_OPTIONS);
+const GOA_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
 const DBUS_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
+const IMAP_IDLE_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
     Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
     &[],
 );

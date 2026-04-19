@@ -205,6 +205,114 @@ signal next = increment base
 }
 
 #[test]
+fn runtime_meta_native_signal_apply_executes_complex_renderer_signal_body() {
+    let backend = lower_text(
+        "backend-native-signal-apply-renderer.aivi",
+        r#"
+ type Cell = (Int, Int)
+type TCell = (Cell, Text)
+type RenderTile = {
+    id: Int,
+    column: Int,
+    row: Int,
+    asset: Text
+}
+
+value boardW = 3
+value boardH = 2
+value snakeCells = [
+    ((0, 0), "head.png"),
+    ((1, 0), "body.png")
+]
+
+type Cell -> TCell -> Bool
+func cellEntryMatches = target pair => pair
+ ||> (cell, _) -> cell == target
+
+type Cell -> List TCell -> Option TCell
+func findSnakeAssetEntry = target snakeCells =>
+    __aivi_list_find (cellEntryMatches target) snakeCells
+
+type List TCell -> Cell -> Option Text
+func findSnakeAsset = snakeCells target => findSnakeAssetEntry target snakeCells
+ ||> Some (_, asset) -> Some asset
+ ||> None            -> None
+
+type Text -> Cell -> Cell -> Text
+func foodOrEmptyAsset = assetRoot target food => target == food
+ ||> True  -> "mouse.png"
+ ||> False -> "empty.png"
+
+type Text -> List TCell -> Cell -> Cell -> Text
+func tileAssetFor = assetRoot snakeCells food target => findSnakeAsset snakeCells target
+ ||> Some asset -> asset
+ ||> None       -> foodOrEmptyAsset assetRoot target food
+
+type Int -> Int -> Text -> RenderTile
+func renderTile = x y asset => {
+    id: y * boardW + x,
+    column: x,
+    row: y,
+    asset: asset
+}
+
+type Text -> List TCell -> Cell -> Int -> Int -> RenderTile
+func renderBoardTileAt = assetRoot snakeCells food y x =>
+    renderTile x y (tileAssetFor assetRoot snakeCells food (x, y))
+
+type Text -> List TCell -> Cell -> Int -> (List RenderTile)
+func renderBoardRow = assetRoot snakeCells food y =>
+    __aivi_list_map (renderBoardTileAt assetRoot snakeCells food y) (__aivi_list_range boardW)
+
+type Text -> Cell -> List TCell -> (List RenderTile)
+func renderBoardTilesWithList = assetRoot food snakeCells =>
+    __aivi_list_flatMap (renderBoardRow assetRoot snakeCells food) (__aivi_list_range boardH)
+
+type Text -> Cell -> (List RenderTile)
+func renderBoardTiles = assetRoot food =>
+    renderBoardTilesWithList assetRoot food snakeCells
+
+signal assetRoot = "assets"
+signal food = (1, 1)
+signal rendered = renderBoardTiles assetRoot food
+"#,
+    );
+    let rendered = find_item(&backend, "rendered");
+    let body_kernel = match &backend.items()[rendered].kind {
+        ItemKind::Signal(signal) => signal
+            .body_kernel
+            .expect("derived renderer signal should lower a dedicated body kernel"),
+        other => panic!("expected signal item, found {other:?}"),
+    };
+    let artifact = compile_native_kernel_artifact(&backend, body_kernel)
+        .expect("renderer signal body native sidecar compilation should succeed")
+        .expect("supported renderer signal body should emit a native sidecar");
+    let bytes = encode_native_kernel_artifact_binary(&artifact);
+    let decoded =
+        decode_native_kernel_artifact_binary(&bytes).expect("encoded native sidecar should decode");
+    let mut native_kernels = NativeKernelArtifactSet::default();
+    native_kernels.insert(compute_kernel_fingerprint(&backend, body_kernel), decoded);
+
+    let arguments = [
+        RuntimeValue::Text("assets".into()),
+        RuntimeValue::Tuple(vec![RuntimeValue::Int(1), RuntimeValue::Int(1)]),
+    ];
+    let globals = BTreeMap::new();
+    let expected = BackendExecutableProgram::interpreted(&backend)
+        .create_engine()
+        .evaluate_signal_body_kernel(body_kernel, &arguments, &globals)
+        .expect("interpreter should evaluate renderer signal body");
+    let meta = aivi_backend::BackendRuntimeMeta::from(&backend);
+    let actual = BackendExecutableProgram::from_runtime_meta(&meta)
+        .with_native_kernels(&native_kernels)
+        .create_engine()
+        .evaluate_signal_body_kernel(body_kernel, &arguments, &globals)
+        .expect("runtime-meta native engine should evaluate renderer signal body");
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn jit_engine_executes_helper_backed_text_kernels() {
     let backend = lower_text(
         "backend-engine-text-jit.aivi",

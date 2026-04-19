@@ -30,13 +30,21 @@ use aivi.url (
 ```aivi
 domain Url over Text = {
     type parse : Text -> Result UrlError Url
+
     type scheme : Url -> Option Text
+
     type host : Url -> Option Text
+
     type port : Url -> Option Int
+
     type path : Url -> Text
+
     type query : Url -> Option Text
+
     type fragment : Url -> Option Text
+
     type withPath : Url -> Text -> Url
+
     type withQuery : Url -> Text -> Url
 }
 ```

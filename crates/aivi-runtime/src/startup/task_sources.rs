@@ -156,7 +156,8 @@ struct PreparedTaskExecution {
     instance: TaskInstanceId,
     owner: hir::ItemId,
     backend_item: BackendItemId,
-    backend: Arc<BackendProgram>,
+    backend: BackendRuntimePayload,
+    native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
     globals: BTreeMap<BackendItemId, DetachedRuntimeValue>,
     completion: DetachedRuntimeCompletionPort,
     db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
@@ -171,6 +172,7 @@ fn execute_task_plan(
         owner,
         backend_item,
         backend,
+        native_kernels,
         globals,
         completion,
         db_commit_invalidation_sink,
@@ -179,7 +181,13 @@ fn execute_task_plan(
     if completion.is_cancelled() {
         return Ok(LinkedTaskWorkerOutcome::Cancelled);
     }
-    let mut engine = KernelEvaluator::new(backend.as_ref());
+    let mut engine = backend
+        .executable_program(native_kernels.as_ref())
+        .with_execution_options(aivi_backend::BackendExecutionOptions {
+            prefer_interpreter: true,
+            ..Default::default()
+        })
+        .create_engine();
     let runtime_globals = materialize_detached_globals(&globals);
     let value = engine
         .evaluate_item(backend_item, &runtime_globals)
@@ -192,7 +200,7 @@ fn execute_task_plan(
     // Use the applier-aware executor so that deferred Task composition plans
     // (Map, Apply, Chain, Join) can call back into the execution engine.
     let mut applier = EvaluatorApplier {
-        evaluator: &mut engine,
+        evaluator: &mut *engine,
         globals: &runtime_globals,
     };
     let stdout = std::io::stdout();

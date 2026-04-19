@@ -41,6 +41,7 @@ include!("context.rs");
 include!("manager.rs");
 include!("plans.rs");
 include!("runtime.rs");
+include!("mail.rs");
 
 #[cfg(test)]
 mod tests;

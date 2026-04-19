@@ -686,6 +686,27 @@ pub fn case_pattern_field_types(
     }
 }
 
+pub fn domain_carrier_type(
+    module: &Module,
+    item_id: ItemId,
+    arguments: &[GateType],
+) -> Option<GateType> {
+    let Item::Domain(domain) = &module.items()[item_id] else {
+        return None;
+    };
+    if domain.parameters.len() != arguments.len() {
+        return None;
+    }
+    let substitutions = domain
+        .parameters
+        .iter()
+        .copied()
+        .zip(arguments.iter().cloned())
+        .collect::<HashMap<_, _>>();
+    let mut typing = GateTypeContext::new(module);
+    typing.lower_hir_type(domain.carrier, &substitutions)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpaqueTypeVariant {
     pub name: Box<str>,

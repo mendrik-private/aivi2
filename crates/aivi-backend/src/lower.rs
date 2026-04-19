@@ -1040,6 +1040,16 @@ impl<'a> ProgramLowerer<'a> {
                     layout_info.variants.entry(name).or_insert(fields);
                 }
             }
+            for (layout_id, collected) in self.collect_declared_opaque_variants_for_all_layouts(hir)
+            {
+                let layout_info = variants_by_layout.entry(layout_id).or_default();
+                if layout_info.item.is_none() {
+                    layout_info.item = collected.item;
+                }
+                for (name, fields) in collected.variants {
+                    layout_info.variants.entry(name).or_insert(fields);
+                }
+            }
         }
         for (layout_id, collected) in variants_by_layout {
             let mut lowered_variants = collected
@@ -1103,6 +1113,41 @@ impl<'a> ProgramLowerer<'a> {
                     ty,
                     item,
                     variant.name,
+                    variant
+                        .fields
+                        .into_iter()
+                        .map(|field| core::Type::lower(&field))
+                        .collect(),
+                );
+            }
+        }
+        collected
+    }
+
+    fn collect_declared_opaque_variants_for_all_layouts(
+        &self,
+        hir_module: &aivi_hir::Module,
+    ) -> HashMap<LayoutId, CollectedOpaqueLayout> {
+        let mut collected: HashMap<LayoutId, CollectedOpaqueLayout> = HashMap::new();
+        for (layout_id, layout) in self.program.layouts().iter() {
+            let LayoutKind::Opaque {
+                item: Some(item), ..
+            } = &layout.kind
+            else {
+                continue;
+            };
+            let Some(subject) = hir_gate_type_for_layout(self.program.layouts(), layout_id) else {
+                continue;
+            };
+            let Some(variants) = hir_opaque_type_variants(hir_module, &subject) else {
+                continue;
+            };
+            let layout_entry = collected.entry(layout_id).or_default();
+            if layout_entry.item.is_none() {
+                layout_entry.item = Some(*item);
+            }
+            for variant in variants {
+                layout_entry.variants.entry(variant.name).or_insert(
                     variant
                         .fields
                         .into_iter()
@@ -3509,7 +3554,29 @@ impl<'a> ProgramLowerer<'a> {
                         }),
                     };
                     let id = self.intern_layout(layout)?;
-                    self.core_layouts.insert(cache_key, id);
+                    self.core_layouts.insert(cache_key.clone(), id);
+                    if let (
+                        Some(hir),
+                        core::Type::Domain {
+                            item, arguments, ..
+                        },
+                    ) = (self.hir, &cache_key)
+                    {
+                        let carrier = aivi_hir::domain_carrier_type(
+                            hir,
+                            *item,
+                            &arguments
+                                .iter()
+                                .map(hir_gate_type_for_core_type)
+                                .collect::<Vec<_>>(),
+                        );
+                        if let Some(carrier) = carrier {
+                            let carrier_layout =
+                                self.intern_core_type(&core::Type::lower(&carrier))?;
+                            self.program
+                                .register_named_domain_carrier(id, carrier_layout);
+                        }
+                    }
                     values.push(id);
                 }
             }
@@ -3615,6 +3682,99 @@ fn hir_gate_type_for_core_type(ty: &core::Type) -> HirGateType {
             arguments: arguments.iter().map(hir_gate_type_for_core_type).collect(),
             definition: None,
         },
+    }
+}
+
+fn hir_gate_type_for_layout(
+    layouts: &Arena<LayoutId, Layout>,
+    layout: LayoutId,
+) -> Option<HirGateType> {
+    let layout = layouts.get(layout)?;
+    match &layout.kind {
+        LayoutKind::Primitive(builtin) => Some(HirGateType::Primitive(match builtin {
+            PrimitiveType::Int => aivi_hir::BuiltinType::Int,
+            PrimitiveType::Float => aivi_hir::BuiltinType::Float,
+            PrimitiveType::Decimal => aivi_hir::BuiltinType::Decimal,
+            PrimitiveType::BigInt => aivi_hir::BuiltinType::BigInt,
+            PrimitiveType::Bool => aivi_hir::BuiltinType::Bool,
+            PrimitiveType::Text => aivi_hir::BuiltinType::Text,
+            PrimitiveType::Unit => aivi_hir::BuiltinType::Unit,
+            PrimitiveType::Bytes => aivi_hir::BuiltinType::Bytes,
+            PrimitiveType::List => aivi_hir::BuiltinType::List,
+            PrimitiveType::Map => aivi_hir::BuiltinType::Map,
+            PrimitiveType::Set => aivi_hir::BuiltinType::Set,
+            PrimitiveType::Option => aivi_hir::BuiltinType::Option,
+            PrimitiveType::Result => aivi_hir::BuiltinType::Result,
+            PrimitiveType::Validation => aivi_hir::BuiltinType::Validation,
+            PrimitiveType::Signal => aivi_hir::BuiltinType::Signal,
+            PrimitiveType::Task => aivi_hir::BuiltinType::Task,
+        })),
+        LayoutKind::Tuple(elements) => Some(HirGateType::Tuple(
+            elements
+                .iter()
+                .map(|layout| hir_gate_type_for_layout(layouts, *layout))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        LayoutKind::Record(fields) => Some(HirGateType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    Some(aivi_hir::GateRecordField {
+                        name: field.name.to_string(),
+                        ty: hir_gate_type_for_layout(layouts, field.layout)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        LayoutKind::Arrow { parameter, result } => Some(HirGateType::Arrow {
+            parameter: Box::new(hir_gate_type_for_layout(layouts, *parameter)?),
+            result: Box::new(hir_gate_type_for_layout(layouts, *result)?),
+        }),
+        LayoutKind::List { element } => Some(HirGateType::List(Box::new(
+            hir_gate_type_for_layout(layouts, *element)?,
+        ))),
+        LayoutKind::Map { key, value } => Some(HirGateType::Map {
+            key: Box::new(hir_gate_type_for_layout(layouts, *key)?),
+            value: Box::new(hir_gate_type_for_layout(layouts, *value)?),
+        }),
+        LayoutKind::Set { element } => Some(HirGateType::Set(Box::new(hir_gate_type_for_layout(
+            layouts, *element,
+        )?))),
+        LayoutKind::Option { element } => Some(HirGateType::Option(Box::new(
+            hir_gate_type_for_layout(layouts, *element)?,
+        ))),
+        LayoutKind::Result { error, value } => Some(HirGateType::Result {
+            error: Box::new(hir_gate_type_for_layout(layouts, *error)?),
+            value: Box::new(hir_gate_type_for_layout(layouts, *value)?),
+        }),
+        LayoutKind::Validation { error, value } => Some(HirGateType::Validation {
+            error: Box::new(hir_gate_type_for_layout(layouts, *error)?),
+            value: Box::new(hir_gate_type_for_layout(layouts, *value)?),
+        }),
+        LayoutKind::Signal { element } => Some(HirGateType::Signal(Box::new(
+            hir_gate_type_for_layout(layouts, *element)?,
+        ))),
+        LayoutKind::Task { error, value } => Some(HirGateType::Task {
+            error: Box::new(hir_gate_type_for_layout(layouts, *error)?),
+            value: Box::new(hir_gate_type_for_layout(layouts, *value)?),
+        }),
+        LayoutKind::Domain { .. } => None,
+        LayoutKind::AnonymousDomain { .. } => None,
+        LayoutKind::Opaque {
+            item: Some(item),
+            name,
+            arguments,
+            ..
+        } => Some(HirGateType::OpaqueItem {
+            item: *item,
+            name: name.to_string(),
+            arguments: arguments
+                .iter()
+                .map(|layout| hir_gate_type_for_layout(layouts, *layout))
+                .collect::<Option<Vec<_>>>()?,
+        }),
+        LayoutKind::Opaque { item: None, .. } => None,
+        LayoutKind::Sum(_) => None,
     }
 }
 

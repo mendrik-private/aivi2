@@ -68,8 +68,10 @@ pub use startup::{
     LinkedSourceArgument, LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption,
     LinkedSourceTickOutcome, LinkedTaskBinding, LinkedTaskExecutionBinding,
     LinkedTaskExecutionBlocker, LinkedTaskWorkerError, LinkedTaskWorkerOutcome,
-    derive_backend_runtime_link_seed, link_backend_runtime, link_backend_runtime_with_seed,
-    link_backend_runtime_with_seed_and_native_kernels, set_native_kernel_plans_enabled,
+    clear_native_kernel_plan_cache, derive_backend_runtime_link_seed, link_backend_runtime,
+    link_backend_runtime_with_seed, link_backend_runtime_with_seed_and_native_kernels,
+    link_backend_runtime_with_seed_and_native_kernels_from_payload,
+    replace_native_kernel_plans_enabled, set_native_kernel_plans_enabled,
 };
 pub use task_executor::{
     CustomCapabilityCommandExecutor, RuntimeTaskExecutionError, execute_runtime_db_task_plan,

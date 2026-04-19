@@ -249,7 +249,20 @@ pub(crate) fn instantiate_cached_jit_kernel(
 ) -> Result<CompiledJitKernel, CodegenErrors> {
     validate_backend_program(program)?;
     let compiler = CraneliftCompiler::new_jit(program).map_err(wrap_one)?;
-    compiler.replay_cached_jit_kernel(kernel_id, artifact)
+    compiler.replay_cached_jit_kernel(kernel_id, artifact, None)
+}
+
+pub(crate) fn instantiate_cached_jit_kernel_for_replay(
+    program: &Program,
+    kernel_id: KernelId,
+    artifact: &CachedJitKernelArtifact,
+) -> Result<CompiledJitKernel, CodegenErrors> {
+    let compiler = CraneliftCompiler::new_jit(program).map_err(wrap_one)?;
+    compiler.replay_cached_jit_kernel(
+        kernel_id,
+        artifact,
+        Some(artifact.kernels.iter().map(|kernel| kernel.kernel).collect::<Vec<_>>()),
+    )
 }
 
 /// Stable symbol name for one backend kernel.
@@ -332,6 +345,9 @@ enum DirectApplyPlan {
     },
     LocalFunctionAddress {
         body: KernelId,
+    },
+    CallableValue {
+        callee_layout: LayoutId,
     },
     DomainMember(DomainMemberCallPlan),
     Builtin(BuiltinCallPlan),

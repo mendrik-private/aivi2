@@ -15,11 +15,11 @@ fn signal_global_value(value: &RuntimeValue) -> RuntimeValue {
 }
 
 fn stage_subject_value(
-    backend: &BackendProgram,
+    backend: BackendRuntimeView<'_>,
     layout: aivi_backend::LayoutId,
     value: &RuntimeValue,
 ) -> RuntimeValue {
-    match (&backend.layouts()[layout].kind, value) {
+    match (&backend.layout(layout).expect("linked runtime layout should exist").kind, value) {
         (LayoutKind::Signal { .. }, RuntimeValue::Signal(_)) => value.clone(),
         (LayoutKind::Signal { .. }, other) => RuntimeValue::Signal(Box::new(other.clone())),
         (_, RuntimeValue::Signal(inner)) => inner.as_ref().clone(),
@@ -28,11 +28,11 @@ fn stage_subject_value(
 }
 
 fn unwrap_signal_layout_result(
-    backend: &BackendProgram,
+    backend: BackendRuntimeView<'_>,
     layout: aivi_backend::LayoutId,
     value: RuntimeValue,
 ) -> RuntimeValue {
-    match (&backend.layouts()[layout].kind, value) {
+    match (&backend.layout(layout).expect("linked runtime layout should exist").kind, value) {
         (LayoutKind::Signal { .. }, RuntimeValue::Signal(inner)) => *inner,
         (_, value) => value,
     }

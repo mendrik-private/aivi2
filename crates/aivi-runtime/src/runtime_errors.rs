@@ -95,7 +95,8 @@ fn eval_error_kernel(error: &EvaluationError) -> Option<KernelId> {
         EvaluationError::UnknownItem { .. }
         | EvaluationError::MissingItemBody { .. }
         | EvaluationError::MissingItemValue { .. }
-        | EvaluationError::RecursiveItemEvaluation { .. } => None,
+        | EvaluationError::RecursiveItemEvaluation { .. }
+        | EvaluationError::UnsupportedNativeOnlyRuntimeOperation { .. } => None,
     }
 }
 

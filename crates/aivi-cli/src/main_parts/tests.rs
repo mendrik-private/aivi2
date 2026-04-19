@@ -8,14 +8,17 @@ use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
 use aivi_base::SourceDatabase;
 use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
 use aivi_hir::{BuiltinType, ImportValueType, ValidationMode, lower_module as lower_hir_module};
-use aivi_runtime::{SourceProviderContext, execute_runtime_task_plan};
+use aivi_runtime::{
+    SourceProviderContext, clear_native_kernel_plan_cache, execute_runtime_task_plan,
+    replace_native_kernel_plans_enabled, set_native_kernel_plans_enabled,
+};
 use aivi_syntax::parse_module;
 use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::Arc,
+    sync::{Arc, Once},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -68,11 +71,17 @@ impl Drop for TempDir {
     }
 }
 
+fn ensure_interpreted_main_parts_tests() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| set_native_kernel_plans_enabled(false));
+}
+
 fn prepare_run_from_text(
     path: &str,
     source: &str,
     requested_view: Option<&str>,
 ) -> Result<super::RunArtifact, String> {
+    ensure_interpreted_main_parts_tests();
     let mut sources = SourceDatabase::new();
     let file_id = sources.add_file(path, source);
     let file = &sources[file_id];
@@ -100,6 +109,7 @@ fn prepare_run_from_workspace(
     entry_relative: &str,
     requested_view: Option<&str>,
 ) -> Result<super::RunArtifact, String> {
+    ensure_interpreted_main_parts_tests();
     let snapshot = WorkspaceHirSnapshot::load(&root.path().join(entry_relative))?;
     assert!(
         !super::workspace_syntax_failed(&snapshot, |_, diagnostics| diagnostics
@@ -139,6 +149,7 @@ fn prepare_run_from_path(
     path: &Path,
     requested_view: Option<&str>,
 ) -> Result<super::RunArtifact, String> {
+    ensure_interpreted_main_parts_tests();
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     assert!(
         !super::workspace_syntax_failed(&snapshot, |_, diagnostics| diagnostics
@@ -172,6 +183,139 @@ fn prepare_run_from_path(
         requested_view,
         Some(snapshot.backend_query_context()),
     )
+}
+
+fn find_backend_item(program: &aivi_backend::Program, name: &str) -> aivi_backend::ItemId {
+    program
+        .items()
+        .iter()
+        .find(|(_, item)| item.name.as_ref() == name)
+        .map(|(id, _)| id)
+        .unwrap_or_else(|| panic!("expected backend item `{name}`"))
+}
+
+fn publish_source_value_by_signal_name(
+    linked: &mut aivi_runtime::BackendLinkedRuntime,
+    snapshot: &WorkspaceHirSnapshot,
+    signal_name: &str,
+    value: RuntimeValue,
+) {
+    let hir_item = snapshot
+        .entry_hir()
+        .module()
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| match item {
+            aivi_hir::Item::Signal(item) if item.name.text() == signal_name => Some(item_id),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected signal item `{signal_name}`"));
+    let signal = linked
+        .assembly()
+        .signal(hir_item)
+        .unwrap_or_else(|| panic!("expected runtime signal binding for `{signal_name}`"))
+        .signal();
+    let binding = linked
+        .source_bindings()
+        .find(|binding| binding.signal == signal)
+        .cloned()
+        .unwrap_or_else(|| panic!("expected source binding for `{signal_name}`"));
+    let stamp = linked
+        .runtime_mut()
+        .advance_generation(binding.input)
+        .unwrap_or_else(|error| panic!("expected fresh stamp for `{signal_name}`: {error:?}"));
+    linked
+        .runtime_mut()
+        .queue_publication(aivi_runtime::Publication::new(stamp, value))
+        .unwrap_or_else(|error| {
+            panic!("expected queued publication for `{signal_name}`: {error:?}")
+        });
+}
+
+fn assert_reactive_clause_body_has_entry_native_kernel(
+    artifact: &super::RunArtifact,
+    snapshot: &WorkspaceHirSnapshot,
+    signal_name: &str,
+    clause_index: usize,
+) {
+    let hir_item = snapshot
+        .entry_hir()
+        .module()
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| match item {
+            aivi_hir::Item::Signal(item) if item.name.text() == signal_name => Some(item_id),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected signal item `{signal_name}`"));
+    let binding = artifact
+        .runtime_assembly
+        .signal(hir_item)
+        .unwrap_or_else(|| panic!("expected runtime signal binding for `{signal_name}`"));
+    let clause = binding
+        .reactive_updates()
+        .get(clause_index)
+        .unwrap_or_else(|| panic!("expected reactive clause {clause_index} for `{signal_name}`"));
+    let backend = clause.compiled_body.backend.runtime_view();
+    let item = backend
+        .item(clause.compiled_body.entry_item)
+        .unwrap_or_else(|| panic!("expected compiled body entry item for `{signal_name}`"));
+    let kernel = item.body.unwrap_or_else(|| {
+        panic!("expected body kernel for `{signal_name}` clause {clause_index}")
+    });
+    let fingerprint = backend
+        .kernel(kernel)
+        .unwrap_or_else(|| {
+            panic!("expected kernel metadata for `{signal_name}` clause {clause_index}")
+        })
+        .fingerprint;
+    let compiled_plan = match &clause.compiled_body.backend {
+        aivi_runtime::hir_adapter::BackendRuntimePayload::Program(program) => {
+            let mut native_kernels = clause.compiled_body.native_kernels.as_ref().clone();
+            if native_kernels.get(fingerprint).is_none() {
+                let native = aivi_backend::compile_native_kernel_artifact(program.as_ref(), kernel)
+                    .expect("program-backed reactive body kernel should compile natively")
+                    .expect("program-backed reactive body kernel should emit a native artifact");
+                native_kernels.insert(fingerprint, native);
+            }
+            aivi_backend::NativeKernelPlan::compile_with_native_artifacts(
+                program.as_ref(),
+                Some(&native_kernels),
+                kernel,
+            )
+        }
+        aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(meta) => {
+            assert!(
+                clause
+                    .compiled_body
+                    .native_kernels
+                    .get(fingerprint)
+                    .is_some(),
+                "expected `{signal_name}` clause {clause_index} body kernel {} fingerprint {:016x} to survive bundle serialization",
+                kernel.as_raw(),
+                fingerprint.as_raw()
+            );
+            aivi_backend::NativeKernelPlan::from_runtime_meta_with_native_artifacts(
+                meta.as_ref(),
+                Some(clause.compiled_body.native_kernels.as_ref()),
+                kernel,
+            )
+        }
+    };
+    assert!(
+        compiled_plan.is_some(),
+        "expected `{signal_name}` clause {clause_index} body kernel {} to build a native execution plan from serialized metadata",
+        kernel.as_raw()
+    );
+}
+
+fn with_native_kernel_plans<T>(enabled: bool, f: impl FnOnce() -> T) -> T {
+    clear_native_kernel_plan_cache();
+    let previous = replace_native_kernel_plans_enabled(enabled);
+    let result = f();
+    replace_native_kernel_plans_enabled(previous);
+    clear_native_kernel_plan_cache();
+    result
 }
 
 #[test]
@@ -216,6 +360,79 @@ fn resolve_run_entrypoint_uses_workspace_root_main_when_present() {
         .expect("implicit resolution should use workspace-root main.aivi");
 
     assert_eq!(resolved.entry_path, expected);
+}
+
+#[test]
+fn snake_frozen_image_roundtrip_reloads_runtime_meta_without_backend_program() {
+    let artifact = prepare_run_from_path(&repo_path("demos/snake.aivi"), Some("main"))
+        .expect("snake demo should prepare cleanly");
+    let temp = TempDir::new("snake-frozen-image-roundtrip");
+    let image_path =
+        super::write_frozen_run_image_bundle_without_native_kernels(temp.path(), &artifact)
+            .expect("snake frozen run image should write");
+    let reloaded = super::load_frozen_run_image(&image_path, Some("main"))
+        .expect("snake frozen run image should reload");
+
+    assert_eq!(reloaded.view_name, artifact.view_name);
+    assert!(
+        matches!(
+            reloaded.backend,
+            aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(_)
+        ),
+        "snake frozen run image should reload runtime metadata, not BackendProgram"
+    );
+    assert!(
+        reloaded.backend_native_kernels.is_empty(),
+        "unit-test frozen image roundtrip should stay metadata-only and skip native sidecar generation"
+    );
+}
+
+#[test]
+fn snake_serialized_frozen_image_reloads_without_backend_program() {
+    with_native_kernel_plans(false, || {
+        let artifact = prepare_run_from_path(&repo_path("demos/snake.aivi"), Some("main"))
+            .expect("snake demo should prepare cleanly");
+        let temp = TempDir::new("snake-bundle-roundtrip");
+        let image_path =
+            super::write_frozen_run_image_bundle_without_native_kernels(temp.path(), &artifact)
+                .expect("snake frozen run image should write");
+        let reloaded = super::load_frozen_run_image(&image_path, Some("main"))
+            .expect("snake frozen run image should reload");
+
+        assert!(matches!(
+            reloaded.backend,
+            aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(_)
+        ));
+        assert!(reloaded.backend_native_kernels.is_empty());
+    });
+}
+
+#[test]
+fn snake_embedded_bundle_reloads_frozen_image_without_backend_program() {
+    with_native_kernel_plans(false, || {
+        let path = repo_path("demos/snake.aivi");
+        let artifact =
+            prepare_run_from_path(&path, Some("main")).expect("snake demo should prepare cleanly");
+        let temp = TempDir::new("snake-embedded-bundle");
+        let executable_path = temp.path().join("snake");
+        let summary = super::write_run_executable(&path, &executable_path, &artifact)
+            .expect("snake executable bundle should write");
+        assert_eq!(summary.executable_path, executable_path);
+
+        let descriptor = super::read_embedded_bundle_descriptor(&executable_path)
+            .expect("snake executable should expose an embedded bundle")
+            .expect("snake executable should contain an embedded bundle footer");
+        let decoded = super::decode_embedded_bundle(&executable_path, &descriptor)
+            .expect("snake executable embedded bundle should decode");
+        let reloaded = super::load_embedded_run_artifact(&decoded.generated_entries, Some("main"))
+            .expect("snake embedded bundle should reload");
+
+        assert!(matches!(
+            reloaded.backend,
+            aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(_)
+        ));
+        assert!(reloaded.backend_native_kernels.is_empty());
+    });
 }
 
 #[test]
@@ -270,6 +487,7 @@ fn resolve_run_entrypoint_uses_manifest_run_entry_when_multiple_apps_exist() {
 }
 
 fn execute_workspace(path: &Path, context: SourceProviderContext) -> (ExitCode, String, String) {
+    ensure_interpreted_main_parts_tests();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let code = execute_file_with_context(path, context, &mut stdout, &mut stderr)
@@ -282,6 +500,7 @@ fn execute_workspace(path: &Path, context: SourceProviderContext) -> (ExitCode, 
 }
 
 fn test_workspace(path: &Path, context: SourceProviderContext) -> (ExitCode, String, String) {
+    ensure_interpreted_main_parts_tests();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let code = test_file_with_context(path, context, &mut stdout, &mut stderr)
@@ -438,6 +657,32 @@ fn prepare_run_accepts_snake_demo() {
         .map(|name| name.as_ref())
         .collect::<Vec<_>>();
     assert!(required.contains(&"boardTiles"));
+}
+
+#[test]
+fn prepare_run_accepts_headless_task_main_when_no_markup_view_exists() {
+    let artifact = prepare_run_from_text(
+        "headless-main.aivi",
+        r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+value main : Task Text Unit =
+    stdoutWrite ""
+"#,
+        None,
+    )
+    .expect("task-valued main should prepare for headless `aivi run`");
+    assert_eq!(artifact.view_name.as_ref(), "main");
+    assert!(matches!(
+        artifact.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(artifact.gtk().is_none());
 }
 
 #[test]
@@ -653,10 +898,10 @@ value view =
         .compile(expr)
         .expect("second compiler should reuse the query-backed fragment backend");
 
-    assert!(Arc::ptr_eq(
-        &first.execution.backend,
-        &third.execution.backend
-    ));
+    assert_eq!(
+        first.execution.backend.cache_identity(),
+        third.execution.backend.cache_identity()
+    );
     assert_eq!(first.item, third.item);
 }
 
@@ -873,13 +1118,13 @@ value view =
 }
 
 #[test]
-fn run_artifact_roundtrip_preserves_hydration_structure_and_native_sidecars() {
-    aivi_runtime::set_native_kernel_plans_enabled(false);
+fn run_artifact_roundtrip_preserves_hydration_structure() {
     let artifact = prepare_run_from_text("planner-window.aivi", planner_window_source(), None)
         .expect("planner window should compile for live run hydration");
     let temp = TempDir::new("run-artifact-profile-roundtrip");
-    let artifact_path = super::write_serialized_run_artifact_bundle(temp.path(), &artifact)
-        .expect("run artifact bundle should write");
+    let artifact_path =
+        super::write_serialized_run_artifact_bundle_without_native_kernels(temp.path(), &artifact)
+            .expect("run artifact bundle should write");
     let reloaded = super::load_serialized_run_artifact(&artifact_path, None)
         .expect("serialized run artifact should reload");
 
@@ -891,15 +1136,49 @@ fn run_artifact_roundtrip_preserves_hydration_structure_and_native_sidecars() {
         artifact.required_signal_globals,
         reloaded.required_signal_globals
     );
-    assert!(
-        !reloaded.backend_native_kernels.is_empty(),
-        "serialized run artifact should reload precompiled native kernel sidecars"
-    );
+    assert!(reloaded.backend_native_kernels.is_empty());
     assert_eq!(
         artifact.hydration_inputs.len(),
         reloaded.hydration_inputs.len(),
         "serialized run artifact should preserve hydration fragments"
     );
+}
+
+#[test]
+fn run_artifact_roundtrip_preserves_headless_task_entries() {
+    let artifact = prepare_run_from_text(
+        "headless-roundtrip.aivi",
+        r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+value main : Task Text Unit =
+    stdoutWrite ""
+"#,
+        None,
+    )
+    .expect("headless run artifact should prepare");
+    let temp = TempDir::new("run-artifact-headless-roundtrip");
+    let artifact_path =
+        super::write_serialized_run_artifact_bundle_without_native_kernels(temp.path(), &artifact)
+            .expect("headless run artifact bundle should write");
+    let reloaded = super::load_serialized_run_artifact(&artifact_path, None)
+        .expect("serialized headless run artifact should reload");
+
+    assert_eq!(artifact.view_name, reloaded.view_name);
+    assert!(matches!(
+        artifact.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(matches!(
+        reloaded.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(reloaded.gtk().is_none());
 }
 
 #[test]

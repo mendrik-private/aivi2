@@ -179,6 +179,13 @@ impl GtkWindowKeyQueue {
             .drain(..)
             .collect()
     }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkWindowKeyQueue mutex should not be poisoned")
+            .is_empty()
+    }
 }
 
 /// Coalescing queue for `gtk.darkMode` events.  Only the latest value matters;
@@ -211,6 +218,13 @@ impl GtkDarkModeQueue {
             .expect("GtkDarkModeQueue mutex should not be poisoned")
             .drain(..)
             .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkDarkModeQueue mutex should not be poisoned")
+            .is_empty()
     }
 }
 
@@ -245,6 +259,13 @@ impl GtkClipboardQueue {
             .drain(..)
             .collect()
     }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkClipboardQueue mutex should not be poisoned")
+            .is_empty()
+    }
 }
 
 struct GtkWindowSizeQueue {
@@ -274,6 +295,13 @@ impl GtkWindowSizeQueue {
             .expect("GtkWindowSizeQueue mutex should not be poisoned")
             .drain(..)
             .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkWindowSizeQueue mutex should not be poisoned")
+            .is_empty()
     }
 }
 
@@ -305,6 +333,13 @@ impl GtkWindowFocusQueue {
             .drain(..)
             .collect()
     }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkWindowFocusQueue mutex should not be poisoned")
+            .is_empty()
+    }
 }
 
 impl<V> GtkEventQueue<V> {
@@ -321,6 +356,13 @@ impl<V> GtkEventQueue<V> {
             .expect("GtkEventQueue mutex should not be poisoned")
             .drain(..)
             .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.events
+            .lock()
+            .expect("GtkEventQueue mutex should not be poisoned")
+            .is_empty()
     }
 }
 
@@ -579,6 +621,16 @@ where
     pub fn drain_window_focus_events(&mut self) -> Vec<bool> {
         GtkConcreteHost::<V>::assert_gtk_main_thread();
         self.queued_window_focus.drain()
+    }
+
+    pub fn has_pending_events(&self) -> bool {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        !self.queued_events.is_empty()
+            || !self.queued_window_keys.is_empty()
+            || !self.queued_dark_mode.is_empty()
+            || !self.queued_clipboard.is_empty()
+            || !self.queued_window_size.is_empty()
+            || !self.queued_window_focus.is_empty()
     }
 
     fn setup_window_size_watcher(&mut self, window: &gtk::Window) {

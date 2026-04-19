@@ -70,9 +70,10 @@ pub use gate_elaboration::{
 pub use general_expr_elaboration::{
     BlockedGeneralExpr, GeneralExprBlocker, GeneralExprDomainMemberElaboration,
     GeneralExprElaborationReport, GeneralExprInstanceMemberElaboration, GeneralExprItemElaboration,
-    GeneralExprOutcome, GeneralExprParameter, MarkupRuntimeExprSite, MarkupRuntimeExprSiteError,
-    MarkupRuntimeExprSites, collect_markup_runtime_expr_sites, elaborate_ambient_items,
-    elaborate_general_expressions, elaborate_runtime_expr_with_env,
+    GeneralExprOutcome, GeneralExprParameter, GeneralExprParameterKind, MarkupRuntimeExprSite,
+    MarkupRuntimeExprSiteError, MarkupRuntimeExprSites, collect_markup_runtime_expr_sites,
+    elaborate_ambient_items, elaborate_general_expressions,
+    elaborate_runtime_expr_fragment_with_env, elaborate_runtime_expr_with_env,
 };
 pub use hir::{
     ApplicativeCluster, ApplicativeSpine, ApplicativeSpineHead, BigIntLiteral, BinaryOperator,
@@ -152,7 +153,7 @@ pub use typecheck::{
     TypeConstraint, apply_defaults, elaborate_default_record_fields, signal_payload_type,
     typecheck_module,
 };
-pub use typecheck_context::{OpaqueTypeVariant, opaque_type_variants};
+pub use typecheck_context::{OpaqueTypeVariant, domain_carrier_type, opaque_type_variants};
 pub use typed_declarations::{
     TypedDeclarationInfo, TypedDeclarationKind, collect_typed_declarations,
 };

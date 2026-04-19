@@ -414,6 +414,55 @@ pub fn elaborate_runtime_expr_with_env(
         .map_err(|blockers| BlockedGeneralExpr { blockers })
 }
 
+pub fn elaborate_runtime_expr_fragment_with_env(
+    module: &Module,
+    owner: ItemId,
+    expr_id: ExprId,
+    parameters: &[GeneralExprParameter],
+    expected: Option<&GateType>,
+) -> Result<GateRuntimeExpr, BlockedGeneralExpr> {
+    let module = crate::typecheck::elaborate_default_record_fields(module);
+    let env = gate_env_from_parameters(parameters);
+    let pipe = match &module.exprs()[expr_id].kind {
+        ExprKind::Pipe(pipe) => Some(pipe),
+        _ => None,
+    };
+    let mut elaborator = GeneralExprElaborator::new(&module);
+    let lowered = elaborator.lower_expr_with_signal_result_fallback(expr_id, &env, None, expected);
+    match lowered {
+        Ok(lowered_body) if pipe.is_none() || signal_pipe_body_runtime_supported(&lowered_body) => {
+            Ok(lowered_body)
+        }
+        Ok(lowered_body) => match extract_signal_pipe_prefix_body(owner, expr_id, lowered_body) {
+            Some(GeneralExprItemElaboration {
+                outcome: GeneralExprOutcome::Lowered(prefix),
+                ..
+            }) => Ok(prefix),
+            Some(GeneralExprItemElaboration {
+                outcome: GeneralExprOutcome::Blocked(blocked),
+                ..
+            }) => Err(blocked),
+            None => unreachable!("unsupported signal pipe should always expose a prefix"),
+        },
+        Err(blockers) if pipe.is_some() => match elaborator.lower_signal_pipe_prefix(
+            owner,
+            expr_id,
+            pipe.expect("checked pipe presence"),
+        ) {
+            Some(GeneralExprItemElaboration {
+                outcome: GeneralExprOutcome::Lowered(prefix),
+                ..
+            }) => Ok(prefix),
+            Some(GeneralExprItemElaboration {
+                outcome: GeneralExprOutcome::Blocked(blocked),
+                ..
+            }) => Err(blocked),
+            None => Err(BlockedGeneralExpr { blockers }),
+        },
+        Err(blockers) => Err(BlockedGeneralExpr { blockers }),
+    }
+}
+
 pub(crate) fn elaborate_runtime_expr(
     module: &Module,
     expr_id: ExprId,

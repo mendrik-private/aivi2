@@ -61,41 +61,41 @@ where
         ..RunArtifactPreparationMetrics::default()
     };
     let included_items = production_item_ids(module);
-    let view = select_run_view(module, requested_view)?;
-    let view_owner = find_value_owner(module, view).ok_or_else(|| {
+    let selected = select_run_entry(module, requested_view)?;
+    let view_owner = find_value_owner(module, selected.value).ok_or_else(|| {
         format!(
             "failed to recover owning item for run view `{}`",
-            view.name.text()
+            selected.value.name.text()
         )
     })?;
-    let ExprKind::Markup(_) = &module.exprs()[view.body].kind else {
-        return Err(format!(
-            "run view `{}` is not markup; `aivi run` currently requires a top-level markup-valued `value`",
-            view.name.text()
-        ));
+    let gtk_preparation = match selected.kind {
+        SelectedRunEntryKind::Gtk => {
+            let markup_lowering_started = Instant::now();
+            let plan = lower_markup_expr(module, selected.value.body).map_err(|error| {
+                format!(
+                    "failed to lower run view `{}` into GTK markup: {error}",
+                    selected.value.name.text()
+                )
+            })?;
+            metrics.markup_lowering = markup_lowering_started.elapsed();
+            on_stage_completed("markup lowering", metrics.markup_lowering);
+            let widget_bridge_lowering_started = Instant::now();
+            let bridge = lower_widget_bridge(&plan).map_err(|error| {
+                format!(
+                    "failed to lower run view `{}` into a GTK bridge graph: {error}",
+                    selected.value.name.text()
+                )
+            })?;
+            metrics.widget_bridge_lowering = widget_bridge_lowering_started.elapsed();
+            on_stage_completed("GTK bridge lowering", metrics.widget_bridge_lowering);
+            let run_plan_validation_started = Instant::now();
+            validate_run_plan(sources, &bridge)?;
+            metrics.run_plan_validation = run_plan_validation_started.elapsed();
+            on_stage_completed("run plan validation", metrics.run_plan_validation);
+            Some(bridge)
+        }
+        SelectedRunEntryKind::HeadlessTaskMain => None,
     };
-    let markup_lowering_started = Instant::now();
-    let plan = lower_markup_expr(module, view.body).map_err(|error| {
-        format!(
-            "failed to lower run view `{}` into GTK markup: {error}",
-            view.name.text()
-        )
-    })?;
-    metrics.markup_lowering = markup_lowering_started.elapsed();
-    on_stage_completed("markup lowering", metrics.markup_lowering);
-    let widget_bridge_lowering_started = Instant::now();
-    let bridge = lower_widget_bridge(&plan).map_err(|error| {
-        format!(
-            "failed to lower run view `{}` into a GTK bridge graph: {error}",
-            view.name.text()
-        )
-    })?;
-    metrics.widget_bridge_lowering = widget_bridge_lowering_started.elapsed();
-    on_stage_completed("GTK bridge lowering", metrics.widget_bridge_lowering);
-    let run_plan_validation_started = Instant::now();
-    validate_run_plan(sources, &bridge)?;
-    metrics.run_plan_validation = run_plan_validation_started.elapsed();
-    on_stage_completed("run plan validation", metrics.run_plan_validation);
     let runtime_backend_lowering_started = Instant::now();
     let lowered = if let Some(query_context) = query_context {
         let unit = whole_program_backend_unit_with_items(
@@ -160,72 +160,100 @@ where
                 }
                 rendered
             })?;
-    let markup_site_collection_started = Instant::now();
-    let sites = collect_markup_runtime_expr_sites(module, view.body).map_err(|error| {
-        let span_info = match &error {
-            aivi_hir::MarkupRuntimeExprSiteError::UnknownExprType { span, .. } => {
-                format!(" (failing expr at {})", source_location(sources, *span))
-            }
-            _ => String::new(),
-        };
-        format!(
-            "failed to collect runtime expression environments for run view at {}: {error}{span_info}",
-            source_location(sources, module.exprs()[view.body].span)
-        )
-    })?;
-    metrics.markup_site_collection = markup_site_collection_started.elapsed();
-    on_stage_completed("runtime expr sites", metrics.markup_site_collection);
-    let hydration_fragment_compilation_started = Instant::now();
-    let (hydration_inputs, hydration_metrics) = compile_run_inputs(
-        sources,
-        module,
-        view_owner,
-        &sites,
-        &bridge,
-        lowered.backend.as_ref(),
-        &runtime_backend_by_hir,
-        query_context,
-    )?;
-    metrics.hydration_fragment_compilation = hydration_fragment_compilation_started.elapsed();
-    on_stage_completed(
-        "hydration fragments",
-        metrics.hydration_fragment_compilation,
-    );
-    metrics.hydration_fragment_count = hydration_metrics.compiled_fragment_count;
-    let required_signal_globals = collect_run_required_signal_globals(&hydration_inputs);
-    let patterns = collect_run_patterns(sources, module, &bridge)?;
-    let event_handler_resolution_started = Instant::now();
-    let event_handlers =
-        resolve_run_event_handlers(module, &sites, &bridge, &runtime_assembly, sources)?;
-    metrics.event_handler_resolution = event_handler_resolution_started.elapsed();
-    on_stage_completed("event handler resolve", metrics.event_handler_resolution);
+    let kind = if let Some(bridge) = gtk_preparation {
+        let markup_site_collection_started = Instant::now();
+        let sites = collect_markup_runtime_expr_sites(module, selected.value.body).map_err(|error| {
+            let span_info = match &error {
+                aivi_hir::MarkupRuntimeExprSiteError::UnknownExprType { span, .. } => {
+                    format!(" (failing expr at {})", source_location(sources, *span))
+                }
+                _ => String::new(),
+            };
+            format!(
+                "failed to collect runtime expression environments for run view at {}: {error}{span_info}",
+                source_location(sources, module.exprs()[selected.value.body].span)
+            )
+        })?;
+        metrics.markup_site_collection = markup_site_collection_started.elapsed();
+        on_stage_completed("runtime expr sites", metrics.markup_site_collection);
+        let hydration_fragment_compilation_started = Instant::now();
+        let (hydration_inputs, hydration_metrics) = compile_run_inputs(
+            sources,
+            module,
+            view_owner,
+            &sites,
+            &bridge,
+            lowered.backend.as_ref(),
+            &runtime_backend_by_hir,
+            query_context,
+        )?;
+        metrics.hydration_fragment_compilation = hydration_fragment_compilation_started.elapsed();
+        on_stage_completed(
+            "hydration fragments",
+            metrics.hydration_fragment_compilation,
+        );
+        metrics.hydration_fragment_count = hydration_metrics.compiled_fragment_count;
+        let patterns = collect_run_patterns(sources, module, &bridge)?;
+        let event_handler_resolution_started = Instant::now();
+        let event_handlers =
+            resolve_run_event_handlers(module, &sites, &bridge, &runtime_assembly, sources)?;
+        metrics.event_handler_resolution = event_handler_resolution_started.elapsed();
+        on_stage_completed("event handler resolve", metrics.event_handler_resolution);
+        RunArtifactKind::Gtk(RunGtkArtifact {
+            patterns,
+            bridge,
+            hydration_inputs,
+            event_handlers,
+        })
+    } else {
+        if runtime_assembly.task_by_owner(view_owner).is_none() {
+            return Err(
+                "`aivi run` headless entries require `value main : Task ...`".to_owned(),
+            );
+        }
+        RunArtifactKind::HeadlessTask {
+            task_owner: view_owner,
+        }
+    };
+    let required_signal_globals = match &kind {
+        RunArtifactKind::Gtk(surface) => collect_run_required_signal_globals(&surface.hydration_inputs),
+        RunArtifactKind::HeadlessTask { .. } => BTreeMap::new(),
+    };
     let stub_signal_defaults_started = Instant::now();
     let stub_signal_defaults = collect_stub_signal_defaults(module, &runtime_assembly);
     metrics.stub_signal_defaults = stub_signal_defaults_started.elapsed();
     on_stage_completed("stub signal defaults", metrics.stub_signal_defaults);
     metrics.total = total_started.elapsed();
-    Ok(PreparedRunArtifact {
-        artifact: RunArtifact {
-            view_name: view.name.text().into(),
-            patterns,
-            bridge,
-            hydration_inputs,
-            required_signal_globals,
-            runtime_assembly,
-            runtime_link,
-            backend: lowered.backend,
-            backend_native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
-            event_handlers,
-            stub_signal_defaults,
-        },
-        metrics,
-    })
+    let mut artifact = RunArtifact {
+        view_name: selected.value.name.text().into(),
+        kind,
+        required_signal_globals,
+        runtime_assembly,
+        runtime_link,
+        backend: aivi_runtime::hir_adapter::BackendRuntimePayload::Program(lowered.backend),
+        backend_native_kernels: Arc::new(aivi_backend::NativeKernelArtifactSet::default()),
+        stub_signal_defaults,
+    };
+    backfill_fragment_opaque_layout_variants(&mut artifact);
+    Ok(PreparedRunArtifact { artifact, metrics })
 }
 
-fn select_run_view<'a>(
+#[derive(Clone, Copy)]
+enum SelectedRunEntryKind {
+    Gtk,
+    HeadlessTaskMain,
+}
+
+#[derive(Clone, Copy)]
+struct SelectedRunEntry<'a> {
+    value: &'a ValueItem,
+    kind: SelectedRunEntryKind,
+}
+
+fn select_run_entry<'a>(
     module: &'a HirModule,
     requested_view: Option<&str>,
-) -> Result<&'a ValueItem, String> {
+) -> Result<SelectedRunEntry<'a>, String> {
     let mut markup_values = Vec::new();
     let mut all_values = Vec::new();
     for (item_id, item) in module.items().iter() {
@@ -258,13 +286,7 @@ fn select_run_view<'a>(
                 )
             });
         };
-        return if matches!(module.exprs()[value.body].kind, ExprKind::Markup(_)) {
-            Ok(value)
-        } else {
-            Err(format!(
-                "run view `{requested_view}` exists but is not markup; `aivi run` currently requires a markup-valued top-level `value`"
-            ))
-        };
+        return classify_selected_run_entry(module, value);
     }
 
     if let Some(view) = markup_values
@@ -272,17 +294,61 @@ fn select_run_view<'a>(
         .copied()
         .find(|value| value.name.text() == "view")
     {
-        return Ok(view);
+        return Ok(SelectedRunEntry {
+            value: view,
+            kind: SelectedRunEntryKind::Gtk,
+        });
+    }
+
+    if markup_values.is_empty()
+        && let Ok(main) = select_execute_main(module) {
+            return Ok(SelectedRunEntry {
+                value: main,
+                kind: SelectedRunEntryKind::HeadlessTaskMain,
+            });
     }
 
     match markup_values.as_slice() {
-        [single] => Ok(*single),
+        [single] => Ok(SelectedRunEntry {
+            value: *single,
+            kind: SelectedRunEntryKind::Gtk,
+        }),
         [] => Err("no markup view found; define `value view = <Window ...>` or pass `--view <name>` for another markup-valued top-level `value`".to_owned()),
         many => Err(format!(
             "multiple markup views are available ({}); rename one to `view` or pass `--view <name>`",
             markup_view_names(many).join(", ")
         )),
     }
+}
+
+fn classify_selected_run_entry<'a>(
+    module: &'a HirModule,
+    value: &'a ValueItem,
+) -> Result<SelectedRunEntry<'a>, String> {
+    if matches!(module.exprs()[value.body].kind, ExprKind::Markup(_)) {
+        return Ok(SelectedRunEntry {
+            value,
+            kind: SelectedRunEntryKind::Gtk,
+        });
+    }
+    if value.name.text() == "main" {
+        return Ok(SelectedRunEntry {
+            value,
+            kind: SelectedRunEntryKind::HeadlessTaskMain,
+        });
+    }
+    Err(format!(
+        "run view `{}` exists but is not markup; `aivi run` currently supports markup-valued top-level `value`s or headless `value main : Task ...` entries",
+        value.name.text()
+    ))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn select_run_view<'a>(
+    module: &'a HirModule,
+    requested_view: Option<&str>,
+) -> Result<&'a ValueItem, String> {
+    select_run_entry(module, requested_view).map(|selected| selected.value)
 }
 
 fn markup_view_names(values: &[&ValueItem]) -> Vec<String> {

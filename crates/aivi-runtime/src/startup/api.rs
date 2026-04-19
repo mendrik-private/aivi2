@@ -69,6 +69,20 @@ pub fn link_backend_runtime_with_seed_and_native_kernels(
     native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
     seed: &BackendRuntimeLinkSeed,
 ) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
+    link_backend_runtime_with_seed_and_native_kernels_from_payload(
+        assembly,
+        BackendRuntimePayload::Program(backend),
+        native_kernels,
+        seed,
+    )
+}
+
+pub fn link_backend_runtime_with_seed_and_native_kernels_from_payload(
+    assembly: HirRuntimeAssembly,
+    backend: BackendRuntimePayload,
+    native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
+    seed: &BackendRuntimeLinkSeed,
+) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
     let runtime = assembly
         .instantiate_runtime_with_value_store::<RuntimeValue, _>(MovingRuntimeValueStore::default())
         .map_err(|error| {
@@ -76,7 +90,7 @@ pub fn link_backend_runtime_with_seed_and_native_kernels(
                 error,
             }])
         })?;
-    let mut builder = LinkBuilder::new(&assembly, &backend, native_kernels.as_ref(), seed);
+    let mut builder = LinkBuilder::new(&assembly, backend.runtime_view(), native_kernels.as_ref(), seed);
     let linked = builder.build()?;
     let mut linked_runtime = BackendLinkedRuntime {
         assembly,
@@ -112,7 +126,7 @@ pub fn link_backend_runtime_with_seed_and_native_kernels(
 pub struct BackendLinkedRuntime {
     assembly: HirRuntimeAssembly,
     runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram, MovingRuntimeValueStore>,
-    backend: Arc<BackendProgram>,
+    backend: BackendRuntimePayload,
     native_kernels: std::sync::Arc<aivi_backend::NativeKernelArtifactSet>,
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,

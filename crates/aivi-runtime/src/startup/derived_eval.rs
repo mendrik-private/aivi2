@@ -1,5 +1,5 @@
 struct LinkedDerivedEvaluator<'a> {
-    backend: &'a BackendProgram,
+    backend: &'a BackendRuntimePayload,
     native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
     signal_items_by_handle: &'a BTreeMap<SignalHandle, BackendItemId>,
     derived_signals: &'a BTreeMap<DerivedHandle, LinkedDerivedSignal>,
@@ -18,7 +18,7 @@ struct LinkedDerivedEvaluator<'a> {
 // persisting compiled plans across scheduler ticks.  The GLib runtime drives all ticks from the
 // GTK main thread, so the same thread-local entry is reused every tick.
 //
-// The first component is the backend pointer — a stable identity for the owning `BackendProgram`.
+// The first component is the backend payload identity.
 // When the runtime is dropped, it removes its entries from this map so stale plans from a
 // previous program at the same address can never interfere.
 thread_local! {
@@ -75,8 +75,9 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             let globals = self.build_signal_globals(binding.backend_item, &inputs);
             let binding_item = binding.item;
             let binding_pipeline_ids = binding.pipeline_ids.clone();
-            let mut engine =
-                Self::executable_program(self.backend, self.native_kernels).create_engine();
+            let backend = self.backend.clone();
+            let native_kernels = self.native_kernels;
+            let mut engine = backend.executable_program(native_kernels).create_engine();
             return self.apply_pipelines_from(
                 signal,
                 binding_item,
@@ -116,7 +117,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                 .get(index)
                 .copied()
                 .expect("linked derived signal should preserve dependency layouts");
-            dependency_environment.push(stage_subject_value(self.backend, layout, value));
+            dependency_environment.push(stage_subject_value(self.backend_view(), layout, value));
             globals.insert(dependency, signal_value);
         }
 
@@ -124,8 +125,9 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         let value =
             self.evaluate_derived_value(signal, &binding, &dependency_environment, &globals)?;
 
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         self.apply_pipelines_from(
             signal,
             binding_item,
@@ -157,10 +159,11 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             let Some(value) = inputs.value(index) else {
                 return Ok(DerivedSignalUpdate::Clear);
             };
-            dependency_environment.push(stage_subject_value(self.backend, layout, value));
+            dependency_environment.push(stage_subject_value(self.backend_view(), layout, value));
         }
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         let value =
             self.evaluate_reactive_seed_value(signal, &binding, &dependency_environment, &globals)?;
         let binding_item = binding.item;
@@ -189,10 +192,11 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         if binding.body_mode == hir::ReactiveUpdateBodyMode::OptionalPayload {
             return Ok(true);
         }
-        let Some(globals) = self.build_fragment_globals(&binding.compiled_guard, &inputs) else {
+        let Some((env, globals)) = self.build_fragment_inputs(&binding.compiled_guard, &inputs)
+        else {
             return Ok(false);
         };
-        let value = self.evaluate_reactive_guard_value(signal, clause, &binding, &globals)?;
+        let value = self.evaluate_reactive_guard_value(signal, clause, &binding, &env, &globals)?;
         match value {
             RuntimeValue::Bool(value) => Ok(value),
             RuntimeValue::Signal(inner) => match *inner {
@@ -228,8 +232,8 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             .cloned()
             .ok_or(BackendRuntimeError::UnknownReactiveSignal { signal })?;
         let clause_binding = self.reactive_clause(signal, clause)?.clone();
-        let Some(fragment_globals) =
-            self.build_fragment_globals(&clause_binding.compiled_body, &inputs)
+        let Some((fragment_env, fragment_globals)) =
+            self.build_fragment_inputs(&clause_binding.compiled_body, &inputs)
         else {
             return Ok(DerivedSignalUpdate::Clear);
         };
@@ -242,6 +246,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             clause,
             &clause_binding,
             &clause_binding.compiled_body,
+            &fragment_env,
             &fragment_globals,
         )?;
         let value = match body_mode {
@@ -272,8 +277,9 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             },
         };
         let globals = self.build_signal_globals(signal_backend_item, &inputs);
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         self.apply_reactive_pipelines(
             signal,
             clause_owner,
@@ -287,11 +293,12 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
 }
 
 impl LinkedDerivedEvaluator<'_> {
-    fn executable_program<'a>(
-        backend: &'a BackendProgram,
-        native_kernels: &'a aivi_backend::NativeKernelArtifactSet,
-    ) -> BackendExecutableProgram<'a> {
-        BackendExecutableProgram::interpreted(backend).with_native_kernels(native_kernels)
+    fn backend_view(&self) -> BackendRuntimeView<'_> {
+        self.backend.runtime_view()
+    }
+
+    fn executable_program(&self) -> BackendExecutableProgram<'_> {
+        self.backend.executable_program(self.native_kernels)
     }
 
     fn reactive_clause(
@@ -361,17 +368,37 @@ impl LinkedDerivedEvaluator<'_> {
         globals
     }
 
-    fn build_fragment_globals(
+    fn build_fragment_inputs(
         &self,
         fragment: &HirCompiledRuntimeExpr,
         inputs: &DependencyValues<'_, RuntimeValue>,
-    ) -> Option<BTreeMap<BackendItemId, RuntimeValue>> {
+    ) -> Option<(Vec<RuntimeValue>, BTreeMap<BackendItemId, RuntimeValue>)> {
+        let backend = fragment.backend.runtime_view();
+        let entry = backend.item(fragment.entry_item)?;
+        let mut env = Vec::with_capacity(fragment.parameter_signals.len());
+        for (index, signal) in fragment.parameter_signals.iter().copied().enumerate() {
+            let value = self.fragment_parameter_value_for_inputs(inputs, signal)?;
+            let layout = *entry.parameters.get(index)?;
+            env.push(stage_subject_value(backend, layout, &value));
+        }
         let mut globals = BTreeMap::new();
         for required in fragment.required_signals.iter() {
             let value = self.fragment_signal_value_for_inputs(inputs, required.signal)?;
             globals.insert(required.backend_item, value);
         }
-        Some(globals)
+        Some((env, globals))
+    }
+
+    fn fragment_parameter_value_for_inputs(
+        &self,
+        inputs: &DependencyValues<'_, RuntimeValue>,
+        signal: SignalHandle,
+    ) -> Option<RuntimeValue> {
+        if inputs.contains_signal(signal) {
+            return inputs.value_for(signal).cloned();
+        }
+        let backend_item = self.signal_items_by_handle.get(&signal)?;
+        self.committed_signals.get(backend_item).cloned()
     }
 
     fn fragment_signal_value_for_inputs(
@@ -463,8 +490,9 @@ impl LinkedDerivedEvaluator<'_> {
             return Ok(());
         }
         let committed = committed.iter().copied().collect::<BTreeSet<_>>();
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         for (&signal, binding) in self.derived_signals.iter() {
             if binding.temporal_trigger_dependencies.is_empty()
                 || !binding
@@ -507,7 +535,7 @@ impl LinkedDerivedEvaluator<'_> {
                 .get(index)
                 .copied()
                 .expect("linked derived signal should preserve dependency layouts");
-            dependency_environment.push(stage_subject_value(self.backend, layout, value));
+            dependency_environment.push(stage_subject_value(self.backend_view(), layout, value));
         }
         self.evaluate_derived_value(signal, binding, &dependency_environment, &globals)
             .map(Some)
@@ -566,8 +594,9 @@ impl LinkedDerivedEvaluator<'_> {
         dependency_environment: &[RuntimeValue],
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         if let Some(body_kernel) = binding.body_kernel {
             engine
                 .evaluate_signal_body_kernel(body_kernel, dependency_environment, globals)
@@ -584,6 +613,7 @@ impl LinkedDerivedEvaluator<'_> {
         signal: SignalHandle,
         clause: ReactiveClauseHandle,
         binding: &LinkedReactiveClause,
+        env: &[RuntimeValue],
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
         match &binding.guard_eval_lane {
@@ -592,12 +622,12 @@ impl LinkedDerivedEvaluator<'_> {
                 let guard_backend = binding.compiled_guard.backend.clone();
                 let guard_native_kernels = binding.compiled_guard.native_kernels.clone();
                 match Self::with_native_plan(
-                    guard_backend.as_ref(),
+                    &guard_backend,
                     guard_native_kernels.as_ref(),
                     NativePlanCacheKey::ReactiveGuard(clause),
                     &native,
                     None,
-                    &[],
+                    env,
                     globals,
                 ) {
                     None => Err(BackendRuntimeError::MissingNativeReactiveGuardPlan {
@@ -609,9 +639,10 @@ impl LinkedDerivedEvaluator<'_> {
                     Some(Ok(value)) => Ok(value),
                     Some(Err(NativeKernelExecutionError::FallbackRequired)) => {
                         self.evaluate_fallback_reactive_fragment_value(
-                            guard_backend.as_ref(),
+                            &guard_backend,
                             guard_native_kernels.as_ref(),
                             binding.compiled_guard.entry_item,
+                            env,
                             |error| self.reactive_guard_eval_error(signal, clause, binding.owner, error),
                             globals,
                         )
@@ -622,9 +653,10 @@ impl LinkedDerivedEvaluator<'_> {
                 }
             }
             LinkedEvalLane::Fallback => self.evaluate_fallback_reactive_fragment_value(
-                binding.compiled_guard.backend.as_ref(),
+                &binding.compiled_guard.backend,
                 binding.compiled_guard.native_kernels.as_ref(),
                 binding.compiled_guard.entry_item,
+                env,
                 |error| self.reactive_guard_eval_error(signal, clause, binding.owner, error),
                 globals,
             ),
@@ -637,6 +669,7 @@ impl LinkedDerivedEvaluator<'_> {
         clause: ReactiveClauseHandle,
         binding: &LinkedReactiveClause,
         fragment: &HirCompiledRuntimeExpr,
+        env: &[RuntimeValue],
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
         match &binding.body_eval_lane {
@@ -645,12 +678,12 @@ impl LinkedDerivedEvaluator<'_> {
                 let frag_backend = fragment.backend.clone();
                 let frag_native_kernels = fragment.native_kernels.clone();
                 match Self::with_native_plan(
-                    frag_backend.as_ref(),
+                    &frag_backend,
                     frag_native_kernels.as_ref(),
                     NativePlanCacheKey::ReactiveBody(clause),
                     &native,
                     None,
-                    &[],
+                    env,
                     globals,
                 ) {
                     None => Err(BackendRuntimeError::MissingNativeReactiveBodyPlan {
@@ -662,9 +695,10 @@ impl LinkedDerivedEvaluator<'_> {
                     Some(Ok(value)) => Ok(value),
                     Some(Err(NativeKernelExecutionError::FallbackRequired)) => self
                         .evaluate_fallback_reactive_fragment_value(
-                            frag_backend.as_ref(),
+                            &frag_backend,
                             frag_native_kernels.as_ref(),
                             fragment.entry_item,
+                            env,
                             |error| self.reactive_body_eval_error(signal, clause, binding.owner, error),
                             globals,
                         ),
@@ -674,9 +708,10 @@ impl LinkedDerivedEvaluator<'_> {
                 }
             }
             LinkedEvalLane::Fallback => self.evaluate_fallback_reactive_fragment_value(
-                fragment.backend.as_ref(),
+                &fragment.backend,
                 fragment.native_kernels.as_ref(),
                 fragment.entry_item,
+                env,
                 |error| self.reactive_body_eval_error(signal, clause, binding.owner, error),
                 globals,
             ),
@@ -690,8 +725,9 @@ impl LinkedDerivedEvaluator<'_> {
         dependency_environment: &[RuntimeValue],
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
-        let mut engine =
-            Self::executable_program(self.backend, self.native_kernels).create_engine();
+        let backend = self.backend.clone();
+        let native_kernels = self.native_kernels;
+        let mut engine = backend.executable_program(native_kernels).create_engine();
         if let Some(body_kernel) = binding.body_kernel {
             engine
                 .evaluate_signal_body_kernel(body_kernel, dependency_environment, globals)
@@ -705,14 +741,19 @@ impl LinkedDerivedEvaluator<'_> {
 
     fn evaluate_fallback_reactive_fragment_value(
         &self,
-        backend: &BackendProgram,
+        backend: &BackendRuntimePayload,
         native_kernels: &aivi_backend::NativeKernelArtifactSet,
         entry_item: BackendItemId,
+        env: &[RuntimeValue],
         map_error: impl FnOnce(EvaluationError) -> BackendRuntimeError,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
-        let mut engine = Self::executable_program(backend, native_kernels).create_engine();
-        engine.evaluate_item(entry_item, globals).map_err(map_error)
+        let mut engine = backend.executable_program(native_kernels).create_engine();
+        if let Some(kernel) = backend.runtime_view().item(entry_item).and_then(|item| item.body) {
+            engine.evaluate_kernel(kernel, None, env, globals).map_err(map_error)
+        } else {
+            engine.evaluate_item(entry_item, globals).map_err(map_error)
+        }
     }
 
     /// Execute a native kernel, compiling and caching in `NATIVE_KERNEL_PLAN_CACHE` on first use.
@@ -722,7 +763,7 @@ impl LinkedDerivedEvaluator<'_> {
     /// `NativeKernelPlan: Send` because they live in a thread-local rather than in the
     /// `Send`-required `BackendLinkedRuntime`.
     fn with_native_plan(
-        backend: &BackendProgram,
+        backend: &BackendRuntimePayload,
         native_kernels: &aivi_backend::NativeKernelArtifactSet,
         key: NativePlanCacheKey,
         native: &LinkedNativeKernelEval,
@@ -730,15 +771,27 @@ impl LinkedDerivedEvaluator<'_> {
         env: &[RuntimeValue],
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Option<Result<RuntimeValue, NativeKernelExecutionError>> {
-        let cache_key = (backend as *const BackendProgram as usize, key);
+        let cache_key = (backend.cache_identity(), key);
         NATIVE_KERNEL_PLAN_CACHE.with(|cell| {
             let mut cache = cell.borrow_mut();
             if !cache.contains_key(&cache_key) {
-                if let Some(compiled) = NativeKernelPlan::compile_with_native_artifacts(
-                    backend,
-                    Some(native_kernels),
-                    native.kernel,
-                ) {
+                let compiled = match backend {
+                    BackendRuntimePayload::Program(program) => {
+                        NativeKernelPlan::compile_with_native_artifacts(
+                            program.as_ref(),
+                            Some(native_kernels),
+                            native.kernel,
+                        )
+                    }
+                    BackendRuntimePayload::Meta(meta) => {
+                        NativeKernelPlan::from_runtime_meta_with_native_artifacts(
+                            meta.as_ref(),
+                            Some(native_kernels),
+                            native.kernel,
+                        )
+                    }
+                };
+                if let Some(compiled) = compiled {
                     cache.insert(cache_key, compiled);
                 }
             }
@@ -756,18 +809,30 @@ impl LinkedDerivedEvaluator<'_> {
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
         let cache_key = (
-            self.backend as *const BackendProgram as usize,
+            self.backend.cache_identity(),
             NativePlanCacheKey::RecurrenceStep(signal, step_kernel),
         );
 
         NATIVE_KERNEL_PLAN_CACHE.with(|cell| {
             let mut cache = cell.borrow_mut();
             if !cache.contains_key(&cache_key) {
-                if let Some(compiled) = NativeKernelPlan::compile_with_native_artifacts(
-                    self.backend,
-                    Some(self.native_kernels),
-                    step_kernel,
-                ) {
+                let compiled = match self.backend {
+                    BackendRuntimePayload::Program(program) => {
+                        NativeKernelPlan::compile_with_native_artifacts(
+                            program.as_ref(),
+                            Some(self.native_kernels),
+                            step_kernel,
+                        )
+                    }
+                    BackendRuntimePayload::Meta(meta) => {
+                        NativeKernelPlan::from_runtime_meta_with_native_artifacts(
+                            meta.as_ref(),
+                            Some(self.native_kernels),
+                            step_kernel,
+                        )
+                    }
+                };
+                if let Some(compiled) = compiled {
                     cache.insert(cache_key, compiled);
                 }
             }
@@ -779,15 +844,15 @@ impl LinkedDerivedEvaluator<'_> {
                 Some(Err(NativeKernelExecutionError::Evaluation(error))) => {
                     Err(BackendRuntimeError::EvaluateRecurrenceSignal { signal, item, error })
                 }
-                None | Some(Err(NativeKernelExecutionError::FallbackRequired)) => {
-                    KernelEvaluator::new(self.backend)
-                        .evaluate_kernel(step_kernel, Some(&input), &[], globals)
-                        .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
-                            signal,
-                            item,
-                            error,
-                        })
-                }
+                None | Some(Err(NativeKernelExecutionError::FallbackRequired)) => self
+                    .executable_program()
+                    .create_engine()
+                    .evaluate_kernel(step_kernel, Some(&input), &[], globals)
+                    .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
+                        signal,
+                        item,
+                        error,
+                    }),
             }
         })
     }
@@ -887,7 +952,11 @@ impl LinkedDerivedEvaluator<'_> {
                 }
                 _ => 0,
             };
-            let pipeline = &self.backend.pipelines()[pipeline_id];
+            let pipeline = self
+                .backend_view()
+                .pipeline(pipeline_id)
+                .expect("linked runtime pipeline should exist")
+                .clone();
             for stage in pipeline.stages.iter().skip(stage_start) {
                 match &stage.kind {
                     BackendStageKind::Gate(BackendGateStage::SignalFilter {
@@ -1078,7 +1147,11 @@ impl LinkedDerivedEvaluator<'_> {
         evaluator: &mut dyn BackendExecutionEngine,
     ) -> Result<DerivedSignalUpdate<RuntimeValue>, BackendRuntimeError> {
         for &pipeline_id in pipeline_ids {
-            let pipeline = &self.backend.pipelines()[pipeline_id];
+            let pipeline = self
+                .backend_view()
+                .pipeline(pipeline_id)
+                .expect("linked runtime pipeline should exist")
+                .clone();
             for stage in &pipeline.stages {
                 match &stage.kind {
                     BackendStageKind::Gate(BackendGateStage::SignalFilter {
@@ -1150,12 +1223,12 @@ impl LinkedDerivedEvaluator<'_> {
         match &fanout.join {
             Some(join) => {
                 let subject =
-                    stage_subject_value(self.backend, join.input_layout, &mapped_collection);
+                    stage_subject_value(self.backend_view(), join.input_layout, &mapped_collection);
                 let joined = evaluator
                     .evaluate_kernel(join.kernel, Some(&subject), &[], globals)
                     .map_err(|error| self.derived_eval_error(signal, item, error))?;
                 Ok(unwrap_signal_layout_result(
-                    self.backend,
+                    self.backend_view(),
                     join.result_layout,
                     joined,
                 ))
@@ -1204,14 +1277,14 @@ impl LinkedDerivedEvaluator<'_> {
         match &fanout.join {
             Some(join) => {
                 let subject =
-                    stage_subject_value(self.backend, join.input_layout, &mapped_collection);
+                    stage_subject_value(self.backend_view(), join.input_layout, &mapped_collection);
                 let joined = evaluator
                     .evaluate_kernel(join.kernel, Some(&subject), &[], globals)
                     .map_err(|error| {
                         self.reactive_pipeline_eval_error(signal, item, context, error)
                     })?;
                 Ok(unwrap_signal_layout_result(
-                    self.backend,
+                    self.backend_view(),
                     join.result_layout,
                     joined,
                 ))
@@ -1240,8 +1313,9 @@ impl LinkedDerivedEvaluator<'_> {
         if previous.is_none() {
             // First tick: evaluate the seed kernel (no input subject). Create a fresh engine
             // for this one-shot initialisation; the cost is paid only once.
-            let mut engine =
-                Self::executable_program(self.backend, self.native_kernels).create_engine();
+            let backend = self.backend.clone();
+            let native_kernels = self.native_kernels;
+            let mut engine = backend.executable_program(native_kernels).create_engine();
             let seed_value = evaluate_kernel_coercing_zero_arity(
                 &mut *engine,
                 binding.seed_kernel,

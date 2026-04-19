@@ -18,6 +18,8 @@ use aivi.gnome.onlineAccounts (
     GoaAccount
     AccessToken
     OAuthToken
+    GoaMailAuth
+    GoaMailAccount
     GoaError
     GoaAccountState
     GoaEvent
@@ -34,6 +36,8 @@ use aivi.gnome.onlineAccounts (
 | `GoaAccount` | Account record |
 | `AccessToken` | Access token without refresh-token data |
 | `OAuthToken` | OAuth token payload including optional refresh token |
+| `GoaMailAuth` | Mail credential payload from GOA |
+| `GoaMailAccount` | Mail-ready GOA account with IMAP/SMTP settings |
 | `GoaError` | Account and credential failures |
 | `GoaAccountState` | Whether the account is active, disabled, or needs attention |
 | `GoaEvent` | Account add/remove/change events |
@@ -125,6 +129,19 @@ type OAuthToken = {
 
 OAuth token payload with optional refresh-token support.
 
+### GoaMailAuth
+
+```aivi
+type GoaMailAuth =
+  | GoaMailPassword Text
+  | GoaMailOAuthToken OAuthToken
+```
+
+Mail authentication material resolved from GOA for daemon-side use.
+
+- `GoaMailPassword Text` — password-based IMAP/SMTP credential
+- `GoaMailOAuthToken OAuthToken` — OAuth2 token payload suitable for XOAUTH2-style auth
+
 ### GoaError
 
 ```aivi
@@ -178,3 +195,44 @@ func describeEvent = event => event
  ||> AccountRemoved id -> "Removed: {id}"
  ||> AccountChanged id -> "Changed: {id}"
 ```
+
+### GoaMailAccount
+
+```aivi
+type GoaMailAccount = {
+    id: GoaAccountId,
+    provider: GoaProvider,
+    providerType: Text,
+    identity: Text,
+    presentationIdentity: Text,
+    state: GoaAccountState,
+    emailAddress: Text,
+    name: Text,
+    imapHost: Text,
+    imapPort: Int,
+    imapUserName: Text,
+    imapUseSsl: Bool,
+    imapUseTls: Bool,
+    smtpHost: Text,
+    smtpPort: Int,
+    smtpUserName: Text,
+    smtpUseSsl: Bool,
+    smtpUseTls: Bool,
+    auth: GoaMailAuth
+}
+```
+
+Mail-ready account record published by the current GOA source provider.
+
+- Includes resolved endpoint settings for both IMAP and SMTP.
+- `auth` carries either a password credential or an OAuth token payload.
+
+## Source provider
+
+```aivi
+@source goa.mailAccounts
+signal accounts : Signal (Result GoaError (List GoaMailAccount))
+```
+
+`goa.mailAccounts` publishes the current set of GOA mail accounts and republishes when GOA account
+objects change on the session bus.

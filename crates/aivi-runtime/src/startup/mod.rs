@@ -11,13 +11,13 @@ use std::{
 };
 
 use aivi_backend::{
-    BackendExecutableProgram, BackendExecutionEngine, DetachedRuntimeValue, EvaluationError,
-    GateStage as BackendGateStage, ItemId as BackendItemId, ItemKind as BackendItemKind,
-    KernelEvaluator, KernelId, LayoutKind, MovingRuntimeValueStore, NativeKernelExecutionError,
-    NativeKernelPlan, PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable,
-    RuntimeDbConnection, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
-    SourceId as BackendSourceId, StageKind as BackendStageKind, TaskFunctionApplier,
-    TemporalStage as BackendTemporalStage,
+    BackendExecutableProgram, BackendExecutionEngine, BackendRuntimeView, DetachedRuntimeValue,
+    EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
+    ItemKind as BackendItemKind, KernelId, LayoutKind, MovingRuntimeValueStore,
+    NativeKernelExecutionError, NativeKernelPlan, PipelineId as BackendPipelineId,
+    Program as BackendProgram, RuntimeCallable, RuntimeDbConnection, RuntimeRecordField,
+    RuntimeSumValue, RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
+    TaskFunctionApplier, TemporalStage as BackendTemporalStage,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -28,7 +28,10 @@ use crate::{
     TaskInstanceId, TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome,
     TryDerivedNodeEvaluator, WorkerPublicationSender,
     graph::{DerivedHandle, OwnerHandle, ReactiveClauseHandle, SignalHandle},
-    hir_adapter::{HirCompiledRuntimeExpr, HirRuntimeAssembly, HirRuntimeInstantiationError},
+    hir_adapter::{
+        BackendRuntimePayload, HirCompiledRuntimeExpr, HirRuntimeAssembly,
+        HirRuntimeInstantiationError,
+    },
     providers::SourceProviderContext,
     scheduler::DependencyValues,
     task_executor::{
@@ -58,6 +61,14 @@ static NATIVE_KERNEL_PLANS_ENABLED: AtomicBool = AtomicBool::new(true);
 
 pub fn set_native_kernel_plans_enabled(enabled: bool) {
     NATIVE_KERNEL_PLANS_ENABLED.store(enabled, Ordering::Release);
+}
+
+pub fn replace_native_kernel_plans_enabled(enabled: bool) -> bool {
+    NATIVE_KERNEL_PLANS_ENABLED.swap(enabled, Ordering::AcqRel)
+}
+
+pub fn clear_native_kernel_plan_cache() {
+    NATIVE_KERNEL_PLAN_CACHE.with(|cell| cell.borrow_mut().clear());
 }
 
 fn native_kernel_plans_enabled() -> bool {

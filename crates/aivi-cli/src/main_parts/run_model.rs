@@ -57,19 +57,59 @@ impl GtkHostValue for RunHostValue {
 #[derive(Clone, Debug)]
 struct RunArtifact {
     view_name: Box<str>,
-    patterns: RunPatternTable,
-    bridge: GtkBridgeGraph,
-    hydration_inputs: BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+    kind: RunArtifactKind,
     required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     runtime_assembly: HirRuntimeAssembly,
     runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
-    backend: Arc<BackendProgram>,
+    backend: aivi_runtime::hir_adapter::BackendRuntimePayload,
     backend_native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
-    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
     /// Default values to publish into stub Input signal handles for cross-module
     /// workspace imports before the first hydration cycle. Keyed by the input handle
     /// that was synthesised in the runtime assembly for each import signal.
     stub_signal_defaults: Vec<(RuntimeInputHandle, DetachedRuntimeValue)>,
+}
+
+#[derive(Clone, Debug)]
+enum RunArtifactKind {
+    Gtk(RunGtkArtifact),
+    HeadlessTask { task_owner: HirItemId },
+}
+
+#[derive(Clone, Debug)]
+struct RunGtkArtifact {
+    patterns: RunPatternTable,
+    bridge: GtkBridgeGraph,
+    hydration_inputs: BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
+}
+
+impl RunArtifact {
+    fn gtk(&self) -> Option<&RunGtkArtifact> {
+        match &self.kind {
+            RunArtifactKind::Gtk(surface) => Some(surface),
+            RunArtifactKind::HeadlessTask { .. } => None,
+        }
+    }
+
+    fn gtk_mut(&mut self) -> Option<&mut RunGtkArtifact> {
+        match &mut self.kind {
+            RunArtifactKind::Gtk(surface) => Some(surface),
+            RunArtifactKind::HeadlessTask { .. } => None,
+        }
+    }
+
+    fn expect_gtk(&self) -> &RunGtkArtifact {
+        self.gtk()
+            .expect("run artifact should carry a GTK surface in this context")
+    }
+}
+
+impl std::ops::Deref for RunArtifact {
+    type Target = RunGtkArtifact;
+
+    fn deref(&self) -> &Self::Target {
+        self.expect_gtk()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -114,35 +154,29 @@ struct RunValidationBlocker {
 
 #[derive(Clone, Debug)]
 struct RunFragmentExecutionUnit {
-    backend: Arc<BackendProgram>,
+    backend: aivi_runtime::hir_adapter::BackendRuntimePayload,
     native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
-    cache_key: u64,
 }
 
 impl RunFragmentExecutionUnit {
     fn new(
-        backend: Arc<BackendProgram>,
+        backend: aivi_runtime::hir_adapter::BackendRuntimePayload,
         native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
-        cache_key: u64,
     ) -> Self {
         Self {
             backend,
             native_kernels,
-            cache_key,
         }
     }
 
-    fn backend(&self) -> &BackendProgram {
-        self.backend.as_ref()
-    }
-
-    fn cache_key(&self) -> u64 {
-        self.cache_key
+    fn backend_view(&self) -> aivi_backend::BackendRuntimeView<'_> {
+        self.backend.runtime_view()
     }
 
     fn create_engine(&self, profiled: bool) -> BackendExecutionEngineHandle<'_> {
-        let executable = BackendExecutableProgram::interpreted(self.backend.as_ref())
-            .with_native_kernels(self.native_kernels.as_ref())
+        let executable = self
+            .backend
+            .executable_program(self.native_kernels.as_ref())
             .with_execution_options(aivi_backend::BackendExecutionOptions {
                 prefer_interpreter: cfg!(test),
                 ..Default::default()
