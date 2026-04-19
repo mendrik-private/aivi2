@@ -2448,6 +2448,99 @@ value cleanup = files.delete "cache.txt"
 }
 
 #[test]
+fn lowers_tray_capability_handles_into_dbus_sources() {
+    let lowered = lower_text(
+        "tray_source_capability_handles.aivi",
+        r#"
+type TraySource = Unit
+type DbusValue =
+  | DbusString Text
+
+type DbusCall = {
+    destination: Text,
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: List DbusValue
+}
+
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+@source tray "io.mailfox.Tray" with {
+    path: "/io/mailfox/Tray",
+    interface: "io.mailfox.Tray"
+}
+signal trayHandle : TraySource
+
+signal trayName : Signal BusNameState = trayHandle.ownName
+signal trayActions : Signal DbusCall = trayHandle.actions
+"#,
+    );
+    assert!(
+        !lowered.has_errors(),
+        "tray capability handle lowering should not introduce front-end diagnostics: {:?}",
+        lowered.diagnostics()
+    );
+
+    let tray_handle = find_signal(lowered.module(), "trayHandle");
+    assert!(
+        tray_handle.is_source_capability_handle,
+        "bodyless `@source tray` anchors should lower as capability handles"
+    );
+    assert!(
+        tray_handle.source_metadata.is_none(),
+        "tray capability handles must not produce executable source metadata"
+    );
+
+    let tray_name = find_signal(lowered.module(), "trayName");
+    let name_metadata = tray_name
+        .source_metadata
+        .as_ref()
+        .expect("lowered tray ownName signal should carry ordinary source metadata");
+    assert_eq!(
+        name_metadata.provider,
+        SourceProviderRef::Builtin(aivi_typing::BuiltinSourceProvider::DbusOwnName)
+    );
+
+    let tray_actions = find_signal(lowered.module(), "trayActions");
+    let action_metadata = tray_actions
+        .source_metadata
+        .as_ref()
+        .expect("lowered tray actions signal should carry ordinary source metadata");
+    assert_eq!(
+        action_metadata.provider,
+        SourceProviderRef::Builtin(aivi_typing::BuiltinSourceProvider::DbusMethod)
+    );
+    let action_options = tray_actions
+        .header
+        .decorators
+        .iter()
+        .find_map(|decorator_id| match &lowered.module().decorators()[*decorator_id].payload {
+            DecoratorPayload::Source(source) => source.options,
+            _ => None,
+        })
+        .expect("tray action lowering should synthesize dbus.method options");
+    let ExprKind::Record(crate::RecordExpr { fields }) =
+        &lowered.module().exprs()[action_options].kind
+    else {
+        panic!("tray action options should lower to a record expression");
+    };
+    let labels = fields
+        .iter()
+        .map(|field| field.label.text().to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        labels.contains(&"path".to_owned())
+            && labels.contains(&"interface".to_owned())
+            && labels.contains(&"member".to_owned()),
+        "tray action lowering should provide path/interface/member dbus.method options, found {labels:?}"
+    );
+}
+
+#[test]
 fn lowers_custom_source_capability_operations_into_member_qualified_custom_sources() {
     let lowered = lower_text(
         "custom_source_capability_operations.aivi",

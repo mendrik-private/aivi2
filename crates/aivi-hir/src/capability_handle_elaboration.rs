@@ -7,8 +7,9 @@ use crate::{
     BuiltinType, CustomCapabilityCommandSpec, CustomSourceOptionSchema, Decorator,
     DecoratorPayload, Expr, ExprId, ExprKind, ImportBinding, ImportBindingMetadata,
     ImportBindingResolution, ImportId, ImportValueType, IntrinsicValue, Item, ItemId, Module, Name,
-    NamePath, NonEmpty, ProjectionBase, RecordExpr, ResolutionState, SignalItem, SourceDecorator,
-    SourceProviderRef, TermReference, TermResolution, TypeKind, TypeResolution, ValueItem,
+    NamePath, NonEmpty, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
+    ResolutionState, SignalItem, SourceDecorator, SourceProviderRef, TermReference,
+    TermResolution, TypeKind, TypeResolution, ValueItem,
     custom_source_capabilities::{
         CustomSourceCapabilityKind, resolve_custom_source_capability_member,
     },
@@ -18,22 +19,23 @@ pub(crate) fn is_builtin_source_capability_family_path(path: &NamePath) -> bool 
     if path.segments().len() != 1 {
         return false;
     }
-    matches!(
-        path.segments().first().text(),
-        "fs" | "http"
-            | "db"
-            | "env"
+        matches!(
+            path.segments().first().text(),
+            "fs" | "http"
+                | "db"
+                | "env"
             | "log"
             | "stdio"
             | "random"
             | "process"
             | "path"
             | "dbus"
-            | "imap"
-            | "smtp"
-            | "time"
-            | "api"
-    )
+                | "imap"
+                | "smtp"
+                | "time"
+                | "tray"
+                | "api"
+        )
 }
 
 pub(crate) fn elaborate_capability_handles(module: &mut Module, diagnostics: &mut Vec<Diagnostic>) {
@@ -70,6 +72,7 @@ enum BuiltinCapabilityFamily {
     Imap,
     Smtp,
     Time,
+    Tray,
     Api,
 }
 
@@ -880,6 +883,48 @@ fn lower_builtin_signal_member(
                 options: handle.options,
             })
         }
+        BuiltinCapabilityFamily::Tray => match invocation.member.as_str() {
+            "ownName" => Some(SourceDecorator {
+                provider: Some(provider_name_path(
+                    invocation.span,
+                    BuiltinSourceProvider::DbusOwnName,
+                )),
+                arguments: inherited_arguments(handle, &invocation.arguments),
+                options: filtered_option_record(
+                    module,
+                    handle.options,
+                    invocation.span,
+                    &["bus", "address", "flags"],
+                    Vec::new(),
+                ),
+            }),
+            "actions" => {
+                let default_path =
+                    synthesize_text_literal(module, "/io/aivi/Tray", invocation.span);
+                let default_interface =
+                    synthesize_text_literal(module, "io.aivi.Tray", invocation.span);
+                let default_member = synthesize_text_literal(module, "Action", invocation.span);
+                Some(SourceDecorator {
+                    provider: Some(provider_name_path(
+                        invocation.span,
+                        BuiltinSourceProvider::DbusMethod,
+                    )),
+                    arguments: inherited_arguments(handle, &invocation.arguments),
+                    options: filtered_option_record(
+                        module,
+                        handle.options,
+                        invocation.span,
+                        &["bus", "address", "path", "interface"],
+                        vec![
+                            ("path", default_path),
+                            ("interface", default_interface),
+                            ("member", default_member),
+                        ],
+                    ),
+                })
+            }
+            _ => None,
+        },
         BuiltinCapabilityFamily::Log
         | BuiltinCapabilityFamily::Random
         | BuiltinCapabilityFamily::Smtp => None,
@@ -1037,7 +1082,8 @@ fn lower_builtin_value_member(
         BuiltinCapabilityFamily::Process
         | BuiltinCapabilityFamily::Dbus
         | BuiltinCapabilityFamily::Imap
-        | BuiltinCapabilityFamily::Time => None,
+        | BuiltinCapabilityFamily::Time
+        | BuiltinCapabilityFamily::Tray => None,
         BuiltinCapabilityFamily::Smtp => None,
         BuiltinCapabilityFamily::Api => {
             lower_api_value_member(module, handle, invocation, diagnostics)
@@ -1270,6 +1316,56 @@ fn synthesize_text_literal(module: &mut Module, text: &str, span: SourceSpan) ->
             }),
         })
         .expect("api capability lowering should fit inside the expression arena")
+}
+
+fn filtered_option_record(
+    module: &mut Module,
+    handle_options: Option<ExprId>,
+    span: SourceSpan,
+    allowed: &[&str],
+    overrides: Vec<(&str, ExprId)>,
+) -> Option<ExprId> {
+    let mut fields = match handle_options {
+        Some(options_id) => match &module.exprs()[options_id].kind {
+            ExprKind::Record(RecordExpr { fields }) => fields
+                .iter()
+                .filter(|field| allowed.iter().any(|allowed| field.label.text() == *allowed))
+                .cloned()
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+
+    for (label, value) in overrides {
+        if let Some(existing) = fields.iter_mut().find(|field| field.label.text() == label) {
+            existing.value = value;
+            existing.surface = RecordFieldSurface::Explicit;
+            existing.span = span;
+            continue;
+        }
+        let label = Name::new(label, span)
+            .expect("compiler-generated source option names should stay valid");
+        fields.push(RecordExprField {
+            span,
+            label,
+            value,
+            surface: RecordFieldSurface::Explicit,
+        });
+    }
+
+    if fields.is_empty() {
+        return None;
+    }
+
+    Some(
+        module
+            .alloc_expr(Expr {
+                span,
+                kind: ExprKind::Record(RecordExpr { fields }),
+            })
+            .expect("capability lowering should fit inside the expression arena"),
+    )
 }
 
 fn lower_api_signal_member(
@@ -1649,6 +1745,7 @@ fn builtin_capability_family(path: &NamePath) -> Option<BuiltinCapabilityFamily>
         "imap" => Some(BuiltinCapabilityFamily::Imap),
         "smtp" => Some(BuiltinCapabilityFamily::Smtp),
         "time" => Some(BuiltinCapabilityFamily::Time),
+        "tray" => Some(BuiltinCapabilityFamily::Tray),
         "api" => Some(BuiltinCapabilityFamily::Api),
         _ => None,
     }
@@ -1669,6 +1766,7 @@ fn supports_builtin_signal_member(family: BuiltinCapabilityFamily, member: &str)
         BuiltinCapabilityFamily::Dbus => matches!(member, "ownName" | "signal" | "method"),
         BuiltinCapabilityFamily::Imap => matches!(member, "connect" | "idle" | "fetchBody"),
         BuiltinCapabilityFamily::Time => matches!(member, "nowMs"),
+        BuiltinCapabilityFamily::Tray => matches!(member, "ownName" | "actions"),
         BuiltinCapabilityFamily::Log
         | BuiltinCapabilityFamily::Random
         | BuiltinCapabilityFamily::Smtp => false,
@@ -1727,7 +1825,8 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
         BuiltinCapabilityFamily::Process
         | BuiltinCapabilityFamily::Dbus
         | BuiltinCapabilityFamily::Imap
-        | BuiltinCapabilityFamily::Time => false,
+        | BuiltinCapabilityFamily::Time
+        | BuiltinCapabilityFamily::Tray => false,
         BuiltinCapabilityFamily::Smtp => matches!(member, "send"),
         // Api members are dynamic (spec-based); validation happens in lower_api_value_member.
         BuiltinCapabilityFamily::Api => true,

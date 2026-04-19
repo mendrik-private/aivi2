@@ -441,6 +441,32 @@ fn prepare_run_accepts_snake_demo() {
 }
 
 #[test]
+fn prepare_run_accepts_headless_task_main_when_no_markup_view_exists() {
+    let artifact = prepare_run_from_text(
+        "headless-main.aivi",
+        r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+value main : Task Text Unit =
+    stdoutWrite ""
+"#,
+        None,
+    )
+    .expect("task-valued main should prepare for headless `aivi run`");
+    assert_eq!(artifact.view_name.as_ref(), "main");
+    assert!(matches!(
+        artifact.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(artifact.gtk().is_none());
+}
+
+#[test]
 fn prepare_run_tracks_transitive_signal_globals_for_parameterized_from_selectors() {
     let artifact = prepare_run_from_text(
         "parameterized-from-run.aivi",
@@ -900,6 +926,42 @@ fn run_artifact_roundtrip_preserves_hydration_structure_and_native_sidecars() {
         reloaded.hydration_inputs.len(),
         "serialized run artifact should preserve hydration fragments"
     );
+}
+
+#[test]
+fn run_artifact_roundtrip_preserves_headless_task_entries() {
+    let artifact = prepare_run_from_text(
+        "headless-roundtrip.aivi",
+        r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+value main : Task Text Unit =
+    stdoutWrite ""
+"#,
+        None,
+    )
+    .expect("headless run artifact should prepare");
+    let temp = TempDir::new("run-artifact-headless-roundtrip");
+    let artifact_path = super::write_serialized_run_artifact_bundle(temp.path(), &artifact)
+        .expect("headless run artifact bundle should write");
+    let reloaded = super::load_serialized_run_artifact(&artifact_path, None)
+        .expect("serialized headless run artifact should reload");
+
+    assert_eq!(artifact.view_name, reloaded.view_name);
+    assert!(matches!(
+        artifact.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(matches!(
+        reloaded.kind,
+        super::RunArtifactKind::HeadlessTask { .. }
+    ));
+    assert!(reloaded.gtk().is_none());
 }
 
 #[test]

@@ -19,6 +19,10 @@ regex = "1"
 url = "2.5"
 ureq = "2"
 fastrand = "2"
+base64 = "0.22"
+imap = "2.4"
+mailparse = "0.15"
+native-tls = "0.2"
 
 [dev-dependencies]
 aivi-syntax.workspace = true

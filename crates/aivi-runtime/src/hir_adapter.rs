@@ -2777,6 +2777,66 @@ value cleanup : Task Text Unit = files.delete "cache.txt"
     }
 
     #[test]
+    fn tray_capability_handle_anchors_lower_to_existing_dbus_sources() {
+        let lowered = lower_text(
+            "runtime-hir-tray-capability-handles.aivi",
+            r#"
+type TraySource = Unit
+type DbusValue =
+  | DbusString Text
+
+type DbusCall = {
+    destination: Text,
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: List DbusValue
+}
+
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+@source tray "io.mailfox.Tray"
+signal tray : TraySource
+
+signal trayName : Signal BusNameState = tray.ownName
+signal trayActions : Signal DbusCall = tray.actions
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "tray capability runtime fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("tray capability runtime fixture should assemble");
+
+        let tray_id = item_id(lowered.module(), "tray");
+        let tray_name_id = item_id(lowered.module(), "trayName");
+        let tray_actions_id = item_id(lowered.module(), "trayActions");
+
+        assert!(
+            assembly.owner(tray_id).is_none(),
+            "tray capability handles should not allocate runtime owners"
+        );
+        assert!(
+            assembly.signal(tray_id).is_none(),
+            "tray capability handles should not assemble as runtime signals"
+        );
+        assert!(
+            assembly.source_by_owner(tray_name_id).is_some(),
+            "tray ownName should assemble as an ordinary runtime source binding"
+        );
+        assert!(
+            assembly.source_by_owner(tray_actions_id).is_some(),
+            "tray actions should assemble as an ordinary runtime source binding"
+        );
+    }
+
+    #[test]
     fn custom_capability_operations_assemble_as_member_qualified_custom_sources() {
         let lowered = lower_text(
             "runtime-hir-custom-capability-operations.aivi",

@@ -773,6 +773,61 @@ signal inbound : Signal DbusSignal
 }
 
 #[test]
+fn dbus_emit_source_emits_string_signal_and_reports_success() {
+    if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+        return;
+    }
+    let path = format!("/org/aivi/TestEmit{}", std::process::id());
+    let interface = format!("org.aivi.TestEmit{}", std::process::id());
+    let lowered = lower_text(
+        "runtime-provider-dbus-emit.aivi",
+        &format!(
+            r#"
+type DbusError =
+  | DbusProtocolError Text
+
+@source dbus.emit "{path}" with {{
+    interface: "{interface}"
+    member: "Ping"
+    body: "hello"
+}}
+signal emitted : Signal (Result DbusError Unit)
+"#,
+            path = path,
+            interface = interface,
+        ),
+    );
+    let assembly =
+        assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let actions = linked
+        .tick_with_source_lifecycle()
+        .expect("linked runtime tick should succeed");
+    let mut providers = SourceProviderManager::new();
+    providers
+        .apply_actions(actions.source_actions())
+        .expect("dbus emit providers should execute");
+
+    let emitted_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "emitted"))
+        .expect("emitted signal binding should exist")
+        .signal();
+
+    let emitted = spin_until(&mut linked, emitted_signal, Duration::from_secs(1))
+        .expect("dbus.emit should publish result");
+    assert!(
+        matches!(emitted, RuntimeValue::ResultOk(_)),
+        "expected successful emit result, found {emitted:?}"
+    );
+}
+
+#[test]
 fn dbus_method_source_replies_unit_and_publishes_calls() {
     if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
         return;
@@ -1166,6 +1221,102 @@ signal db : Signal (Result DbError Connection)
         "expected a SQLite open failure message, found {message}"
     );
     let _ = fs::remove_dir_all(&missing_parent);
+}
+
+#[test]
+fn imap_connect_source_surfaces_starttls_gap_as_explicit_error() {
+    let lowered = lower_text(
+        "runtime-provider-imap-connect.aivi",
+        r#"
+type GoaMailAuth =
+  | GoaMailPassword Text
+  | GoaMailOAuthToken {
+      accessToken: Text,
+      refreshToken: Option Text,
+      tokenType: Text,
+      expiresAt: Option Int
+    }
+
+type ImapError =
+  | ImapAuthFailed
+  | ImapConnectionFailed Text
+  | FolderNotFound Text
+  | ImapProtocolError Text
+
+type ImapFlag =
+  | Seen
+  | Answered
+  | Flagged
+  | Draft
+
+type ImapHeader = {
+    uid: Int,
+    subject: Text,
+    from: Text,
+    date: Text,
+    messageId: Text,
+    flags: List ImapFlag,
+    preview: Text,
+    rawHeader: Text
+}
+
+type ImapSnapshot = {
+    accountId: Text,
+    mailbox: Text,
+    highestUid: Option Int,
+    messages: List ImapHeader
+}
+
+value accounts = [{
+    id: "acc-1",
+    imapHost: "imap.example.test",
+    imapPort: 143,
+    imapUserName: "demo",
+    imapUseSsl: False,
+    imapUseTls: True,
+    auth: GoaMailPassword "secret"
+}]
+
+@source imap.connect accounts with {
+    mailbox: "INBOX"
+    limit: 10
+}
+signal snapshots : Signal (Result ImapError (List ImapSnapshot))
+"#,
+    );
+    let assembly =
+        assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let actions = linked
+        .tick_with_source_lifecycle()
+        .expect("linked runtime tick should succeed");
+    let mut providers = SourceProviderManager::new();
+    providers
+        .apply_actions(actions.source_actions())
+        .expect("imap.connect source should execute");
+    let snapshots_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "snapshots"))
+        .expect("snapshots signal binding should exist")
+        .signal();
+    let value = spin_until(&mut linked, snapshots_signal, Duration::from_secs(1))
+        .expect("imap.connect source should publish");
+    let RuntimeValue::ResultErr(error) = value else {
+        panic!("expected imap snapshot Err payload, found {value:?}");
+    };
+    let RuntimeValue::Sum(error) = error.as_ref() else {
+        panic!("expected imap error sum, found {error:?}");
+    };
+    assert_eq!(error.variant_name.as_ref(), "ImapConnectionFailed");
+    expect_text(
+        &error.fields[0],
+        "STARTTLS-backed GOA IMAP accounts are not executed by this runtime slice yet",
+    );
 }
 
 #[test]

@@ -87,6 +87,10 @@ impl SourceProviderManager {
         }
     }
 
+    pub fn app_dir(&self) -> &Path {
+        self.context.app_dir()
+    }
+
     pub fn active_provider(&self, instance: SourceInstanceId) -> Option<&RuntimeSourceProvider> {
         self.active
             .get(&instance)
@@ -703,6 +707,21 @@ impl SourceProviderManager {
                     stop,
                 }
             }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::GoaMailAccounts) => {
+                let plan = GoaMailAccountsPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_goa_mail_accounts_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusOwnName) => {
                 let plan = DbusOwnNamePlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
@@ -737,6 +756,21 @@ impl SourceProviderManager {
                 let plan = DbusMethodPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
                 let handle = spawn_dbus_method_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusEmit) => {
+                let plan = DbusEmitPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_dbus_emit_worker(port, plan, stop.clone())?;
                 self.thread_handles
                     .lock()
                     .unwrap()
@@ -797,11 +831,53 @@ impl SourceProviderManager {
                     port,
                 }
             }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ImapConnect) => {
+                let plan = ImapConnectPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_imap_connect_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ImapIdle) => {
+                let plan = ImapIdlePlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_imap_idle_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ImapFetchBody) => {
+                let plan = ImapFetchBodyPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_imap_fetch_body_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
             RuntimeSourceProvider::Builtin(
-                BuiltinSourceProvider::ImapConnect
-                | BuiltinSourceProvider::ImapIdle
-                | BuiltinSourceProvider::ImapFetchBody
-                | BuiltinSourceProvider::SmtpSend
+                BuiltinSourceProvider::SmtpSend
                 | BuiltinSourceProvider::DbExec
                 | BuiltinSourceProvider::TimeNowMs,
             ) => {

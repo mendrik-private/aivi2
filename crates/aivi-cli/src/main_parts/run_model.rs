@@ -57,19 +57,52 @@ impl GtkHostValue for RunHostValue {
 #[derive(Clone, Debug)]
 struct RunArtifact {
     view_name: Box<str>,
-    patterns: RunPatternTable,
-    bridge: GtkBridgeGraph,
-    hydration_inputs: BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+    kind: RunArtifactKind,
     required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     runtime_assembly: HirRuntimeAssembly,
     runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
     backend: Arc<BackendProgram>,
     backend_native_kernels: Arc<aivi_backend::NativeKernelArtifactSet>,
-    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
     /// Default values to publish into stub Input signal handles for cross-module
     /// workspace imports before the first hydration cycle. Keyed by the input handle
     /// that was synthesised in the runtime assembly for each import signal.
     stub_signal_defaults: Vec<(RuntimeInputHandle, DetachedRuntimeValue)>,
+}
+
+#[derive(Clone, Debug)]
+enum RunArtifactKind {
+    Gtk(RunGtkArtifact),
+    HeadlessTask { task_owner: HirItemId },
+}
+
+#[derive(Clone, Debug)]
+struct RunGtkArtifact {
+    patterns: RunPatternTable,
+    bridge: GtkBridgeGraph,
+    hydration_inputs: BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
+}
+
+impl RunArtifact {
+    fn gtk(&self) -> Option<&RunGtkArtifact> {
+        match &self.kind {
+            RunArtifactKind::Gtk(surface) => Some(surface),
+            RunArtifactKind::HeadlessTask { .. } => None,
+        }
+    }
+
+    fn expect_gtk(&self) -> &RunGtkArtifact {
+        self.gtk()
+            .expect("run artifact should carry a GTK surface in this context")
+    }
+}
+
+impl std::ops::Deref for RunArtifact {
+    type Target = RunGtkArtifact;
+
+    fn deref(&self) -> &Self::Target {
+        self.expect_gtk()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

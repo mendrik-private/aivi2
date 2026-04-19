@@ -88,6 +88,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.desktop.xdg](xdg.md) | XDG error vocabulary | `dataHome`, `configHome`, `cacheHome` |
 | [aivi.portal](portal.md) | Desktop portal results | `openFile`, `openUri`, `screenshot` |
 | [aivi.dbus](dbus.md) | D-Bus vocabulary and `DbusSource` | `destination`, `path`, `interface`, `member` |
+| [aivi.gnome.tray](tray.md) | GNOME tray bridge vocabulary | `TraySource`, `defaultPath`, `actionMember` |
 | [aivi.gnome.settings](settings.md) | GSettings schema, key, and value types | `make`, `parse`, `GSettingsSource` |
 | [aivi.gnome.onlineAccounts](onlineAccounts.md) | Desktop account and token records | `id`, `token`, `tokenType`, `expiresAt` |
 | [aivi.gnome.notifications](notifications.md) | Desktop notification payloads | `summary`, `body`, `icon`, `actions` |

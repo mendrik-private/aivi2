@@ -1,5 +1,5 @@
 const RUN_ARTIFACT_FORMAT: &str = "aivi.run-artifact";
-const RUN_ARTIFACT_VERSION: u32 = 2;
+const RUN_ARTIFACT_VERSION: u32 = 3;
 const RUN_ARTIFACT_FILE_NAME: &str = "run-artifact.bin";
 const RUN_ARTIFACT_PAYLOAD_DIR: &str = "payloads";
 
@@ -8,15 +8,26 @@ struct SerializedRunArtifact {
     format: Box<str>,
     version: u32,
     view_name: Box<str>,
-    patterns: Box<[RunPatternEntryWire]>,
-    bridge: GtkBridgeGraphWire,
-    hydration_inputs: Box<[RunInputEntryWire]>,
+    kind: SerializedRunArtifactKind,
     required_signal_globals: Box<[RequiredSignalGlobalWire]>,
     runtime_assembly: HirRuntimeAssemblyWire,
     runtime_link: aivi_runtime::BackendRuntimeLinkSeed,
     backend: BackendPayloadWire,
-    event_handlers: Box<[RunEventHandlerEntryWire]>,
     stub_signal_defaults: Box<[StubSignalDefaultWire]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+enum SerializedRunArtifactKind {
+    Gtk(SerializedRunGtkArtifact),
+    HeadlessTask { task_owner: HirItemId },
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct SerializedRunGtkArtifact {
+    patterns: Box<[RunPatternEntryWire]>,
+    bridge: GtkBridgeGraphWire,
+    hydration_inputs: Box<[RunInputEntryWire]>,
+    event_handlers: Box<[RunEventHandlerEntryWire]>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -468,32 +479,51 @@ fn serialize_run_artifact(
     artifact: &RunArtifact,
     payloads: &mut ArtifactPayloadRegistry,
 ) -> Result<SerializedRunArtifact, String> {
+    let kind = match &artifact.kind {
+        RunArtifactKind::Gtk(surface) => SerializedRunArtifactKind::Gtk(SerializedRunGtkArtifact {
+            patterns: surface
+                .patterns
+                .patterns
+                .iter()
+                .map(|(&id, pattern)| RunPatternEntryWire {
+                    id,
+                    pattern: pattern.clone(),
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            bridge: gtk_bridge_graph_to_wire(surface.bridge.clone()),
+            hydration_inputs: surface
+                .hydration_inputs
+                .iter()
+                .map(|(&input, compiled)| -> Result<RunInputEntryWire, String> {
+                    Ok(RunInputEntryWire {
+                        input,
+                        compiled: compiled_run_input_to_wire(compiled, payloads)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
+            event_handlers: surface
+                .event_handlers
+                .iter()
+                .map(|(&handler, resolved)| RunEventHandlerEntryWire {
+                    handler,
+                    resolved: resolved.clone(),
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }),
+        RunArtifactKind::HeadlessTask { task_owner } => {
+            SerializedRunArtifactKind::HeadlessTask {
+                task_owner: *task_owner,
+            }
+        }
+    };
     Ok(SerializedRunArtifact {
         format: RUN_ARTIFACT_FORMAT.into(),
         version: RUN_ARTIFACT_VERSION,
         view_name: artifact.view_name.clone(),
-        patterns: artifact
-            .patterns
-            .patterns
-            .iter()
-            .map(|(&id, pattern)| RunPatternEntryWire {
-                id,
-                pattern: pattern.clone(),
-            })
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-        bridge: gtk_bridge_graph_to_wire(artifact.bridge.clone()),
-        hydration_inputs: artifact
-            .hydration_inputs
-            .iter()
-            .map(|(&input, compiled)| -> Result<RunInputEntryWire, String> {
-                Ok(RunInputEntryWire {
-                    input,
-                    compiled: compiled_run_input_to_wire(compiled, payloads)?,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_boxed_slice(),
+        kind,
         required_signal_globals: artifact
             .required_signal_globals
             .iter()
@@ -506,15 +536,6 @@ fn serialize_run_artifact(
         runtime_assembly: hir_runtime_assembly_to_wire(artifact.runtime_assembly.clone(), payloads)?,
         runtime_link: artifact.runtime_link.clone(),
         backend: payloads.register_program(artifact.backend.clone())?,
-        event_handlers: artifact
-            .event_handlers
-            .iter()
-            .map(|(&handler, resolved)| RunEventHandlerEntryWire {
-                handler,
-                resolved: resolved.clone(),
-            })
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
         stub_signal_defaults: artifact
             .stub_signal_defaults
             .iter()
@@ -533,26 +554,40 @@ fn deserialize_run_artifact(
 ) -> Result<RunArtifact, String> {
     let mut payloads = ArtifactPayloadLoader::new(payload_reader);
     let backend = payloads.load(&serialized.backend)?;
-    Ok(RunArtifact {
-        view_name: serialized.view_name,
-        patterns: RunPatternTable {
-            patterns: serialized
-                .patterns
+    let kind = match serialized.kind {
+        SerializedRunArtifactKind::Gtk(surface) => RunArtifactKind::Gtk(RunGtkArtifact {
+            patterns: RunPatternTable {
+                patterns: surface
+                    .patterns
+                    .into_vec()
+                    .into_iter()
+                    .map(|entry| (entry.id, entry.pattern))
+                    .collect(),
+            },
+            bridge: gtk_bridge_graph_from_wire(surface.bridge)?,
+            hydration_inputs: surface
+                .hydration_inputs
                 .into_vec()
                 .into_iter()
-                .map(|entry| (entry.id, entry.pattern))
+                .map(|entry| {
+                    compiled_run_input_from_wire(entry.compiled, &mut payloads)
+                        .map(|compiled| (entry.input, compiled))
+                })
+                .collect::<Result<_, _>>()?,
+            event_handlers: surface
+                .event_handlers
+                .into_vec()
+                .into_iter()
+                .map(|entry| (entry.handler, entry.resolved))
                 .collect(),
-        },
-        bridge: gtk_bridge_graph_from_wire(serialized.bridge)?,
-        hydration_inputs: serialized
-            .hydration_inputs
-            .into_vec()
-            .into_iter()
-            .map(|entry| {
-                compiled_run_input_from_wire(entry.compiled, &mut payloads)
-                    .map(|compiled| (entry.input, compiled))
-            })
-            .collect::<Result<_, _>>()?,
+        }),
+        SerializedRunArtifactKind::HeadlessTask { task_owner } => {
+            RunArtifactKind::HeadlessTask { task_owner }
+        }
+    };
+    Ok(RunArtifact {
+        view_name: serialized.view_name,
+        kind,
         required_signal_globals: serialized
             .required_signal_globals
             .into_vec()
@@ -563,12 +598,6 @@ fn deserialize_run_artifact(
         runtime_link: serialized.runtime_link,
         backend: backend.program,
         backend_native_kernels: backend.native_kernels,
-        event_handlers: serialized
-            .event_handlers
-            .into_vec()
-            .into_iter()
-            .map(|entry| (entry.handler, entry.resolved))
-            .collect(),
         stub_signal_defaults: serialized
             .stub_signal_defaults
             .into_vec()

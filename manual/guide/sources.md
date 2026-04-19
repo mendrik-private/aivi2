@@ -62,7 +62,7 @@ value cleanup = files.delete "cache.txt"
 ```
 
 Today this lowering is implemented for `fs`, `http`, `db`, `env`, `log`, `stdio`, `random`,
-`process`, `path`, and `dbus`.
+`process`, `path`, `dbus`, and `tray`.
 
 Current rules:
 

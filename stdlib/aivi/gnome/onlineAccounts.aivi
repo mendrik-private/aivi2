@@ -26,6 +26,10 @@ type OAuthToken = {
     expiresAt: Option Int
 }
 
+type GoaMailAuth =
+  | GoaMailPassword Text
+  | GoaMailOAuthToken OAuthToken
+
 type GoaError =
   | AccountNotFound Text
   | CredentialUnavailable Text
@@ -42,4 +46,26 @@ type GoaEvent =
   | AccountRemoved GoaAccountId
   | AccountChanged GoaAccountId
 
-export (GoaAccountId, GoaCapability, Mail, Calendar, Contacts, Files, Photos, GoaProvider, GoaAccount, AccessToken, OAuthToken, GoaError, AccountNotFound, CredentialUnavailable, AttentionRequired, GoaProtocolError, GoaAccountState, AccountActive, AccountNeedsAttention, AccountDisabled, GoaEvent, AccountAdded, AccountRemoved, AccountChanged)
+type GoaMailAccount = {
+    id: GoaAccountId,
+    provider: GoaProvider,
+    providerType: Text,
+    identity: Text,
+    presentationIdentity: Text,
+    state: GoaAccountState,
+    emailAddress: Text,
+    name: Text,
+    imapHost: Text,
+    imapPort: Int,
+    imapUserName: Text,
+    imapUseSsl: Bool,
+    imapUseTls: Bool,
+    smtpHost: Text,
+    smtpPort: Int,
+    smtpUserName: Text,
+    smtpUseSsl: Bool,
+    smtpUseTls: Bool,
+    auth: GoaMailAuth
+}
+
+export (GoaAccountId, GoaCapability, Mail, Calendar, Contacts, Files, Photos, GoaProvider, GoaAccount, AccessToken, OAuthToken, GoaMailAuth, GoaMailPassword, GoaMailOAuthToken, GoaError, AccountNotFound, CredentialUnavailable, AttentionRequired, GoaProtocolError, GoaAccountState, AccountActive, AccountNeedsAttention, AccountDisabled, GoaEvent, AccountAdded, AccountRemoved, AccountChanged, GoaMailAccount)

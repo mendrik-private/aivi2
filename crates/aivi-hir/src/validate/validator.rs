@@ -6099,9 +6099,11 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::SocketConnect
                             | BuiltinSourceProvider::MailboxSubscribe
                             | BuiltinSourceProvider::ProcessSpawn
+                            | BuiltinSourceProvider::GoaMailAccounts
                             | BuiltinSourceProvider::DbusOwnName
                             | BuiltinSourceProvider::DbusSignal
                             | BuiltinSourceProvider::DbusMethod
+                            | BuiltinSourceProvider::DbusEmit
                             | BuiltinSourceProvider::WindowKeyDown
                             | BuiltinSourceProvider::GtkDarkMode
                             | BuiltinSourceProvider::GtkClipboard

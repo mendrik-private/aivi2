@@ -481,7 +481,90 @@ value view =
 - The output must currently be a record with fields `destination`, `path`, `interface`, `member`, and `body`.
 - Header fields must decode as `Text`.
 - The `body` field may currently be `Text` or `List DbusValue`.
-- The runtime currently replies on the D-Bus wire with `Unit` immediately; non-`Unit` reply payloads are still deferred.
+- `dbus.method` currently acts as a **service-side** method handler: it watches incoming calls whose destination/path/interface/member match the configured filter, publishes the call record into the signal graph, and replies immediately on the wire.
+- The optional `reply` option lets the runtime reply with a fixed GLib-variant body. Without it, the runtime replies with `Unit`.
+
+### `dbus.emit`
+
+**Form:** `@source dbus.emit path`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `bus` | `Text` | Supported. Current accepted values are `"session"` and `"system"`. Defaults to the session bus. |
+| `address` | `Text` | Supported. |
+| `interface` | `Text` | Supported. |
+| `member` | `Text` | Supported. |
+| `body` | `Text` | Supported. Sent as a single string argument. |
+| `refreshOn` | `Signal B` | Supported. |
+| `activeWhen` | `Signal Bool` | Supported. |
+
+**Notes**
+
+- The intended output shape is `Signal (Result DbusError Unit)`.
+- The current runtime emits a signal with at most one string payload argument. Rich structured emit bodies remain future work.
+
+## GNOME Online Accounts
+
+### `goa.mailAccounts`
+
+**Form:** `@source goa.mailAccounts`
+
+No options.
+
+**Notes**
+
+- The intended output shape is `Signal (Result GoaError (List GoaMailAccount))`.
+- The runtime publishes one full mail-account snapshot at startup and republishes whenever GOA account objects are added, removed, or change relevant properties.
+- Each `GoaMailAccount` currently includes resolved IMAP/SMTP endpoint data plus auth data from GOA (`GoaMailPassword` or `GoaMailOAuthToken`).
+
+## IMAP
+
+### `imap.connect`
+
+**Form:** `@source imap.connect accounts`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `mailbox` | `Text` | Supported. Defaults to `"INBOX"`. |
+| `limit` | `Int` | Supported. Limits fetched headers per account. Defaults to `25`. |
+| `refreshOn` | `Signal B` | Supported. |
+| `activeWhen` | `Signal Bool` | Supported. |
+
+**Notes**
+
+- `accounts` must currently evaluate to `List GoaMailAccount`.
+- The intended output shape is `Signal (Result ImapError (List ImapSnapshot))`.
+- Each sync cycle selects the configured mailbox on every listed account and fetches up to `limit` recent message headers.
+
+### `imap.idle`
+
+**Form:** `@source imap.idle accounts`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `mailbox` | `Text` | Supported. Defaults to `"INBOX"`. |
+| `activeWhen` | `Signal Bool` | Supported. |
+
+**Notes**
+
+- `accounts` must currently evaluate to `List GoaMailAccount`.
+- The intended output shape is `Signal (Result ImapError ImapLiveEvent)`.
+- The current runtime uses a polling fallback and emits `NewMessage` events when the highest UID changes. Full RFC 2177 IDLE semantics remain future work.
+
+### `imap.fetchBody`
+
+**Form:** `@source imap.fetchBody request`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `refreshOn` | `Signal B` | Supported. |
+| `activeWhen` | `Signal Bool` | Supported. |
+
+**Notes**
+
+- `request` must currently evaluate to a record carrying GoaMailAccount-style connection fields plus `mailbox: Text` and `uid: Int`.
+- The intended output shape is `Signal (Result ImapError ImapBody)`.
+- The runtime fetches the full raw message body and extracts best-effort plain-text and HTML bodies.
 
 ## Custom source providers
 

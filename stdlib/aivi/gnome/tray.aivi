@@ -1,0 +1,11 @@
+use aivi.dbus (BusNameState, DbusCall)
+
+type TraySource = Unit
+
+type TrayActionCall = DbusCall
+
+value defaultPath : Text = "/io/aivi/Tray"
+value defaultInterface : Text = "io.aivi.Tray"
+value actionMember : Text = "Action"
+
+export (TraySource, TrayActionCall, BusNameState, defaultPath, defaultInterface, actionMember)
