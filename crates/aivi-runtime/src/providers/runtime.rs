@@ -47,6 +47,11 @@ fn dbus_value_step_supported(
 }
 
 const MAX_DBUS_VALUE_DEPTH: usize = 64;
+const FREEDESKTOP_PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
+const FREEDESKTOP_PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+const FREEDESKTOP_PORTAL_FILE_CHOOSER_INTERFACE: &str = "org.freedesktop.portal.FileChooser";
+const FREEDESKTOP_PORTAL_OPEN_URI_INTERFACE: &str = "org.freedesktop.portal.OpenURI";
+const FREEDESKTOP_PORTAL_SCREENSHOT_INTERFACE: &str = "org.freedesktop.portal.Screenshot";
 
 fn runtime_dbus_value_supported(value: &RuntimeValue, depth: usize) -> bool {
     if depth >= MAX_DBUS_VALUE_DEPTH {
@@ -453,6 +458,60 @@ pub(crate) fn open_dbus_connection_text(
     open_dbus_connection(bus, address)
 }
 
+fn portal_request_identity(connection: &DBusConnection) -> Result<(String, String), Box<str>> {
+    let Some(unique_name) = connection.unique_name() else {
+        return Err("portal D-Bus connection does not have a unique name".into());
+    };
+    let token = format!("aivi{}_{}", std::process::id(), fastrand::u32(..));
+    let sender = unique_name
+        .strip_prefix(':')
+        .unwrap_or(unique_name.as_str())
+        .replace('.', "_");
+    Ok((
+        token.clone(),
+        format!("/org/freedesktop/portal/desktop/request/{sender}/{token}"),
+    ))
+}
+
+fn portal_publish_error(port: &DetachedRuntimePublicationPort, value: Result<RuntimeValue, Box<str>>) {
+    if let Ok(value) = value {
+        let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+    }
+}
+
+fn portal_result_value(results: &Variant, key: &str) -> Result<Variant, Box<str>> {
+    for index in 0..results.n_children() {
+        let entry = results.child_value(index);
+        if entry.child_value(0).get::<String>().as_deref() == Some(key) {
+            return Ok(unwrap_variant(&entry.child_value(1)));
+        }
+    }
+    Err(format!("portal response missing `{key}` result").into_boxed_str())
+}
+
+fn portal_result_text(results: &Variant, key: &str) -> Result<String, Box<str>> {
+    variant_text(&portal_result_value(results, key)?)
+}
+
+fn portal_result_strings(results: &Variant, key: &str) -> Result<Vec<String>, Box<str>> {
+    let values = portal_result_value(results, key)?;
+    let mut items = Vec::with_capacity(values.n_children());
+    for index in 0..values.n_children() {
+        items.push(variant_text(&values.child_value(index))?);
+    }
+    Ok(items)
+}
+
+fn portal_screenshot_bytes(uri: &str) -> Result<Box<[u8]>, Box<str>> {
+    let url = Url::parse(uri).map_err(|error| error.to_string().into_boxed_str())?;
+    let path = url
+        .to_file_path()
+        .map_err(|_| format!("portal screenshot URI is not a local file: {uri}").into_boxed_str())?;
+    fs::read(path)
+        .map(Vec::into_boxed_slice)
+        .map_err(|error| error.to_string().into_boxed_str())
+}
+
 fn spawn_dbus_own_name_worker(
     port: DetachedRuntimePublicationPort,
     plan: DbusOwnNamePlan,
@@ -668,6 +727,573 @@ fn spawn_notification_events_worker(
         }
     });
     finish_dbus_startup(instance, provider, handle, startup_rx)
+}
+
+fn spawn_portal_open_file_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: PortalOpenFilePlan,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let _ = context.with_thread_default(|| {
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
+            let Ok(connection) = open_dbus_connection(DbusBus::Session, None) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal session bus is unavailable",
+                    ),
+                );
+                return;
+            };
+            let Ok((handle_token, expected_handle)) = portal_request_identity(&connection) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal request handle could not be prepared",
+                    ),
+                );
+                return;
+            };
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            let loop_quit = main_loop.clone();
+            #[allow(deprecated)]
+            let mut subscription_id = connection.signal_subscribe(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                Some("org.freedesktop.portal.Request"),
+                Some("Response"),
+                Some(expected_handle.as_str()),
+                None,
+                DBusSignalFlags::NONE,
+                move |_, _, _, _, _, parameters| {
+                    let value = match parameters.child_value(0).get::<u32>() {
+                        Some(0) => {
+                            let results = parameters.child_value(1);
+                            match portal_result_strings(&results, "uris") {
+                                Ok(uris) => output.selection_value(&uris),
+                                Err(detail) => Err(SourceDecodeErrorWithPath::new(
+                                    SourceDecodeError::InvalidJson { detail },
+                                )),
+                            }
+                        }
+                        Some(1) => output.cancelled_value(),
+                        Some(_) => {
+                            portal_publish_error(
+                                &publish_port,
+                                output.error_value(
+                                    PortalErrorKind::PermissionDenied,
+                                    "desktop rejected file chooser request",
+                                ),
+                            );
+                            loop_quit.quit();
+                            return;
+                        }
+                        None => Err(SourceDecodeErrorWithPath::new(SourceDecodeError::InvalidJson {
+                            detail: "portal.openFile response missing status".into(),
+                        })),
+                    };
+                    match value {
+                        Ok(value) => {
+                            let _ =
+                                publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                        Err(error) => {
+                            portal_publish_error(
+                                &publish_port,
+                                output.error_value(PortalErrorKind::Decode, &error.to_string()),
+                            );
+                        }
+                    }
+                    loop_quit.quit();
+                },
+            );
+            let options = glib::VariantDict::new(None);
+            options.insert("handle_token", handle_token.as_str());
+            options.insert("modal", plan.modal);
+            options.insert("multiple", plan.multiple);
+            options.insert("directory", plan.directory);
+            if let Some(label) = plan.accept_label.as_deref() {
+                options.insert("accept_label", label);
+            }
+            if let Some(folder) = plan.current_folder.as_deref() {
+                let mut bytes = folder.as_bytes().to_vec();
+                bytes.push(0);
+                options.insert_value("current_folder", &bytes.to_variant());
+            }
+            if !plan.filters.is_empty() {
+                let filter_items = plan
+                    .filters
+                    .iter()
+                    .map(|filter| {
+                        let patterns = filter
+                            .patterns
+                            .iter()
+                            .map(|pattern| Variant::tuple_from_iter([0_u32.to_variant(), pattern.as_ref().to_variant()]))
+                            .collect::<Vec<_>>();
+                        let pattern_array = Variant::array_from_iter_with_type(
+                            glib::VariantTy::new("(us)")
+                                .expect("portal file filter tuple type should be valid"),
+                            patterns.iter(),
+                        );
+                        Variant::tuple_from_iter([filter.name.as_ref().to_variant(), pattern_array])
+                    })
+                    .collect::<Vec<_>>();
+                let filters = Variant::array_from_iter_with_type(
+                    glib::VariantTy::new("(sa(us))")
+                        .expect("portal file chooser filter type should be valid"),
+                    filter_items.iter(),
+                );
+                options.insert_value("filters", &filters);
+            }
+            let call = connection.call_sync(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                FREEDESKTOP_PORTAL_PATH,
+                FREEDESKTOP_PORTAL_FILE_CHOOSER_INTERFACE,
+                "OpenFile",
+                Some(&Variant::tuple_from_iter([
+                    "".to_variant(),
+                    plan.title.as_ref().to_variant(),
+                    options.end(),
+                ])),
+                None::<&glib::VariantTy>,
+                gio::DBusCallFlags::NONE,
+                5_000,
+                None::<&gio::Cancellable>,
+            );
+            let reply = match call {
+                Ok(reply) => reply,
+                Err(error) => {
+                    let _ = portal_publish_error(
+                        &port,
+                        plan.output
+                            .error_value(PortalErrorKind::Unavailable, &error.to_string()),
+                    );
+                    #[allow(deprecated)]
+                    connection.signal_unsubscribe(subscription_id);
+                    return;
+                }
+            };
+            if let Some(actual_handle) = reply.child_value(0).get::<String>()
+                && actual_handle != expected_handle
+            {
+                #[allow(deprecated)]
+                connection.signal_unsubscribe(subscription_id);
+                let output = plan.output.clone();
+                let publish_port = port.clone();
+                let loop_quit = main_loop.clone();
+                #[allow(deprecated)]
+                {
+                    subscription_id = connection.signal_subscribe(
+                        Some(FREEDESKTOP_PORTAL_DESTINATION),
+                        Some("org.freedesktop.portal.Request"),
+                        Some("Response"),
+                        Some(actual_handle.as_str()),
+                        None,
+                        DBusSignalFlags::NONE,
+                        move |_, _, _, _, _, parameters| {
+                            let value = match parameters.child_value(0).get::<u32>() {
+                                Some(0) => {
+                                    let results = parameters.child_value(1);
+                                    match portal_result_strings(&results, "uris") {
+                                        Ok(uris) => output.selection_value(&uris),
+                                        Err(detail) => Err(SourceDecodeErrorWithPath::new(
+                                            SourceDecodeError::InvalidJson { detail },
+                                        )),
+                                    }
+                                }
+                                Some(1) => output.cancelled_value(),
+                                Some(_) => {
+                                    portal_publish_error(
+                                        &publish_port,
+                                        output.error_value(
+                                            PortalErrorKind::PermissionDenied,
+                                            "desktop rejected file chooser request",
+                                        ),
+                                    );
+                                    loop_quit.quit();
+                                    return;
+                                }
+                                None => Err(SourceDecodeErrorWithPath::new(
+                                    SourceDecodeError::InvalidJson {
+                                        detail: "portal.openFile response missing status".into(),
+                                    },
+                                )),
+                            };
+                            match value {
+                                Ok(value) => {
+                                    let _ = publish_port
+                                        .publish(DetachedRuntimeValue::from_runtime_owned(value));
+                                }
+                                Err(error) => {
+                                    portal_publish_error(
+                                        &publish_port,
+                                        output.error_value(
+                                            PortalErrorKind::Decode,
+                                            &error.to_string(),
+                                        ),
+                                    );
+                                }
+                            }
+                            loop_quit.quit();
+                        },
+                    );
+                }
+            }
+            main_loop.run();
+            #[allow(deprecated)]
+            connection.signal_unsubscribe(subscription_id);
+        });
+    })
+}
+
+fn spawn_portal_open_uri_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: PortalOpenUriPlan,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let _ = context.with_thread_default(|| {
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
+            let Ok(connection) = open_dbus_connection(DbusBus::Session, None) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal session bus is unavailable",
+                    ),
+                );
+                return;
+            };
+            let Ok((handle_token, expected_handle)) = portal_request_identity(&connection) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal request handle could not be prepared",
+                    ),
+                );
+                return;
+            };
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            let loop_quit = main_loop.clone();
+            let uri_for_signal = plan.uri.clone();
+            #[allow(deprecated)]
+            let mut subscription_id = connection.signal_subscribe(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                Some("org.freedesktop.portal.Request"),
+                Some("Response"),
+                Some(expected_handle.as_str()),
+                None,
+                DBusSignalFlags::NONE,
+                move |_, _, _, _, _, parameters| {
+                    let value = match parameters.child_value(0).get::<u32>() {
+                        Some(0) => output.opened_value(uri_for_signal.as_ref()),
+                        Some(1) => output.cancelled_value(),
+                        Some(_) => output.failed_value("desktop rejected URI open request"),
+                        None => Err(SourceDecodeErrorWithPath::new(SourceDecodeError::InvalidJson {
+                            detail: "portal.openUri response missing status".into(),
+                        })),
+                    };
+                    match value {
+                        Ok(value) => {
+                            let _ =
+                                publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                        Err(error) => {
+                            portal_publish_error(
+                                &publish_port,
+                                output.error_value(PortalErrorKind::Decode, &error.to_string()),
+                            );
+                        }
+                    }
+                    loop_quit.quit();
+                },
+            );
+            let options = glib::VariantDict::new(None);
+            options.insert("handle_token", handle_token.as_str());
+            options.insert("ask", plan.ask);
+            options.insert("writable", plan.writable);
+            if let Some(token) = plan.activation_token.as_deref() {
+                options.insert("activation_token", token);
+            }
+            let call = connection.call_sync(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                FREEDESKTOP_PORTAL_PATH,
+                FREEDESKTOP_PORTAL_OPEN_URI_INTERFACE,
+                "OpenURI",
+                Some(&Variant::tuple_from_iter([
+                    "".to_variant(),
+                    plan.uri.as_ref().to_variant(),
+                    options.end(),
+                ])),
+                None::<&glib::VariantTy>,
+                gio::DBusCallFlags::NONE,
+                5_000,
+                None::<&gio::Cancellable>,
+            );
+            let reply = match call {
+                Ok(reply) => reply,
+                Err(error) => {
+                    let _ = portal_publish_error(
+                        &port,
+                        plan.output
+                            .error_value(PortalErrorKind::Unavailable, &error.to_string()),
+                    );
+                    #[allow(deprecated)]
+                    connection.signal_unsubscribe(subscription_id);
+                    return;
+                }
+            };
+            if let Some(actual_handle) = reply.child_value(0).get::<String>()
+                && actual_handle != expected_handle
+            {
+                #[allow(deprecated)]
+                connection.signal_unsubscribe(subscription_id);
+                let output = plan.output.clone();
+                let publish_port = port.clone();
+                let loop_quit = main_loop.clone();
+                let uri = plan.uri.clone();
+                #[allow(deprecated)]
+                {
+                    subscription_id = connection.signal_subscribe(
+                        Some(FREEDESKTOP_PORTAL_DESTINATION),
+                        Some("org.freedesktop.portal.Request"),
+                        Some("Response"),
+                        Some(actual_handle.as_str()),
+                        None,
+                        DBusSignalFlags::NONE,
+                        move |_, _, _, _, _, parameters| {
+                            let value = match parameters.child_value(0).get::<u32>() {
+                                Some(0) => output.opened_value(uri.as_ref()),
+                                Some(1) => output.cancelled_value(),
+                                Some(_) => output.failed_value("desktop rejected URI open request"),
+                                None => Err(SourceDecodeErrorWithPath::new(
+                                    SourceDecodeError::InvalidJson {
+                                        detail: "portal.openUri response missing status".into(),
+                                    },
+                                )),
+                            };
+                            match value {
+                                Ok(value) => {
+                                    let _ = publish_port
+                                        .publish(DetachedRuntimeValue::from_runtime_owned(value));
+                                }
+                                Err(error) => {
+                                    portal_publish_error(
+                                        &publish_port,
+                                        output.error_value(
+                                            PortalErrorKind::Decode,
+                                            &error.to_string(),
+                                        ),
+                                    );
+                                }
+                            }
+                            loop_quit.quit();
+                        },
+                    );
+                }
+            }
+            main_loop.run();
+            #[allow(deprecated)]
+            connection.signal_unsubscribe(subscription_id);
+        });
+    })
+}
+
+fn spawn_portal_screenshot_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: PortalScreenshotPlan,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let _ = context.with_thread_default(|| {
+            install_dbus_stop_timer(&context, &main_loop, &stop, &port);
+            let Ok(connection) = open_dbus_connection(DbusBus::Session, None) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal session bus is unavailable",
+                    ),
+                );
+                return;
+            };
+            let Ok((handle_token, expected_handle)) = portal_request_identity(&connection) else {
+                let _ = portal_publish_error(
+                    &port,
+                    plan.output.error_value(
+                        PortalErrorKind::Unavailable,
+                        "desktop portal request handle could not be prepared",
+                    ),
+                );
+                return;
+            };
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            let loop_quit = main_loop.clone();
+            #[allow(deprecated)]
+            let mut subscription_id = connection.signal_subscribe(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                Some("org.freedesktop.portal.Request"),
+                Some("Response"),
+                Some(expected_handle.as_str()),
+                None,
+                DBusSignalFlags::NONE,
+                move |_, _, _, _, _, parameters| {
+                    let value = match parameters.child_value(0).get::<u32>() {
+                        Some(0) => {
+                            let results = parameters.child_value(1);
+                            match portal_result_text(&results, "uri")
+                                .and_then(|uri| portal_screenshot_bytes(&uri))
+                            {
+                                Ok(bytes) => output.bytes_value(bytes),
+                                Err(detail) => Err(SourceDecodeErrorWithPath::new(
+                                    SourceDecodeError::InvalidJson { detail },
+                                )),
+                            }
+                        }
+                        Some(1) => output.cancelled_value(),
+                        Some(_) => {
+                            portal_publish_error(
+                                &publish_port,
+                                output.error_value(
+                                    PortalErrorKind::PermissionDenied,
+                                    "desktop rejected screenshot request",
+                                ),
+                            );
+                            loop_quit.quit();
+                            return;
+                        }
+                        None => Err(SourceDecodeErrorWithPath::new(SourceDecodeError::InvalidJson {
+                            detail: "portal.screenshot response missing status".into(),
+                        })),
+                    };
+                    match value {
+                        Ok(value) => {
+                            let _ =
+                                publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                        Err(error) => {
+                            portal_publish_error(
+                                &publish_port,
+                                output.error_value(PortalErrorKind::Decode, &error.to_string()),
+                            );
+                        }
+                    }
+                    loop_quit.quit();
+                },
+            );
+            let options = glib::VariantDict::new(None);
+            options.insert("handle_token", handle_token.as_str());
+            options.insert("interactive", plan.interactive);
+            options.insert("modal", plan.modal);
+            let call = connection.call_sync(
+                Some(FREEDESKTOP_PORTAL_DESTINATION),
+                FREEDESKTOP_PORTAL_PATH,
+                FREEDESKTOP_PORTAL_SCREENSHOT_INTERFACE,
+                "Screenshot",
+                Some(&Variant::tuple_from_iter(["".to_variant(), options.end()])),
+                None::<&glib::VariantTy>,
+                gio::DBusCallFlags::NONE,
+                5_000,
+                None::<&gio::Cancellable>,
+            );
+            let reply = match call {
+                Ok(reply) => reply,
+                Err(error) => {
+                    let _ = portal_publish_error(
+                        &port,
+                        plan.output
+                            .error_value(PortalErrorKind::Unavailable, &error.to_string()),
+                    );
+                    #[allow(deprecated)]
+                    connection.signal_unsubscribe(subscription_id);
+                    return;
+                }
+            };
+            if let Some(actual_handle) = reply.child_value(0).get::<String>()
+                && actual_handle != expected_handle
+            {
+                #[allow(deprecated)]
+                connection.signal_unsubscribe(subscription_id);
+                let output = plan.output.clone();
+                let publish_port = port.clone();
+                let loop_quit = main_loop.clone();
+                #[allow(deprecated)]
+                {
+                    subscription_id = connection.signal_subscribe(
+                        Some(FREEDESKTOP_PORTAL_DESTINATION),
+                        Some("org.freedesktop.portal.Request"),
+                        Some("Response"),
+                        Some(actual_handle.as_str()),
+                        None,
+                        DBusSignalFlags::NONE,
+                        move |_, _, _, _, _, parameters| {
+                            let value = match parameters.child_value(0).get::<u32>() {
+                                Some(0) => {
+                                    let results = parameters.child_value(1);
+                                    match portal_result_text(&results, "uri")
+                                        .and_then(|uri| portal_screenshot_bytes(&uri))
+                                    {
+                                        Ok(bytes) => output.bytes_value(bytes),
+                                        Err(detail) => Err(SourceDecodeErrorWithPath::new(
+                                            SourceDecodeError::InvalidJson { detail },
+                                        )),
+                                    }
+                                }
+                                Some(1) => output.cancelled_value(),
+                                Some(_) => {
+                                    portal_publish_error(
+                                        &publish_port,
+                                        output.error_value(
+                                            PortalErrorKind::PermissionDenied,
+                                            "desktop rejected screenshot request",
+                                        ),
+                                    );
+                                    loop_quit.quit();
+                                    return;
+                                }
+                                None => Err(SourceDecodeErrorWithPath::new(
+                                    SourceDecodeError::InvalidJson {
+                                        detail: "portal.screenshot response missing status".into(),
+                                    },
+                                )),
+                            };
+                            match value {
+                                Ok(value) => {
+                                    let _ = publish_port
+                                        .publish(DetachedRuntimeValue::from_runtime_owned(value));
+                                }
+                                Err(error) => {
+                                    portal_publish_error(
+                                        &publish_port,
+                                        output.error_value(
+                                            PortalErrorKind::Decode,
+                                            &error.to_string(),
+                                        ),
+                                    );
+                                }
+                            }
+                            loop_quit.quit();
+                        },
+                    );
+                }
+            }
+            main_loop.run();
+            #[allow(deprecated)]
+            connection.signal_unsubscribe(subscription_id);
+        });
+    })
 }
 
 fn spawn_dbus_method_worker(
@@ -1701,6 +2327,16 @@ fn strip_signal(value: &RuntimeValue) -> &RuntimeValue {
 
 fn strip_detached_signal(value: &DetachedRuntimeValue) -> &RuntimeValue {
     strip_signal(value.as_runtime())
+}
+
+fn runtime_record_field<'a>(
+    fields: &'a [aivi_backend::RuntimeRecordField],
+    name: &str,
+) -> Option<&'a RuntimeValue> {
+    fields
+        .iter()
+        .find(|field| field.label.as_ref() == name)
+        .map(|field| strip_signal(&field.value))
 }
 
 fn parse_bool(

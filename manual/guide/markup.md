@@ -695,6 +695,49 @@ value view =
 **Events:** `onActivated` (Unit)  
 **Children:** `child` (single)
 
+#### `ListView`
+
+A factory-backed GTK list for large item sequences. It accepts ordinary child widgets, but mounts them through GTK list items so scrolling stays efficient. Wrap it in a `ScrolledWindow` when the content should scroll.
+
+```aivi
+value view =
+    <Window title="App">
+        <ScrolledWindow vexpand={True}>
+            <ListView showSeparators={True} singleClickActivate={True} onActivate={index}>
+                <Label text="Thread A" />
+                <Label text="Thread B" />
+                <Label text="Thread C" />
+            </ListView>
+        </ScrolledWindow>
+    </Window>
+```
+
+**Properties:** `showSeparators`, `enableRubberband`, `singleClickActivate` (Bool)  
+**Events:** `onActivate` (Int — zero-based item index)  
+**Children:** `children` (sequence — default)
+
+#### `GridView`
+
+A factory-backed GTK grid for large tile collections. Like `ListView`, it accepts ordinary child widgets and virtualizes scrolling/layout through GTK’s grid item machinery.
+
+```aivi
+value view =
+    <Window title="App">
+        <ScrolledWindow vexpand={True}>
+            <GridView minColumns={2} maxColumns={4} singleClickActivate={True} onActivate={index}>
+                <Button label="Card 1" />
+                <Button label="Card 2" />
+                <Button label="Card 3" />
+                <Button label="Card 4" />
+            </GridView>
+        </ScrolledWindow>
+    </Window>
+```
+
+**Properties:** `enableRubberband`, `singleClickActivate` (Bool), `minColumns`, `maxColumns` (Int)  
+**Events:** `onActivate` (Int — zero-based item index)  
+**Children:** `children` (sequence — default)
+
 #### `DropDown`
 
 A dropdown selector from a comma-separated list of strings.
@@ -954,6 +997,19 @@ value view =
 - `contentFit` (Text) — one of `contain` (default), `fill`, `cover`, `scale-down`
 - `altText` (Text) — accessibility description
 - `canShrink` (Bool) — allow the picture to shrink below its natural size (default `True`)
+
+#### `WebView`
+
+Strict embedded HTML viewer backed by WebKitGTK. Load HTML through `html`. Safe defaults stay on: JavaScript disabled, session/storage ephemeral, permission requests denied, and navigation/new windows blocked. When links should open externally, use `portal.openUri` from app state instead of relying on in-widget browsing.
+
+```aivi
+value view =
+    <Window title="App">
+        <WebView html={"<article><h1>Hello</h1><p>Rendered by WebKit.</p></article>"} hexpand={True} vexpand={True} />
+    </Window>
+```
+
+**Properties:** `html` (Text)
 
 ### ViewStack + ViewSwitcher
 

@@ -783,6 +783,51 @@ impl SourceProviderManager {
                     stop,
                 }
             }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PortalOpenFile) => {
+                let plan = PortalOpenFilePlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_portal_open_file_worker(port, plan, stop.clone());
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PortalOpenUri) => {
+                let plan = PortalOpenUriPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_portal_open_uri_worker(port, plan, stop.clone());
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PortalScreenshot) => {
+                let plan = PortalScreenshotPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_portal_screenshot_worker(port, plan, stop.clone());
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusEmit) => {
                 let plan = DbusEmitPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));

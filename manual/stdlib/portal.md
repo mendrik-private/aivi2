@@ -6,12 +6,10 @@ Portals are the standard Linux desktop way to ask the system for privileged acti
 opening a file chooser, opening a URI, or taking a screenshot. They are especially useful
 for sandboxed apps.
 
-This module currently exports the result and error types used by portal-backed features. The
-stdlib comments also document the source names for several portal operations.
+This module exports the result and error types used by the built-in desktop portal sources.
 
-Current status: this is shared vocabulary around a host-service boundary. The target architecture is
-to keep portal interactions under provider capabilities rather than introducing a separate
-task-first portal API family.
+Portal work stays under provider-backed `@source` variants rather than a separate task-first
+portal handle family.
 
 ## Import
 
@@ -36,9 +34,9 @@ use aivi.portal (
 | `PortalUriResult` | type | Result of asking the desktop to open a URI |
 | `PortalScreenshotResult` | type | Result of requesting a screenshot |
 | `PortalTask A` | `Task PortalError A` | Generic portal task alias |
-| `portal.openFile` | `Signal (Result PortalError PortalFileSelection)` | Documented file chooser source shape |
-| `portal.openUri` | `Signal (Result PortalError PortalUriResult)` | Documented URI-opening source shape |
-| `portal.screenshot` | `Signal (Result PortalError PortalScreenshotResult)` | Documented screenshot source shape |
+| `portal.openFile` | `Signal (Result PortalError PortalFileSelection)` | Built-in file chooser source |
+| `portal.openUri` | `Signal (Result PortalError PortalUriResult)` | Built-in URI-opening source |
+| `portal.screenshot` | `Signal (Result PortalError PortalScreenshotResult)` | Built-in screenshot source |
 
 ## Types
 
@@ -148,20 +146,76 @@ type PortalTask A = (Task PortalError A)
 
 Generic alias for portal-related tasks.
 
-## Documented source shapes
+## Built-in source shapes
 
-The stdlib module comments document the following source-backed patterns:
+These source variants are implemented today:
 
 ```aivi
-@source portal.openFile { filters: [{ name: "AIVI Files", patterns: ["*.aivi"] }] }
+@source portal.openFile {
+    title: "Open attachment"
+    multiple: true
+    filters: [{ name: "AIVI Files", patterns: ["*.aivi"] }]
+}
 signal openedFile : Signal (Result PortalError PortalFileSelection)
 
-@source portal.openUri "https://example.com"
+@source portal.openUri "https://example.com" with { ask: true }
 signal uriResult : Signal (Result PortalError PortalUriResult)
 
-@source portal.screenshot
+@source portal.screenshot with { interactive: true }
 signal screenshot : Signal (Result PortalError PortalScreenshotResult)
 ```
 
-This module does not currently export direct `openFile`, `openUri`, or `screenshot`
-functions.
+### `portal.openFile`
+
+**Form:** `@source portal.openFile config`
+
+`config` is currently a record with these supported fields:
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `title` | `Text` | Dialog title. Default: `"Open File"` |
+| `acceptLabel` | `Text` | Custom accept button label |
+| `modal` | `Bool` | Modal hint. Default: `True` |
+| `multiple` | `Bool` | Allow multiple selection |
+| `directory` | `Bool` | Pick folders instead of files |
+| `currentFolder` | `Text` | Suggested starting folder path |
+| `filters` | `List PortalFileFilter` | Glob-based chooser filters |
+
+`portal.openFile` returns:
+
+- `Ok (SingleFile uri)` for one selected file
+- `Ok (MultipleFiles uris)` for multi-select
+- `Ok SelectionCancelled` if chooser is cancelled
+- `Err PortalUnavailable | PortalPermissionDenied | PortalDecodeFailed` for runtime/protocol failures
+
+### `portal.openUri`
+
+**Form:** `@source portal.openUri uri`
+
+Supported options:
+
+| Option | Type | Meaning |
+|------|------|---------|
+| `ask` | `Bool` | Ask desktop to prompt for app choice |
+| `writable` | `Bool` | Request writable handoff where supported |
+| `activationToken` | `Text` | Forward activation token to launched app |
+| `refreshOn` | `Signal A` | Standard request retrigger |
+| `activeWhen` | `Signal Bool` | Standard lifecycle gate |
+
+`portal.openUri` returns `Ok (UriOpened uri)`, `Ok UriOpenCancelled`, or `Ok (UriOpenFailed message)`.
+
+### `portal.screenshot`
+
+**Form:** `@source portal.screenshot`
+
+Supported options:
+
+| Option | Type | Meaning |
+|------|------|---------|
+| `interactive` | `Bool` | Ask portal backend for interactive capture UI |
+| `modal` | `Bool` | Modal hint |
+| `refreshOn` | `Signal A` | Standard request retrigger |
+| `activeWhen` | `Signal Bool` | Standard lifecycle gate |
+
+`portal.screenshot` reads the portal-provided file URI and returns `Ok (ScreenshotBytes bytes)` or
+`Ok ScreenshotCancelled`.

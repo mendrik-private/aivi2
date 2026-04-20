@@ -531,6 +531,44 @@ impl ErrorPlan {
             }
         }
     }
+
+    fn portal_payload_for(
+        &self,
+        kind: PortalErrorKind,
+        message: &str,
+    ) -> Result<ExternalSourceValue, Box<str>> {
+        match self {
+            Self::Text => Ok(ExternalSourceValue::Text(message.into())),
+            Self::Sum { variants } => {
+                for spec in kind.candidates() {
+                    let Some(variant) = variants
+                        .iter()
+                        .find(|variant| variant.name.as_ref() == spec.name)
+                    else {
+                        continue;
+                    };
+                    if variant.payload != spec.payload {
+                        continue;
+                    }
+                    return Ok(match spec.payload {
+                        ErrorPayloadKind::None => ExternalSourceValue::variant(spec.name),
+                        ErrorPayloadKind::Text => ExternalSourceValue::variant_with_payload(
+                            spec.name,
+                            ExternalSourceValue::Text(message.into()),
+                        ),
+                        ErrorPayloadKind::Int => ExternalSourceValue::variant_with_payload(
+                            spec.name,
+                            ExternalSourceValue::Int(spec.int_payload.unwrap_or_default()),
+                        ),
+                    });
+                }
+                Err(
+                    format!("the current result error type cannot represent a {:?} portal failure", kind)
+                        .into(),
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -542,6 +580,16 @@ enum TextSourceErrorKind {
     Query,
     Connect,
     Mailbox,
+}
+
+impl PortalErrorKind {
+    fn candidates(self) -> &'static [ErrorCandidate] {
+        match self {
+            Self::Unavailable => &PORTAL_UNAVAILABLE_ERROR_CANDIDATES,
+            Self::PermissionDenied => &PORTAL_PERMISSION_ERROR_CANDIDATES,
+            Self::Decode => &PORTAL_DECODE_ERROR_CANDIDATES,
+        }
+    }
 }
 
 impl TextSourceErrorKind {
@@ -640,6 +688,22 @@ const CONNECT_ERROR_CANDIDATES: [ErrorCandidate; 4] = [
 
 const MAILBOX_ERROR_CANDIDATES: [ErrorCandidate; 2] = [
     ErrorCandidate::text("MailboxFailure"),
+    ErrorCandidate::text("Error"),
+];
+
+const PORTAL_UNAVAILABLE_ERROR_CANDIDATES: [ErrorCandidate; 3] = [
+    ErrorCandidate::none("PortalUnavailable"),
+    ErrorCandidate::text("PortalPermissionDenied"),
+    ErrorCandidate::text("Error"),
+];
+
+const PORTAL_PERMISSION_ERROR_CANDIDATES: [ErrorCandidate; 2] = [
+    ErrorCandidate::text("PortalPermissionDenied"),
+    ErrorCandidate::text("Error"),
+];
+
+const PORTAL_DECODE_ERROR_CANDIDATES: [ErrorCandidate; 2] = [
+    ErrorCandidate::text("PortalDecodeFailed"),
     ErrorCandidate::text("Error"),
 ];
 
@@ -2134,6 +2198,404 @@ impl NotificationEventOutputPlan {
 }
 
 #[derive(Clone)]
+struct PortalFileFilterSpec {
+    name: Box<str>,
+    patterns: Box<[Box<str>]>,
+}
+
+#[derive(Clone)]
+struct PortalOpenFilePlan {
+    title: Box<str>,
+    accept_label: Option<Box<str>>,
+    modal: bool,
+    multiple: bool,
+    directory: bool,
+    current_folder: Option<Box<str>>,
+    filters: Box<[PortalFileFilterSpec]>,
+    output: PortalOpenFileOutputPlan,
+}
+
+impl PortalOpenFilePlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalOpenFile;
+        validate_argument_count(instance, provider, config, 1)?;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "refreshOn" | "activeWhen" => {}
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        let argument = parse_portal_open_file_argument(instance, provider, 0, &config.arguments[0])?;
+        Ok(Self {
+            title: argument.title,
+            accept_label: argument.accept_label,
+            modal: argument.modal,
+            multiple: argument.multiple,
+            directory: argument.directory,
+            current_folder: argument.current_folder,
+            filters: argument.filters,
+            output: PortalOpenFileOutputPlan::parse(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct PortalOpenUriPlan {
+    uri: Box<str>,
+    ask: bool,
+    writable: bool,
+    activation_token: Option<Box<str>>,
+    output: PortalOpenUriOutputPlan,
+}
+
+impl PortalOpenUriPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalOpenUri;
+        validate_argument_count(instance, provider, config, 1)?;
+        let uri = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let mut ask = false;
+        let mut writable = false;
+        let mut activation_token = None;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "ask" => {
+                    ask = parse_bool(instance, provider, &option.option_name, &option.value)?;
+                }
+                "writable" => {
+                    writable = parse_bool(instance, provider, &option.option_name, &option.value)?;
+                }
+                "activationToken" => {
+                    activation_token = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "refreshOn" | "activeWhen" => {}
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            uri,
+            ask,
+            writable,
+            activation_token,
+            output: PortalOpenUriOutputPlan::parse(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct PortalScreenshotPlan {
+    interactive: bool,
+    modal: bool,
+    output: PortalScreenshotOutputPlan,
+}
+
+impl PortalScreenshotPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalScreenshot;
+        validate_argument_count(instance, provider, config, 0)?;
+        let mut interactive = false;
+        let mut modal = true;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "interactive" => {
+                    interactive = parse_bool(instance, provider, &option.option_name, &option.value)?;
+                }
+                "modal" => {
+                    modal = parse_bool(instance, provider, &option.option_name, &option.value)?;
+                }
+                "refreshOn" | "activeWhen" => {}
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            interactive,
+            modal,
+            output: PortalScreenshotOutputPlan::parse(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PortalErrorKind {
+    Unavailable,
+    PermissionDenied,
+    Decode,
+}
+
+#[derive(Clone)]
+struct PortalOpenFileOutputPlan {
+    decode: hir::SourceDecodeProgram,
+    error: ErrorPlan,
+}
+
+impl PortalOpenFileOutputPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalOpenFile;
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        let hir::DecodeProgramStep::Result { error, value } = decode.root_step() else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "portal.openFile requires `Signal (Result PortalError PortalFileSelection)`"
+                    .into(),
+            });
+        };
+        validate_portal_file_selection_step(instance, provider, &decode, *value)?;
+        Ok(Self {
+            error: ErrorPlan::from_step(instance, provider, &decode, *error)?,
+            decode,
+        })
+    }
+
+    fn selection_value(
+        &self,
+        uris: &[String],
+    ) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        let payload = match uris {
+            [] => {
+                return Err(SourceDecodeErrorWithPath::new(SourceDecodeError::InvalidJson {
+                    detail: "portal.openFile succeeded without returning any URIs".into(),
+                }))
+            }
+            [single] => ExternalSourceValue::variant_with_payload(
+                "SingleFile",
+                ExternalSourceValue::Text(single.clone().into_boxed_str()),
+            ),
+            many => ExternalSourceValue::variant_with_payload(
+                "MultipleFiles",
+                ExternalSourceValue::List(
+                    many.iter()
+                        .map(|uri| ExternalSourceValue::Text(uri.clone().into_boxed_str()))
+                        .collect(),
+                ),
+            ),
+        };
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload("Ok", payload),
+        )
+    }
+
+    fn cancelled_value(&self) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant("SelectionCancelled"),
+            ),
+        )
+    }
+
+    fn error_value(&self, kind: PortalErrorKind, message: &str) -> Result<RuntimeValue, Box<str>> {
+        let payload = self.error.portal_payload_for(kind, message)?;
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload("Err", payload),
+        )
+        .map_err(|error| error.to_string().into_boxed_str())
+    }
+}
+
+#[derive(Clone)]
+struct PortalOpenUriOutputPlan {
+    decode: hir::SourceDecodeProgram,
+    error: ErrorPlan,
+}
+
+impl PortalOpenUriOutputPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalOpenUri;
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        let hir::DecodeProgramStep::Result { error, value } = decode.root_step() else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: "portal.openUri requires `Signal (Result PortalError PortalUriResult)`".into(),
+            });
+        };
+        validate_portal_uri_result_step(instance, provider, &decode, *value)?;
+        Ok(Self {
+            error: ErrorPlan::from_step(instance, provider, &decode, *error)?,
+            decode,
+        })
+    }
+
+    fn opened_value(&self, uri: &str) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant_with_payload(
+                    "UriOpened",
+                    ExternalSourceValue::Text(uri.into()),
+                ),
+            ),
+        )
+    }
+
+    fn cancelled_value(&self) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant("UriOpenCancelled"),
+            ),
+        )
+    }
+
+    fn failed_value(&self, message: &str) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant_with_payload(
+                    "UriOpenFailed",
+                    ExternalSourceValue::Text(message.into()),
+                ),
+            ),
+        )
+    }
+
+    fn error_value(&self, kind: PortalErrorKind, message: &str) -> Result<RuntimeValue, Box<str>> {
+        let payload = self.error.portal_payload_for(kind, message)?;
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload("Err", payload),
+        )
+        .map_err(|error| error.to_string().into_boxed_str())
+    }
+}
+
+#[derive(Clone)]
+struct PortalScreenshotOutputPlan {
+    decode: hir::SourceDecodeProgram,
+    error: ErrorPlan,
+}
+
+impl PortalScreenshotOutputPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::PortalScreenshot;
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        let hir::DecodeProgramStep::Result { error, value } = decode.root_step() else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail:
+                    "portal.screenshot requires `Signal (Result PortalError PortalScreenshotResult)`"
+                        .into(),
+            });
+        };
+        validate_portal_screenshot_result_step(instance, provider, &decode, *value)?;
+        Ok(Self {
+            error: ErrorPlan::from_step(instance, provider, &decode, *error)?,
+            decode,
+        })
+    }
+
+    fn bytes_value(&self, bytes: Box<[u8]>) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant_with_payload(
+                    "ScreenshotBytes",
+                    ExternalSourceValue::Bytes(bytes),
+                ),
+            ),
+        )
+    }
+
+    fn cancelled_value(&self) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload(
+                "Ok",
+                ExternalSourceValue::variant("ScreenshotCancelled"),
+            ),
+        )
+    }
+
+    fn error_value(&self, kind: PortalErrorKind, message: &str) -> Result<RuntimeValue, Box<str>> {
+        let payload = self.error.portal_payload_for(kind, message)?;
+        decode_external(
+            &self.decode,
+            &ExternalSourceValue::variant_with_payload("Err", payload),
+        )
+        .map_err(|error| error.to_string().into_boxed_str())
+    }
+}
+
+#[derive(Clone)]
 struct DbusMethodPlan {
     instance: SourceInstanceId,
     bus: DbusBus,
@@ -2573,5 +3035,357 @@ impl DbusMessageOutputPlan {
             },
         );
         Ok(ExternalSourceValue::Record(record))
+    }
+}
+
+#[derive(Clone)]
+struct ParsedPortalOpenFileArgument {
+    title: Box<str>,
+    accept_label: Option<Box<str>>,
+    modal: bool,
+    multiple: bool,
+    directory: bool,
+    current_folder: Option<Box<str>>,
+    filters: Box<[PortalFileFilterSpec]>,
+}
+
+fn parse_portal_open_file_argument(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    index: usize,
+    value: &DetachedRuntimeValue,
+) -> Result<ParsedPortalOpenFileArgument, SourceProviderExecutionError> {
+    let RuntimeValue::Record(fields) = strip_detached_signal(value) else {
+        return Err(SourceProviderExecutionError::InvalidArgument {
+            instance,
+            provider,
+            index,
+            expected: "{ title?: Text, acceptLabel?: Text, modal?: Bool, multiple?: Bool, directory?: Bool, currentFolder?: Text, filters?: List PortalFileFilter }".into(),
+            value: strip_detached_signal(value).clone(),
+        });
+    };
+    for field in fields {
+        match field.label.as_ref() {
+            "title" | "acceptLabel" | "modal" | "multiple" | "directory" | "currentFolder"
+            | "filters" => {}
+            _ => {
+                return Err(SourceProviderExecutionError::InvalidArgument {
+                    instance,
+                    provider,
+                    index,
+                    expected: "portal.openFile only supports fields title, acceptLabel, modal, multiple, directory, currentFolder, and filters".into(),
+                    value: strip_detached_signal(value).clone(),
+                });
+            }
+        }
+    }
+    let title = match runtime_record_field(fields, "title") {
+        Some(RuntimeValue::Text(text)) => text.clone(),
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `title` must be Text".into(),
+                value: other.clone(),
+            });
+        }
+        None => "Open File".into(),
+    };
+    let accept_label = match runtime_record_field(fields, "acceptLabel") {
+        Some(RuntimeValue::Text(text)) => Some(text.clone()),
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `acceptLabel` must be Text".into(),
+                value: other.clone(),
+            });
+        }
+        None => None,
+    };
+    let modal = match runtime_record_field(fields, "modal") {
+        Some(RuntimeValue::Bool(value)) => *value,
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `modal` must be Bool".into(),
+                value: other.clone(),
+            });
+        }
+        None => true,
+    };
+    let multiple = match runtime_record_field(fields, "multiple") {
+        Some(RuntimeValue::Bool(value)) => *value,
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `multiple` must be Bool".into(),
+                value: other.clone(),
+            });
+        }
+        None => false,
+    };
+    let directory = match runtime_record_field(fields, "directory") {
+        Some(RuntimeValue::Bool(value)) => *value,
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `directory` must be Bool".into(),
+                value: other.clone(),
+            });
+        }
+        None => false,
+    };
+    let current_folder = match runtime_record_field(fields, "currentFolder") {
+        Some(RuntimeValue::Text(text)) => Some(text.clone()),
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `currentFolder` must be Text".into(),
+                value: other.clone(),
+            });
+        }
+        None => None,
+    };
+    let filters = match runtime_record_field(fields, "filters") {
+        Some(RuntimeValue::List(filters)) => filters
+            .iter()
+            .map(|filter| parse_portal_file_filter(instance, provider, index, filter))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_boxed_slice(),
+        Some(other) => {
+            return Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "portal.openFile field `filters` must be List PortalFileFilter".into(),
+                value: other.clone(),
+            });
+        }
+        None => Vec::new().into_boxed_slice(),
+    };
+    Ok(ParsedPortalOpenFileArgument {
+        title,
+        accept_label,
+        modal,
+        multiple,
+        directory,
+        current_folder,
+        filters,
+    })
+}
+
+fn parse_portal_file_filter(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    index: usize,
+    value: &RuntimeValue,
+) -> Result<PortalFileFilterSpec, SourceProviderExecutionError> {
+    let RuntimeValue::Record(fields) = strip_signal(value) else {
+        return Err(SourceProviderExecutionError::InvalidArgument {
+            instance,
+            provider,
+            index,
+            expected: "PortalFileFilter records must have `name: Text` and `patterns: List Text`".into(),
+            value: strip_signal(value).clone(),
+        });
+    };
+    let Some(RuntimeValue::Text(name)) = runtime_record_field(fields, "name") else {
+        return Err(SourceProviderExecutionError::InvalidArgument {
+            instance,
+            provider,
+            index,
+            expected: "PortalFileFilter field `name` must be Text".into(),
+            value: strip_signal(value).clone(),
+        });
+    };
+    let Some(RuntimeValue::List(patterns)) = runtime_record_field(fields, "patterns") else {
+        return Err(SourceProviderExecutionError::InvalidArgument {
+            instance,
+            provider,
+            index,
+            expected: "PortalFileFilter field `patterns` must be List Text".into(),
+            value: strip_signal(value).clone(),
+        });
+    };
+    let patterns = patterns
+        .iter()
+        .map(|pattern| match strip_signal(pattern) {
+            RuntimeValue::Text(text) => Ok(text.clone()),
+            other => Err(SourceProviderExecutionError::InvalidArgument {
+                instance,
+                provider,
+                index,
+                expected: "PortalFileFilter field `patterns` must be List Text".into(),
+                value: other.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_boxed_slice();
+    Ok(PortalFileFilterSpec {
+        name: name.clone(),
+        patterns,
+    })
+}
+
+fn validate_portal_file_selection_step(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    decode: &hir::SourceDecodeProgram,
+    step: hir::DecodeProgramStepId,
+) -> Result<(), SourceProviderExecutionError> {
+    let hir::DecodeProgramStep::Sum { variants, .. } = decode.step(step) else {
+        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.openFile success payload must decode as PortalFileSelection".into(),
+        });
+    };
+    let mut saw_single = false;
+    let mut saw_multiple = false;
+    let mut saw_cancelled = false;
+    for variant in variants {
+        match (variant.name.as_str(), variant.payload) {
+            ("SingleFile", Some(payload))
+                if matches!(
+                    decode.step(payload),
+                    hir::DecodeProgramStep::Scalar {
+                        scalar: aivi_typing::PrimitiveType::Text,
+                    }
+                ) =>
+            {
+                saw_single = true;
+            }
+            ("MultipleFiles", Some(payload))
+                if matches!(
+                    decode.step(payload),
+                    hir::DecodeProgramStep::List { element }
+                        if matches!(
+                            decode.step(*element),
+                            hir::DecodeProgramStep::Scalar {
+                                scalar: aivi_typing::PrimitiveType::Text,
+                            }
+                        )
+                ) =>
+            {
+                saw_multiple = true;
+            }
+            ("SelectionCancelled", None) => {
+                saw_cancelled = true;
+            }
+            _ => {}
+        }
+    }
+    if saw_single && saw_multiple && saw_cancelled {
+        Ok(())
+    } else {
+        Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.openFile success payload must support `SingleFile Text`, `MultipleFiles (List Text)`, and `SelectionCancelled`".into(),
+        })
+    }
+}
+
+fn validate_portal_uri_result_step(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    decode: &hir::SourceDecodeProgram,
+    step: hir::DecodeProgramStepId,
+) -> Result<(), SourceProviderExecutionError> {
+    let hir::DecodeProgramStep::Sum { variants, .. } = decode.step(step) else {
+        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.openUri success payload must decode as PortalUriResult".into(),
+        });
+    };
+    let mut saw_opened = false;
+    let mut saw_cancelled = false;
+    let mut saw_failed = false;
+    for variant in variants {
+        match (variant.name.as_str(), variant.payload) {
+            ("UriOpened", Some(payload)) | ("UriOpenFailed", Some(payload))
+                if matches!(
+                    decode.step(payload),
+                    hir::DecodeProgramStep::Scalar {
+                        scalar: aivi_typing::PrimitiveType::Text,
+                    }
+                ) =>
+            {
+                if variant.name.as_str() == "UriOpened" {
+                    saw_opened = true;
+                } else {
+                    saw_failed = true;
+                }
+            }
+            ("UriOpenCancelled", None) => {
+                saw_cancelled = true;
+            }
+            _ => {}
+        }
+    }
+    if saw_opened && saw_cancelled && saw_failed {
+        Ok(())
+    } else {
+        Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.openUri success payload must support `UriOpened Text`, `UriOpenCancelled`, and `UriOpenFailed Text`".into(),
+        })
+    }
+}
+
+fn validate_portal_screenshot_result_step(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    decode: &hir::SourceDecodeProgram,
+    step: hir::DecodeProgramStepId,
+) -> Result<(), SourceProviderExecutionError> {
+    let hir::DecodeProgramStep::Sum { variants, .. } = decode.step(step) else {
+        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.screenshot success payload must decode as PortalScreenshotResult".into(),
+        });
+    };
+    let mut saw_bytes = false;
+    let mut saw_cancelled = false;
+    for variant in variants {
+        match (variant.name.as_str(), variant.payload) {
+            ("ScreenshotBytes", Some(payload))
+                if matches!(
+                    decode.step(payload),
+                    hir::DecodeProgramStep::Scalar {
+                        scalar: aivi_typing::PrimitiveType::Bytes,
+                    }
+                ) =>
+            {
+                saw_bytes = true;
+            }
+            ("ScreenshotCancelled", None) => {
+                saw_cancelled = true;
+            }
+            _ => {}
+        }
+    }
+    if saw_bytes && saw_cancelled {
+        Ok(())
+    } else {
+        Err(SourceProviderExecutionError::UnsupportedProviderShape {
+            instance,
+            provider,
+            detail: "portal.screenshot success payload must support `ScreenshotBytes Bytes` and `ScreenshotCancelled`".into(),
+        })
     }
 }

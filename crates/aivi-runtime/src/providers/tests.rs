@@ -1745,3 +1745,42 @@ signal tick : Signal Unit
         );
     }
 }
+
+#[test]
+fn portal_result_helpers_decode_request_dicts() {
+    let uris = Variant::array_from_iter_with_type(
+        glib::VariantTy::STRING,
+        ["file:///tmp/one", "file:///tmp/two"]
+            .iter()
+            .map(|uri| uri.to_variant()),
+    );
+    let dict = glib::VariantDict::new(None);
+    dict.insert_value("uris", &uris);
+    dict.insert("uri", "file:///tmp/screenshot.png");
+    let results = dict.end();
+
+    assert_eq!(
+        portal_result_strings(&results, "uris").expect("uris should decode"),
+        vec!["file:///tmp/one".to_owned(), "file:///tmp/two".to_owned(),]
+    );
+    assert_eq!(
+        portal_result_text(&results, "uri").expect("uri should decode"),
+        "file:///tmp/screenshot.png"
+    );
+}
+
+#[test]
+fn portal_screenshot_bytes_reads_local_file_uris() {
+    let path = temp_path("portal-screenshot");
+    fs::write(&path, b"portal-bytes").expect("test screenshot file should write");
+    let uri = url::Url::from_file_path(&path)
+        .expect("temp path should map to file URI")
+        .to_string();
+    assert_eq!(
+        portal_screenshot_bytes(&uri)
+            .expect("portal screenshot helper should read bytes")
+            .as_ref(),
+        b"portal-bytes".as_slice()
+    );
+    let _ = fs::remove_file(path);
+}

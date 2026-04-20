@@ -66,6 +66,8 @@ pub enum GtkConcreteWidgetKind {
     // Group B: List and selection
     ListBox,
     ListBoxRow,
+    ListView,
+    GridView,
     DropDown,
     // Group C: Utility
     SearchEntry,
@@ -86,6 +88,7 @@ pub enum GtkConcreteWidgetKind {
     MultilineEntry,
     // Group H: Picture
     Picture,
+    WebView,
     // Group I: ViewStack navigation
     ViewStack,
     ViewStackPage,
@@ -148,6 +151,8 @@ impl GtkConcreteWidgetKind {
             Self::EntryRow => "EntryRow",
             Self::ListBox => "ListBox",
             Self::ListBoxRow => "ListBoxRow",
+            Self::ListView => "ListView",
+            Self::GridView => "GridView",
             Self::DropDown => "DropDown",
             Self::SearchEntry => "SearchEntry",
             Self::Expander => "Expander",
@@ -162,6 +167,7 @@ impl GtkConcreteWidgetKind {
             Self::Overlay => "Overlay",
             Self::MultilineEntry => "MultilineEntry",
             Self::Picture => "Picture",
+            Self::WebView => "WebView",
             Self::ViewStack => "ViewStack",
             Self::ViewStackPage => "ViewStackPage",
             Self::AlertDialog => "AlertDialog",
@@ -303,6 +309,11 @@ pub enum GtkBoolPropertySetter {
     GridRowHomogeneous,
     GridColumnHomogeneous,
     ListBoxShowSeparators,
+    ListViewShowSeparators,
+    ListViewEnableRubberband,
+    ListViewSingleClickActivate,
+    GridViewEnableRubberband,
+    GridViewSingleClickActivate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -375,6 +386,7 @@ pub enum GtkTextPropertySetter {
     PictureResource,
     PictureContentFit,
     PictureAltText,
+    WebViewHtml,
     // Group I: ViewStack navigation
     ViewStackVisibleChild,
     ViewStackPageName,
@@ -468,6 +480,8 @@ pub enum GtkI64PropertySetter {
     GridChildRow,
     GridChildColumnSpan,
     GridChildRowSpan,
+    GridViewMinColumns,
+    GridViewMaxColumns,
     CarouselSpacing,
     CarouselRevealDuration,
     TabViewSelectedPage,
@@ -605,6 +619,8 @@ pub enum GtkEventSignal {
     // Group B: List and selection
     ListBoxActivated,
     ListBoxRowActivated,
+    ListViewActivated,
+    GridViewActivated,
     DropDownSelectionChanged,
     // Group C: Utility
     SearchEntryChanged,
@@ -723,6 +739,8 @@ pub enum GtkChildMountRoute {
     // FlowBox
     FlowBoxChildren,
     FlowBoxChildContent,
+    ListViewChildren,
+    GridViewChildren,
     // MenuButton
     MenuButtonPopover,
     // Popover
@@ -2367,6 +2385,12 @@ const PICTURE_CAN_SHRINK_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::PictureCanShrink),
 };
 
+const WEB_VIEW_HTML_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "html",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::WebViewHtml),
+};
+
 const PICTURE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Picture",
     kind: GtkConcreteWidgetKind::Picture,
@@ -3086,6 +3110,141 @@ const LIST_BOX_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[LIST_BOX_ROW_CHILD_GROUP],
 };
 
+// ── ListView ──────────────────────────────────────────────────────────────────
+
+const LIST_VIEW_SHOW_SEPARATORS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showSeparators",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewShowSeparators),
+};
+
+const LIST_VIEW_ENABLE_RUBBERBAND_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "enableRubberband",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewEnableRubberband),
+};
+
+const LIST_VIEW_SINGLE_CLICK_ACTIVATE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "singleClickActivate",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewSingleClickActivate),
+};
+
+const LIST_VIEW_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivate",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::ListViewActivated,
+};
+
+const LIST_VIEW_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "children",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ListViewChildren,
+    min_children: 0,
+    max_children: None,
+};
+
+const LIST_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ListView",
+    kind: GtkConcreteWidgetKind::ListView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        LIST_VIEW_SHOW_SEPARATORS_PROPERTY,
+        LIST_VIEW_ENABLE_RUBBERBAND_PROPERTY,
+        LIST_VIEW_SINGLE_CLICK_ACTIVATE_PROPERTY,
+    ],
+    events: &[LIST_VIEW_ACTIVATED_EVENT],
+    default_child_group_override: Some(&LIST_VIEW_CHILDREN_CHILD_GROUP),
+    child_groups: &[LIST_VIEW_CHILDREN_CHILD_GROUP],
+};
+
+// ── GridView ──────────────────────────────────────────────────────────────────
+
+const GRID_VIEW_ENABLE_RUBBERBAND_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "enableRubberband",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GridViewEnableRubberband),
+};
+
+const GRID_VIEW_SINGLE_CLICK_ACTIVATE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "singleClickActivate",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GridViewSingleClickActivate),
+};
+
+const GRID_VIEW_MIN_COLUMNS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "minColumns",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridViewMinColumns),
+};
+
+const GRID_VIEW_MAX_COLUMNS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxColumns",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GridViewMaxColumns),
+};
+
+const GRID_VIEW_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivate",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::GridViewActivated,
+};
+
+const GRID_VIEW_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "children",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::GridViewChildren,
+    min_children: 0,
+    max_children: None,
+};
+
+const GRID_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GridView",
+    kind: GtkConcreteWidgetKind::GridView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        GRID_VIEW_ENABLE_RUBBERBAND_PROPERTY,
+        GRID_VIEW_SINGLE_CLICK_ACTIVATE_PROPERTY,
+        GRID_VIEW_MIN_COLUMNS_PROPERTY,
+        GRID_VIEW_MAX_COLUMNS_PROPERTY,
+    ],
+    events: &[GRID_VIEW_ACTIVATED_EVENT],
+    default_child_group_override: Some(&GRID_VIEW_CHILDREN_CHILD_GROUP),
+    child_groups: &[GRID_VIEW_CHILDREN_CHILD_GROUP],
+};
+
 // ── DropDown ──────────────────────────────────────────────────────────────────
 
 const DROP_DOWN_ITEMS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -3795,6 +3954,34 @@ const MULTILINE_ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         FOCUS_IN_EVENT,
         FOCUS_OUT_EVENT,
     ],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const WEB_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "WebView",
+    kind: GtkConcreteWidgetKind::WebView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        WEB_VIEW_HTML_PROPERTY,
+    ],
+    events: &[],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -5139,6 +5326,8 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     ENTRY_ROW_SCHEMA,
     LIST_BOX_SCHEMA,
     LIST_BOX_ROW_SCHEMA,
+    LIST_VIEW_SCHEMA,
+    GRID_VIEW_SCHEMA,
     DROP_DOWN_SCHEMA,
     SEARCH_ENTRY_SCHEMA,
     EXPANDER_SCHEMA,
@@ -5153,6 +5342,7 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     OVERLAY_SCHEMA,
     MULTILINE_ENTRY_SCHEMA,
     PICTURE_SCHEMA,
+    WEB_VIEW_SCHEMA,
     VIEW_STACK_SCHEMA,
     VIEW_STACK_PAGE_SCHEMA,
     ALERT_DIALOG_SCHEMA,
@@ -5287,6 +5477,8 @@ mod tests {
                 "EntryRow",
                 "ListBox",
                 "ListBoxRow",
+                "ListView",
+                "GridView",
                 "DropDown",
                 "SearchEntry",
                 "Expander",
@@ -5301,6 +5493,7 @@ mod tests {
                 "Overlay",
                 "MultilineEntry",
                 "Picture",
+                "WebView",
                 "ViewStack",
                 "ViewStackPage",
                 "AlertDialog",
@@ -5342,6 +5535,8 @@ mod tests {
         let switch = path(&["Switch"]);
         let header_bar = path(&["HeaderBar"]);
         let separator = path(&["Separator"]);
+        let list_view = path(&["ListView"]);
+        let grid_view = path(&["GridView"]);
         let property = lookup_widget_property(&button, "label")
             .expect("Button.label should be part of the catalog");
         assert_eq!(property.value_shape, GtkPropertyValueShape::Text);
@@ -5355,6 +5550,11 @@ mod tests {
         assert!(lookup_widget_property(&button, "opacity").is_some());
         assert!(lookup_widget_property(&label, "label").is_some());
         assert!(lookup_widget_property(&label, "monospace").is_some());
+        assert!(lookup_widget_property(&path(&["WebView"]), "html").is_some());
+        assert!(lookup_widget_property(&list_view, "showSeparators").is_some());
+        assert!(lookup_widget_property(&list_view, "singleClickActivate").is_some());
+        assert!(lookup_widget_property(&grid_view, "minColumns").is_some());
+        assert!(lookup_widget_property(&grid_view, "maxColumns").is_some());
         assert!(lookup_widget_property(&entry, "text").is_some());
         assert!(lookup_widget_property(&entry, "placeholderText").is_some());
         assert!(lookup_widget_property(&entry, "label").is_none());
@@ -5374,6 +5574,7 @@ mod tests {
         let button = path(&["Button"]);
         let entry = path(&["Entry"]);
         let switch = path(&["Switch"]);
+        let list_view = path(&["ListView"]);
         let event =
             lookup_widget_event(&button, "onClick").expect("Button.onClick should be in catalog");
         assert_eq!(event.payload, GtkConcreteEventPayload::Unit);
@@ -5386,6 +5587,9 @@ mod tests {
         let event =
             lookup_widget_event(&switch, "onToggle").expect("Switch.onToggle should be in catalog");
         assert_eq!(event.payload, GtkConcreteEventPayload::Bool);
+        let event = lookup_widget_event(&list_view, "onActivate")
+            .expect("ListView.onActivate should be in catalog");
+        assert_eq!(event.payload, GtkConcreteEventPayload::I64);
         assert!(lookup_widget_event(&button, "onclick").is_none());
         assert!(lookup_widget_event(&entry, "onactivate").is_none());
         assert!(lookup_widget_event(&path(&["Label"]), "onClick").is_none());
@@ -5422,6 +5626,17 @@ mod tests {
 
         let button = lookup_widget_schema_by_name("Button").expect("Button schema should exist");
         assert_eq!(button.default_child_group(), GtkDefaultChildGroup::None);
+
+        let list_view =
+            lookup_widget_schema_by_name("ListView").expect("ListView schema should exist");
+        assert!(matches!(
+            list_view.default_child_group(),
+            GtkDefaultChildGroup::One(group)
+                if group.name == "children"
+                    && group.container == GtkChildContainerKind::Sequence
+                    && group.accepts_child_count(0)
+                    && group.accepts_child_count(2)
+        ));
 
         let frame = lookup_widget_schema_by_name("Frame").expect("Frame schema should exist");
         assert!(matches!(

@@ -18,6 +18,8 @@ use aivi_runtime::{
 use gtk::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
+use webkit6::WebView;
+use webkit6::prelude::*;
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const HOST_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -1355,7 +1357,7 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "snapshot_gtk_tree",
-            "description": "Capture a semantic GTK widget tree for the live app. Every node includes `allocated_width`/`allocated_height` (actual layout sizes in pixels) and a `props` object with widget-specific runtime properties: Picture nodes expose `file`, `can_shrink`, `content_fit`, `paintable_width`, `paintable_height`; Image nodes expose `file`, `pixel_size`, `storage_type`; Grid nodes expose `row_homogeneous`, `column_homogeneous`, `row_spacing`, `column_spacing`.",
+            "description": "Capture a semantic GTK widget tree for the live app. Every node includes `allocated_width`/`allocated_height` (actual layout sizes in pixels) and a `props` object with widget-specific runtime properties: Picture nodes expose `file`, `can_shrink`, `content_fit`, `paintable_width`, `paintable_height`; Image nodes expose `file`, `pixel_size`, `storage_type`; Grid nodes expose `row_homogeneous`, `column_homogeneous`, `row_spacing`, `column_spacing`; WebView nodes expose `uri`, `title`, `loading`, `estimated_load_progress`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2009,6 +2011,14 @@ fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
             "column_homogeneous": grid.is_column_homogeneous(),
             "row_spacing": grid.row_spacing(),
             "column_spacing": grid.column_spacing(),
+        }));
+    }
+    if let Ok(web_view) = widget.clone().downcast::<WebView>() {
+        return Some(json!({
+            "uri": web_view.uri().map(|uri| uri.to_string()).unwrap_or_default(),
+            "title": web_view.title().map(|title| title.to_string()).unwrap_or_default(),
+            "loading": web_view.is_loading(),
+            "estimated_load_progress": web_view.estimated_load_progress(),
         }));
     }
     None

@@ -86,7 +86,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.app](app.md) | Application framework types | `AppLifecycle`, `AppActionResult`, `AppCommand` |
 | [aivi.app.lifecycle](lifecycle.md) | Lifecycle state, commands, undo, notifications | `label`, `shortcut`, `canUndo`, `NotificationLevel` |
 | [aivi.desktop.xdg](xdg.md) | XDG error vocabulary | `dataHome`, `configHome`, `cacheHome` |
-| [aivi.portal](portal.md) | Desktop portal results | `openFile`, `openUri`, `screenshot` |
+| [aivi.portal](portal.md) | Desktop portal result vocabulary plus built-in portal sources | `openFile`, `openUri`, `screenshot` |
 | [aivi.dbus](dbus.md) | D-Bus vocabulary and `DbusSource` | `destination`, `path`, `interface`, `member` |
 | [aivi.gnome.tray](tray.md) | GNOME tray bridge vocabulary | `TraySource`, `defaultPath`, `actionMember` |
 | [aivi.gnome.settings](settings.md) | GSettings schema, key, and value types | `make`, `parse`, `GSettingsSource` |
@@ -185,7 +185,7 @@ place to look when wiring a Linux desktop app together.
 - [`aivi.app`](/stdlib/app) — application framework types.
 - [`aivi.app.lifecycle`](/stdlib/lifecycle) — lifecycle state, commands, undo state, and in-app notifications.
 - [`aivi.desktop.xdg`](/stdlib/xdg) — XDG error vocabulary; actual directories come from `PathSource`.
-- [`aivi.portal`](/stdlib/portal) — desktop portal results for file picking, opening URIs, and screenshots.
+- [`aivi.portal`](/stdlib/portal) — desktop portal results and built-in sources for file picking, opening URIs, and screenshots.
 - [`aivi.dbus`](/stdlib/dbus) — D-Bus vocabulary plus `DbusSource`.
 - [`aivi.gnome.settings`](/stdlib/settings) — GSettings schema, key, and value types.
 - [`aivi.gnome.onlineAccounts`](/stdlib/onlineAccounts) — desktop account and token records.

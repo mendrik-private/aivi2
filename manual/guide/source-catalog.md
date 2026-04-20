@@ -24,7 +24,7 @@ as handle members.
 
 ## Common current rules
 
-- `http.get`, `http.post`, `fs.read`, `socket.connect`, and `mailbox.subscribe` currently expect a `Signal (Result E A)` output shape.
+- `http.get`, `http.post`, `portal.openFile`, `portal.openUri`, `portal.screenshot`, `fs.read`, `socket.connect`, and `mailbox.subscribe` currently expect a `Signal (Result E A)` output shape.
 - `fs.watch` currently decodes to `Text` or to a payloadless sum such as `Created | Changed | Deleted`.
 - `window.keyDown` currently decodes to `Text`, a payloadless key sum, or a single text-wrapping key constructor.
 - `dbus.signal` and `dbus.method` currently decode to specific record shapes described below.
@@ -105,6 +105,63 @@ Uses the same option surface as `http.get`, plus:
 | Option | Type | Current support |
 | --- | --- | --- |
 | `body` | `A` | Supported for `http.post` only. |
+
+## Portals
+
+### `portal.openFile`
+
+**Form:** `@source portal.openFile config`
+
+| Field / option | Type | Current support |
+| --- | --- | --- |
+| positional `config.title` | `Text` | Supported. Dialog title. Default: `"Open File"`. |
+| positional `config.acceptLabel` | `Text` | Supported. Custom accept button label. |
+| positional `config.modal` | `Bool` | Supported. Modal hint. Default: `True`. |
+| positional `config.multiple` | `Bool` | Supported. Multi-select chooser. |
+| positional `config.directory` | `Bool` | Supported. Directory picker instead of file picker. |
+| positional `config.currentFolder` | `Text` | Supported. Suggested starting folder path. |
+| positional `config.filters` | `List PortalFileFilter` | Supported. Serialized as glob filters for the XDG portal file chooser. |
+| `refreshOn` | `Signal A` | Supported as an explicit trigger option. |
+| `activeWhen` | `Signal Bool` | Supported as a lifecycle gate. |
+
+**Notes**
+
+- `portal.openFile` is request-like: it runs once per subscription/trigger.
+- Success publishes `SingleFile uri`, `MultipleFiles uris`, or `SelectionCancelled`.
+- Runtime failures publish `PortalUnavailable`, `PortalPermissionDenied`, or `PortalDecodeFailed` in the outer `Err`.
+
+### `portal.openUri`
+
+**Form:** `@source portal.openUri uri`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `ask` | `Bool` | Supported. Asks the portal to prompt for an app choice. |
+| `writable` | `Bool` | Supported. Forwards writable handoff where the backend supports it. |
+| `activationToken` | `Text` | Supported. Forwarded to the chosen app. |
+| `refreshOn` | `Signal A` | Supported as an explicit trigger option. |
+| `activeWhen` | `Signal Bool` | Supported as a lifecycle gate. |
+
+**Notes**
+
+- Success publishes `UriOpened uri`, `UriOpenCancelled`, or `UriOpenFailed message`.
+- Portal transport/protocol failures still surface through the outer `Err PortalError`.
+
+### `portal.screenshot`
+
+**Form:** `@source portal.screenshot`
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `interactive` | `Bool` | Supported. Requests interactive capture UI where backend supports it. |
+| `modal` | `Bool` | Supported. Modal hint. |
+| `refreshOn` | `Signal A` | Supported as an explicit trigger option. |
+| `activeWhen` | `Signal Bool` | Supported as a lifecycle gate. |
+
+**Notes**
+
+- Success publishes screenshot file bytes as `ScreenshotBytes Bytes` after reading the portal-returned file URI.
+- Cancellation publishes `ScreenshotCancelled`.
 
 ## OpenAPI
 

@@ -26,17 +26,21 @@ type PortalScreenshotResult =
 
 type PortalTask A = (Task PortalError A)
 
-// @source usage patterns (documented for users):
+// Built-in portal source shapes:
 //
 // File chooser (open):
-// @source portal.openFile { filters: [{ name: "AIVI Files", patterns: ["*.aivi"] }] }
+// @source portal.openFile {
+//   title: "Open attachment"
+//   multiple: true
+//   filters: [{ name: "Images", patterns: ["*.png", "*.jpg"] }]
+// }
 // signal openedFile : Signal (Result PortalError PortalFileSelection)
 //
 // Open URI:
-// @source portal.openUri "https://example.com"
+// @source portal.openUri "https://example.com" with { ask: true }
 // signal uriResult : Signal (Result PortalError PortalUriResult)
 //
 // Screenshot:
-// @source portal.screenshot
+// @source portal.screenshot with { interactive: true }
 // signal screenshot : Signal (Result PortalError PortalScreenshotResult)
 export (PortalError, PortalUnavailable, UserCancelled, PortalPermissionDenied, PortalDecodeFailed, PortalFileFilter, PortalFileSelection, SingleFile, MultipleFiles, SelectionCancelled, PortalUriResult, UriOpened, UriOpenCancelled, UriOpenFailed, PortalScreenshotResult, ScreenshotBytes, ScreenshotCancelled, PortalTask)

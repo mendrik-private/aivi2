@@ -40,6 +40,9 @@ pub enum BuiltinSourceProvider {
     DbusMethod,
     DbusEmit,
     NotificationsEvents,
+    PortalOpenFile,
+    PortalOpenUri,
+    PortalScreenshot,
     WindowKeyDown,
     GtkDarkMode,
     GtkClipboard,
@@ -59,7 +62,7 @@ pub enum BuiltinSourceProvider {
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 46] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -87,6 +90,9 @@ impl BuiltinSourceProvider {
         Self::DbusMethod,
         Self::DbusEmit,
         Self::NotificationsEvents,
+        Self::PortalOpenFile,
+        Self::PortalOpenUri,
+        Self::PortalScreenshot,
         Self::WindowKeyDown,
         Self::GtkDarkMode,
         Self::GtkClipboard,
@@ -134,6 +140,9 @@ impl BuiltinSourceProvider {
             "dbus.method" => Some(Self::DbusMethod),
             "dbus.emit" => Some(Self::DbusEmit),
             "notifications.events" => Some(Self::NotificationsEvents),
+            "portal.openFile" => Some(Self::PortalOpenFile),
+            "portal.openUri" => Some(Self::PortalOpenUri),
+            "portal.screenshot" => Some(Self::PortalScreenshot),
             "window.keyDown" => Some(Self::WindowKeyDown),
             "gtk.darkMode" => Some(Self::GtkDarkMode),
             "clipboard.changed" => Some(Self::GtkClipboard),
@@ -183,6 +192,9 @@ impl BuiltinSourceProvider {
             Self::DbusMethod => "dbus.method",
             Self::DbusEmit => "dbus.emit",
             Self::NotificationsEvents => "notifications.events",
+            Self::PortalOpenFile => "portal.openFile",
+            Self::PortalOpenUri => "portal.openUri",
+            Self::PortalScreenshot => "portal.screenshot",
             Self::WindowKeyDown => "window.keyDown",
             Self::GtkDarkMode => "gtk.darkMode",
             Self::GtkClipboard => "clipboard.changed",
@@ -284,6 +296,24 @@ impl BuiltinSourceProvider {
                 notifications_events_options(),
                 DBUS_RECURRENCE,
                 STREAM_LIFECYCLE,
+            ),
+            Self::PortalOpenFile => SourceContract::new(
+                self,
+                portal_open_file_options(),
+                HTTP_RECURRENCE,
+                HTTP_LIFECYCLE,
+            ),
+            Self::PortalOpenUri => SourceContract::new(
+                self,
+                portal_open_uri_options(),
+                HTTP_RECURRENCE,
+                HTTP_LIFECYCLE,
+            ),
+            Self::PortalScreenshot => SourceContract::new(
+                self,
+                portal_screenshot_options(),
+                HTTP_RECURRENCE,
+                HTTP_LIFECYCLE,
             ),
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
@@ -1051,6 +1081,9 @@ fn dbus_method_options() -> &'static [SourceOptionContract] {
 
 static DBUS_EMIT_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 static NOTIFICATIONS_EVENTS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+static PORTAL_OPEN_FILE_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+static PORTAL_OPEN_URI_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+static PORTAL_SCREENSHOT_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 
 fn dbus_emit_options() -> &'static [SourceOptionContract] {
     DBUS_EMIT_OPTIONS_STORAGE.get_or_init(|| {
@@ -1081,6 +1114,56 @@ fn notifications_events_options() -> &'static [SourceOptionContract] {
         vec![
             SourceOptionContract::new("bus", SourceContractType::text()),
             SourceOptionContract::new("address", SourceContractType::text()),
+        ]
+    })
+}
+
+fn portal_open_file_options() -> &'static [SourceOptionContract] {
+    PORTAL_OPEN_FILE_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
+fn portal_open_uri_options() -> &'static [SourceOptionContract] {
+    PORTAL_OPEN_URI_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("ask", SourceContractType::bool()),
+            SourceOptionContract::new("writable", SourceContractType::bool()),
+            SourceOptionContract::new("activationToken", SourceContractType::text()),
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
+        ]
+    })
+}
+
+fn portal_screenshot_options() -> &'static [SourceOptionContract] {
+    PORTAL_SCREENSHOT_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("interactive", SourceContractType::bool()),
+            SourceOptionContract::new("modal", SourceContractType::bool()),
+            SourceOptionContract::new(
+                "refreshOn",
+                SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
+            ),
+            SourceOptionContract::new(
+                "activeWhen",
+                SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
+            ),
         ]
     })
 }
@@ -1326,6 +1409,59 @@ mod tests {
             live.option("onRollback").map(|option| option.ty()),
             Some(SourceContractType::signal(SourceTypeAtom::nominal(
                 SourceNominalType::DbError,
+            )))
+        );
+    }
+
+    #[test]
+    fn exposes_portal_source_contract_types() {
+        let open_file = BuiltinSourceProvider::PortalOpenFile.contract();
+        let open_uri = BuiltinSourceProvider::PortalOpenUri.contract();
+        let screenshot = BuiltinSourceProvider::PortalScreenshot.contract();
+
+        assert_eq!(
+            BuiltinSourceProvider::parse("portal.openFile"),
+            Some(BuiltinSourceProvider::PortalOpenFile)
+        );
+        assert_eq!(
+            BuiltinSourceProvider::parse("portal.openUri"),
+            Some(BuiltinSourceProvider::PortalOpenUri)
+        );
+        assert_eq!(
+            BuiltinSourceProvider::parse("portal.screenshot"),
+            Some(BuiltinSourceProvider::PortalScreenshot)
+        );
+        assert_eq!(
+            BuiltinSourceProvider::PortalOpenFile.key(),
+            "portal.openFile"
+        );
+        assert_eq!(BuiltinSourceProvider::PortalOpenUri.key(), "portal.openUri");
+        assert_eq!(
+            BuiltinSourceProvider::PortalScreenshot.key(),
+            "portal.screenshot"
+        );
+        assert_eq!(
+            open_file.option("refreshOn").map(|option| option.ty()),
+            Some(SourceContractType::signal(SourceTypeAtom::parameter(
+                SourceTypeParameter::A,
+            )))
+        );
+        assert_eq!(
+            open_uri.option("ask").map(|option| option.ty()),
+            Some(SourceContractType::bool())
+        );
+        assert_eq!(
+            open_uri.option("activationToken").map(|option| option.ty()),
+            Some(SourceContractType::text())
+        );
+        assert_eq!(
+            screenshot.option("interactive").map(|option| option.ty()),
+            Some(SourceContractType::bool())
+        );
+        assert_eq!(
+            screenshot.option("activeWhen").map(|option| option.ty()),
+            Some(SourceContractType::signal(SourceTypeAtom::primitive(
+                PrimitiveType::Bool,
             )))
         );
     }

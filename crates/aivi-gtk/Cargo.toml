@@ -11,6 +11,7 @@ aivi-runtime = { path = "../aivi-runtime" }
 gtk = { package = "gtk4", version = "0.11.1", features = ["v4_8"] }
 libadwaita = { package = "libadwaita", version = "0.9", features = ["v1_3", "v1_4", "v1_5"] }
 serde.workspace = true
+webkit6 = "0.6.1"
 
 [dev-dependencies]
 aivi-syntax.workspace = true

@@ -6078,9 +6078,13 @@ impl Validator<'_> {
         match hint {
             Some(RecurrenceWakeupHint::BuiltinSource(context)) => {
                 let (label, note) = match context.provider() {
-                    BuiltinSourceProvider::HttpGet | BuiltinSourceProvider::HttpPost => (
+                    BuiltinSourceProvider::HttpGet
+                    | BuiltinSourceProvider::HttpPost
+                    | BuiltinSourceProvider::PortalOpenFile
+                    | BuiltinSourceProvider::PortalOpenUri
+                    | BuiltinSourceProvider::PortalScreenshot => (
                         "this request-like source still needs an explicit recurrence wakeup such as `retry`, `refreshEvery`, `refreshOn`, or reactive source inputs",
-                        "plain `http.get` / `http.post` sources issue one request when subscribed; polling, backoff, and refresh proof stay explicit at the current recurrence boundary",
+                        "plain request-like sources issue one request when subscribed; polling, backoff, and refresh proof stay explicit at the current recurrence boundary",
                     ),
                     BuiltinSourceProvider::DbLive => (
                         "this live query source still needs an explicit recurrence wakeup such as `refreshOn` or reactive source inputs",
@@ -6137,6 +6141,9 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::HttpPost
                             | BuiltinSourceProvider::DbLive
                             | BuiltinSourceProvider::FsRead
+                            | BuiltinSourceProvider::PortalOpenFile
+                            | BuiltinSourceProvider::PortalOpenUri
+                            | BuiltinSourceProvider::PortalScreenshot
                             | BuiltinSourceProvider::ApiGet
                             | BuiltinSourceProvider::ApiPost
                             | BuiltinSourceProvider::ApiPut

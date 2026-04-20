@@ -15,6 +15,8 @@ use gtk::{
     prelude::*,
 };
 use libadwaita as adw;
+use webkit6::prelude::*;
+use webkit6::{NetworkSession, PolicyDecisionType, WebView};
 
 use crate::{
     GtkBoolPropertySetter, GtkChildGroupDescriptor, GtkChildMountRoute, GtkConcreteWidgetKind,
@@ -50,6 +52,21 @@ button.aivi-animate-opacity {
 }
 "#;
 
+const AIVI_WEB_VIEW_DEFAULT_CSP: &str = concat!(
+    "default-src 'none'; ",
+    "img-src data: blob: file: resource: cid: aivi:; ",
+    "media-src data: blob: file: resource: cid: aivi:; ",
+    "style-src 'unsafe-inline' data: blob: file: resource:; ",
+    "font-src data: blob: file: resource:; ",
+    "connect-src 'none'; ",
+    "script-src 'none'; ",
+    "object-src 'none'; ",
+    "frame-src 'none'; ",
+    "worker-src 'none'; ",
+    "form-action 'none'; ",
+    "navigate-to 'none';"
+);
+
 thread_local! {
     static AIVI_WIDGET_STYLE_PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
 }
@@ -72,6 +89,112 @@ fn ensure_aivi_widget_styles() {
         );
         *slot.borrow_mut() = Some(provider);
     });
+}
+
+fn configure_aivi_web_view(web_view: &WebView) {
+    if let Some(settings) = webkit6::prelude::WebViewExt::settings(web_view) {
+        settings.set_enable_javascript(false);
+        settings.set_enable_javascript_markup(false);
+        settings.set_enable_html5_local_storage(false);
+        settings.set_enable_hyperlink_auditing(false);
+        settings.set_enable_dns_prefetching(false);
+        settings.set_enable_media(false);
+        settings.set_enable_media_capabilities(false);
+        settings.set_enable_media_stream(false);
+        settings.set_enable_mediasource(false);
+        settings.set_enable_page_cache(false);
+        settings.set_enable_webgl(false);
+        settings.set_allow_file_access_from_file_urls(false);
+        settings.set_allow_universal_access_from_file_urls(false);
+        settings.set_auto_load_images(true);
+    }
+    web_view.connect_permission_request(|_, request| {
+        request.deny();
+        true
+    });
+    web_view.connect_decide_policy(|_, decision, decision_type| match decision_type {
+        PolicyDecisionType::NavigationAction | PolicyDecisionType::NewWindowAction => {
+            decision.ignore();
+            true
+        }
+        PolicyDecisionType::Response | PolicyDecisionType::__Unknown(_) => false,
+        _ => false,
+    });
+}
+
+fn create_collection_item_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let list_item = item
+            .downcast_ref::<gtk::ListItem>()
+            .expect("SignalListItemFactory setup should receive gtk::ListItem");
+        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        list_item.set_child(Some(&wrapper));
+        list_item.set_activatable(true);
+    });
+    factory.connect_bind(|_, item| {
+        let list_item = item
+            .downcast_ref::<gtk::ListItem>()
+            .expect("SignalListItemFactory bind should receive gtk::ListItem");
+        let wrapper = list_item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Box>().ok())
+            .expect("collection list items should install a box wrapper during setup");
+        while let Some(child) = wrapper.first_child() {
+            wrapper.remove(&child);
+        }
+        let Some(item_object) = list_item.item() else {
+            return;
+        };
+        let boxed = item_object
+            .downcast::<glib::BoxedAnyObject>()
+            .expect("collection list items should store glib::BoxedAnyObject");
+        let child = boxed.borrow::<gtk::Widget>().clone();
+        if let Some(parent) = child
+            .parent()
+            .and_then(|parent| parent.downcast::<gtk::Box>().ok())
+        {
+            parent.remove(&child);
+        }
+        wrapper.append(&child);
+    });
+    factory.connect_unbind(|_, item| {
+        let list_item = item
+            .downcast_ref::<gtk::ListItem>()
+            .expect("SignalListItemFactory unbind should receive gtk::ListItem");
+        let wrapper = list_item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Box>().ok())
+            .expect("collection list items should keep a box wrapper during unbind");
+        while let Some(child) = wrapper.first_child() {
+            wrapper.remove(&child);
+        }
+    });
+    factory
+}
+
+fn selection_model_store(model: Option<gtk::SelectionModel>) -> Option<gtk::gio::ListStore> {
+    let model = model?;
+    if let Ok(no_selection) = model.clone().downcast::<gtk::NoSelection>() {
+        return no_selection
+            .model()
+            .and_then(|model| model.downcast::<gtk::gio::ListStore>().ok());
+    }
+    if let Ok(single_selection) = model.downcast::<gtk::SingleSelection>() {
+        return single_selection
+            .model()
+            .and_then(|model| model.downcast::<gtk::gio::ListStore>().ok());
+    }
+    None
+}
+
+fn replace_collection_store_children(store: &gtk::gio::ListStore, next: &[gtk::Widget]) {
+    let boxed = next
+        .iter()
+        .cloned()
+        .map(glib::BoxedAnyObject::new)
+        .collect::<Vec<_>>();
+    store.splice(0, store.n_items(), &boxed);
 }
 
 pub trait GtkHostValue: Clone + 'static {
@@ -798,6 +921,18 @@ where
             GtkConcreteWidgetKind::EntryRow => adw::EntryRow::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ListBox => gtk::ListBox::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ListBoxRow => gtk::ListBoxRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ListView => {
+                let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
+                let selection = gtk::NoSelection::new(Some(store));
+                let factory = create_collection_item_factory();
+                gtk::ListView::new(Some(selection), Some(factory)).upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::GridView => {
+                let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
+                let selection = gtk::NoSelection::new(Some(store));
+                let factory = create_collection_item_factory();
+                gtk::GridView::new(Some(selection), Some(factory)).upcast::<gtk::Widget>()
+            }
             GtkConcreteWidgetKind::DropDown => {
                 gtk::DropDown::new(None::<gtk::StringList>, None::<gtk::Expression>)
                     .upcast::<gtk::Widget>()
@@ -828,6 +963,14 @@ where
             GtkConcreteWidgetKind::Overlay => gtk::Overlay::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::MultilineEntry => gtk::TextView::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Picture => gtk::Picture::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::WebView => {
+                let web_view = WebView::builder()
+                    .network_session(&NetworkSession::new_ephemeral())
+                    .default_content_security_policy(AIVI_WEB_VIEW_DEFAULT_CSP)
+                    .build();
+                configure_aivi_web_view(&web_view);
+                web_view.upcast::<gtk::Widget>()
+            }
             GtkConcreteWidgetKind::ViewStack => adw::ViewStack::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ViewStackPage => adw::Bin::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::AlertDialog => {
@@ -1590,6 +1733,56 @@ where
                     })?
                     .set_show_separators(value);
             }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewShowSeparators) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ListView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListView",
+                    })?
+                    .set_show_separators(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewEnableRubberband) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ListView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListView",
+                    })?
+                    .set_enable_rubberband(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ListViewSingleClickActivate) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ListView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListView",
+                    })?
+                    .set_single_click_activate(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::GridViewEnableRubberband) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::GridView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::GridView",
+                    })?
+                    .set_enable_rubberband(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::GridViewSingleClickActivate) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::GridView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::GridView",
+                    })?
+                    .set_single_click_activate(value);
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -2288,6 +2481,16 @@ where
                         expected_type: "gtk::Picture",
                     })?
                     .set_alternative_text(if value.is_empty() { None } else { Some(value) });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::WebViewHtml) => {
+                widget
+                    .clone()
+                    .downcast::<WebView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "webkit6::WebView",
+                    })?
+                    .load_html(value, None);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ViewStackVisibleChild) => {
                 widget
@@ -3073,6 +3276,28 @@ where
                     .set_column_spacing(value.max(0) as u32);
                 Ok(())
             }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridViewMinColumns) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::GridView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::GridView",
+                    })?
+                    .set_min_columns(value.max(1) as u32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::GridViewMaxColumns) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::GridView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::GridView",
+                    })?
+                    .set_max_columns(value.max(1) as u32);
+                Ok(())
+            }
             GtkPropertySetter::I64(GtkI64PropertySetter::GridChildColumn) => {
                 let key = widget.as_ptr() as usize;
                 let prev = self.grid_child_meta.borrow().get(&key).map(|m| m.column);
@@ -3553,6 +3778,24 @@ where
                 for child in next {
                     list_box.append(child);
                 }
+            }
+            GtkChildMountRoute::ListViewChildren => {
+                let list_view = parent_widget
+                    .clone()
+                    .downcast::<gtk::ListView>()
+                    .expect("list view widget should downcast");
+                let store = selection_model_store(list_view.model())
+                    .expect("list view should keep a list store-backed selection model");
+                replace_collection_store_children(&store, next);
+            }
+            GtkChildMountRoute::GridViewChildren => {
+                let grid_view = parent_widget
+                    .clone()
+                    .downcast::<gtk::GridView>()
+                    .expect("grid view widget should downcast");
+                let store = selection_model_store(grid_view.model())
+                    .expect("grid view should keep a list store-backed selection model");
+                replace_collection_store_children(&store, next);
             }
             GtkChildMountRoute::NavigationViewPages => {
                 for child in previous {
@@ -4090,6 +4333,8 @@ where
             | GtkChildMountRoute::ActionRowSuffix
             | GtkChildMountRoute::ExpanderRowRows
             | GtkChildMountRoute::ListBoxChildren
+            | GtkChildMountRoute::ListViewChildren
+            | GtkChildMountRoute::GridViewChildren
             | GtkChildMountRoute::NavigationViewPages
             | GtkChildMountRoute::PreferencesGroupChildren
             | GtkChildMountRoute::PreferencesPageChildren
@@ -4610,6 +4855,38 @@ where
                     queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::unit(),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::ListViewActivated => widget
+                .clone()
+                .downcast::<gtk::ListView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::ListView",
+                })?
+                .connect_activate(move |_, position| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_i64(position as i64),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::GridViewActivated => widget
+                .clone()
+                .downcast::<gtk::GridView>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::GridView",
+                })?
+                .connect_activate(move |_, position| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_i64(position as i64),
                     });
                     if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
@@ -5826,6 +6103,21 @@ mod tests {
             .unwrap_or_else(|| panic!("expected {widget_name}.{property} input"))
     }
 
+    fn collection_store_widgets(model: Option<gtk::SelectionModel>) -> Vec<gtk::Widget> {
+        let store = selection_model_store(model)
+            .expect("collection views should keep a list store-backed selection model");
+        (0..store.n_items())
+            .map(|index| {
+                let boxed = store
+                    .item(index)
+                    .expect("list store item should exist")
+                    .downcast::<glib::BoxedAnyObject>()
+                    .expect("list store items should be boxed widgets");
+                boxed.borrow::<gtk::Widget>().clone()
+            })
+            .collect()
+    }
+
     fn span(start: usize, end: usize) -> SourceSpan {
         SourceSpan::new(FileId::new(0), Span::from(start..end))
     }
@@ -6881,6 +7173,185 @@ value view =
                 })
                 .collect::<Vec<_>>();
             assert_eq!(labels, vec!["B", "C", "A"]);
+        });
+    }
+
+    #[test]
+    fn concrete_host_mounts_virtual_collection_views_and_routes_activation() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-virtual-collections.aivi",
+                r#"
+signal listShowSeparators : Signal Bool
+signal listEnableRubberband : Signal Bool
+signal listSingleClickActivate : Signal Bool
+signal gridEnableRubberband : Signal Bool
+signal gridSingleClickActivate : Signal Bool
+signal gridMinColumns : Signal Int
+signal gridMaxColumns : Signal Int
+
+value view =
+    <Window title="Host">
+        <Box orientation="Vertical">
+            <ListView
+                showSeparators={listShowSeparators}
+                enableRubberband={listEnableRubberband}
+                singleClickActivate={listSingleClickActivate}
+                onActivate={.}
+            >
+                <Label text="Alpha" />
+                <Label text="Beta" />
+                <Label text="Gamma" />
+            </ListView>
+            <GridView
+                minColumns={gridMinColumns}
+                maxColumns={gridMaxColumns}
+                enableRubberband={gridEnableRubberband}
+                singleClickActivate={gridSingleClickActivate}
+                onActivate={.}
+            >
+                <Button label="One" />
+                <Button label="Two" />
+            </GridView>
+        </Box>
+    </Window>
+"#,
+            );
+            let list_show_separators_input =
+                find_widget_input(&graph, "ListView", "showSeparators");
+            let list_enable_rubberband_input =
+                find_widget_input(&graph, "ListView", "enableRubberband");
+            let list_single_click_activate_input =
+                find_widget_input(&graph, "ListView", "singleClickActivate");
+            let grid_enable_rubberband_input =
+                find_widget_input(&graph, "GridView", "enableRubberband");
+            let grid_single_click_activate_input =
+                find_widget_input(&graph, "GridView", "singleClickActivate");
+            let grid_min_columns_input = find_widget_input(&graph, "GridView", "minColumns");
+            let grid_max_columns_input = find_widget_input(&graph, "GridView", "maxColumns");
+            let mut executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [
+                    (list_show_separators_input, TestValue::Bool(true)),
+                    (list_enable_rubberband_input, TestValue::Bool(true)),
+                    (list_single_click_activate_input, TestValue::Bool(true)),
+                    (grid_enable_rubberband_input, TestValue::Bool(true)),
+                    (grid_single_click_activate_input, TestValue::Bool(true)),
+                    (grid_min_columns_input, TestValue::Int(2)),
+                    (grid_max_columns_input, TestValue::Int(4)),
+                ],
+            )
+            .expect("concrete GTK host should mount virtual collection widgets");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let container_handle = executor
+                .host()
+                .child_handles(&root)
+                .expect("window child order should be tracked")
+                .into_iter()
+                .next()
+                .expect("window should contain the box child");
+            let child_handles = executor
+                .host()
+                .child_handles(&container_handle)
+                .expect("box child order should be tracked");
+            assert_eq!(child_handles.len(), 2);
+
+            let list_handle = child_handles[0].clone();
+            let grid_handle = child_handles[1].clone();
+
+            let list_view = executor
+                .host()
+                .widget(&list_handle)
+                .expect("list view handle should resolve")
+                .downcast::<gtk::ListView>()
+                .expect("first child should be a GTK list view");
+            let grid_view = executor
+                .host()
+                .widget(&grid_handle)
+                .expect("grid view handle should resolve")
+                .downcast::<gtk::GridView>()
+                .expect("second child should be a GTK grid view");
+
+            assert!(list_view.shows_separators());
+            assert!(list_view.enables_rubberband());
+            assert!(list_view.is_single_click_activate());
+            assert_eq!(grid_view.min_columns(), 2);
+            assert_eq!(grid_view.max_columns(), 4);
+            assert!(grid_view.enables_rubberband());
+            assert!(grid_view.is_single_click_activate());
+
+            let list_labels = collection_store_widgets(list_view.model())
+                .into_iter()
+                .map(|widget| {
+                    widget
+                        .downcast::<gtk::Label>()
+                        .expect("list view model items should stay labels")
+                        .text()
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(list_labels, vec!["Alpha", "Beta", "Gamma"]);
+
+            let grid_labels = collection_store_widgets(grid_view.model())
+                .into_iter()
+                .map(|widget| {
+                    widget
+                        .downcast::<gtk::Button>()
+                        .expect("grid view model items should stay buttons")
+                        .label()
+                        .expect("grid buttons should have labels")
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(grid_labels, vec!["One", "Two"]);
+
+            let before = executor
+                .host()
+                .child_handles(&list_handle)
+                .expect("list view child order should be tracked");
+            executor
+                .host_mut()
+                .move_children(
+                    &list_handle,
+                    crate::lookup_widget_schema_by_name("ListView")
+                        .and_then(|schema| schema.child_group("children"))
+                        .expect("ListView should expose its default children group"),
+                    0,
+                    1,
+                    2,
+                    &[before[0].clone()],
+                )
+                .expect("moving list view children should update the backing model");
+
+            let moved_list_labels = collection_store_widgets(list_view.model())
+                .into_iter()
+                .map(|widget| {
+                    widget
+                        .downcast::<gtk::Label>()
+                        .expect("moved list items should stay labels")
+                        .text()
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(moved_list_labels, vec!["Beta", "Gamma", "Alpha"]);
+
+            let routes = executor.event_routes();
+            assert_eq!(routes.len(), 2);
+            list_view.emit_by_name::<()>("activate", &[&1u32]);
+            grid_view.emit_by_name::<()>("activate", &[&0u32]);
+            let queued = executor.host_mut().drain_events();
+            assert_eq!(queued.len(), 2);
+            assert_eq!(queued[0].route, routes[0].id);
+            assert_eq!(queued[0].value, TestValue::Int(1));
+            assert_eq!(queued[1].route, routes[1].id);
+            assert_eq!(queued[1].value, TestValue::Int(0));
         });
     }
 }
