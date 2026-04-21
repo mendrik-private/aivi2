@@ -661,4 +661,39 @@ mod tests {
             "expected middle lines to be truncated, but all appeared: {rendered}"
         );
     }
+
+    #[test]
+    fn gutter_pipes_stay_aligned_for_multi_digit_line_numbers() {
+        let src = (1..=12)
+            .map(|n| format!("value line{n} = {n}\n"))
+            .collect::<String>();
+        let mut sources = SourceDatabase::new();
+        let fid = sources.add_file("aligned.aivi", src);
+        let file = &sources[fid];
+        let line_ten_start = file
+            .text()
+            .match_indices("value line10 = 10")
+            .next()
+            .map(|(start, _)| start)
+            .expect("line 10 should exist");
+        let span = file.source_span(line_ten_start..line_ten_start + "value".len());
+        let diag = Diagnostic::error("alignment check").with_primary_label(span, "marker");
+
+        let renderer = DiagnosticRenderer::plain();
+        let rendered = renderer.render(&diag, &sources);
+        let pipe_columns = rendered
+            .lines()
+            .filter_map(|line| line.find('│'))
+            .collect::<Vec<_>>();
+
+        assert!(
+            pipe_columns.len() >= 3,
+            "expected snippet gutter lines in render output: {rendered}"
+        );
+        let first = pipe_columns[0];
+        assert!(
+            pipe_columns.iter().all(|&column| column == first),
+            "expected all gutter pipes to align in one column: {rendered}"
+        );
+    }
 }

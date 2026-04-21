@@ -541,9 +541,10 @@ fn print_diagnostics<'a>(
     sources: &SourceDatabase,
     diagnostics: impl IntoIterator<Item = &'a Diagnostic>,
 ) -> bool {
+    let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
     let mut saw_error = false;
     for diagnostic in diagnostics {
-        eprintln!("{}\n", diagnostic.render(sources));
+        eprintln!("{}\n", renderer.render(diagnostic, sources));
         if diagnostic.severity == Severity::Error {
             saw_error = true;
         }
@@ -556,6 +557,7 @@ fn print_stage_diagnostics<'a>(
     sources: &SourceDatabase,
     diagnostics: impl IntoIterator<Item = &'a Diagnostic>,
 ) -> bool {
+    let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
     let mut saw_any = false;
     let mut saw_error = false;
     for diagnostic in diagnostics {
@@ -563,7 +565,7 @@ fn print_stage_diagnostics<'a>(
             eprintln!("{} diagnostics:\n", stage.label());
             saw_any = true;
         }
-        eprintln!("{}\n", diagnostic.render(sources));
+        eprintln!("{}\n", renderer.render(diagnostic, sources));
         if diagnostic.severity == Severity::Error {
             saw_error = true;
         }
@@ -1114,8 +1116,9 @@ fn lex_file(path: &Path) -> Result<ExitCode, String> {
     }
 
     if lexed.has_errors() {
+        let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
         for diagnostic in lexed.diagnostics() {
-            eprintln!("{}\n", diagnostic.render(&sources));
+            eprintln!("{}\n", renderer.render(diagnostic, &sources));
         }
         Ok(ExitCode::FAILURE)
     } else {
@@ -1129,8 +1132,9 @@ fn format_file(path: &Path) -> Result<ExitCode, String> {
     let file = &sources[file_id];
     let parsed = parse_module(file);
     if parsed.has_errors() {
+        let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
         for diagnostic in parsed.all_diagnostics() {
-            eprintln!("{}\n", diagnostic.render(&sources));
+            eprintln!("{}\n", renderer.render(diagnostic, &sources));
         }
         return Ok(ExitCode::FAILURE);
     }
