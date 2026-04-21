@@ -277,6 +277,13 @@ impl<'a> LinkBuilder<'a> {
                 .into_boxed_slice();
             let has_seed_body = item.body.is_some();
             let entry_kernel = info.body_kernel.or(item.body);
+            let dependency_items = if info.dependencies.is_empty() {
+                item.body
+                    .map(|body| self.collect_required_signal_items(binding.item, body))
+                    .unwrap_or_else(|| info.dependencies.clone().into_boxed_slice())
+            } else {
+                info.dependencies.clone().into_boxed_slice()
+            };
             let dependency_layouts = entry_kernel
                 .and_then(|kernel| self.backend.kernel(kernel))
                 .map(|kernel| kernel.environment.to_vec().into_boxed_slice())
@@ -301,7 +308,7 @@ impl<'a> LinkBuilder<'a> {
                     entry_kernel,
                     body_kernel: info.body_kernel,
                     seed_eval_lane,
-                    dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    dependency_items,
                     dependency_layouts,
                     pipeline_signals,
                     pipeline_ids: pipeline_ids.clone(),
@@ -497,7 +504,11 @@ impl<'a> LinkBuilder<'a> {
             } else {
                 info.dependencies.clone().into_boxed_slice()
             };
-            let declared = info.dependencies.clone().into_boxed_slice();
+            let declared = if body.is_some() && info.dependencies.is_empty() {
+                required.clone()
+            } else {
+                info.dependencies.clone().into_boxed_slice()
+            };
             if !same_items(&required, &declared) {
                 self.errors
                     .push(BackendRuntimeLinkError::SignalRequirementMismatch {
@@ -508,8 +519,7 @@ impl<'a> LinkBuilder<'a> {
                 continue;
             }
 
-            let backend_dependencies = info
-                .dependencies
+            let backend_dependencies = declared
                 .iter()
                 .filter_map(|dependency| {
                     self.runtime_signal_for_backend_item(binding.item, *dependency)
@@ -564,7 +574,7 @@ impl<'a> LinkBuilder<'a> {
                     body_kernel,
                     eval_lane,
                     runtime_dependency_count: binding.dependencies().len(),
-                    dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    dependency_items: declared,
                     dependency_layouts,
                     source_input: binding.source_input,
                     pipeline_ids: item

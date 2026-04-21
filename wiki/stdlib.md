@@ -71,6 +71,8 @@ membership follows that same contract directly: `contains : Eq A => A -> List A 
 | `image` | Image loading and display |
 | `clipboard` | Clipboard read/write |
 | `portal` | XDG portal integration (file chooser, etc.) |
+| `gnome.notifications` | Desktop notification capability handle, tasks, and response stream vocabulary |
+| `gnome.tray` | Tray name ownership and action-dispatch vocabulary |
 | `desktop` | Desktop integration helpers |
 | `gnome` | GNOME-specific APIs (`stdlib/aivi/gnome/`) |
 | `gresource` | GResource bundle access |
@@ -82,12 +84,24 @@ membership follows that same contract directly: `contains : Eq A => A -> List A 
 |--------|-------------|
 | `db` | SQLite database access |
 | `dbus` | D-Bus method calls and signals |
+| `secret` | Desktop keyring / Secret Service lookups, stores, and deletes |
 | `api` | Shared auth/error vocabulary for `@source api` and generated OpenAPI handles |
+| `gnome.onlineAccounts` | GOA mail-account snapshots with resolved IMAP/SMTP/auth details |
 | `imap` | IMAP email client |
 | `smtp` | SMTP email sending |
 | `url` | URL parsing and construction |
 | `auth` | OAuth / authentication flows |
 | `defaults` | GSettings/defaults persistence |
+
+Recent runtime-backed surface additions:
+
+- `process.appDir` publishes the app-relative directory for source runs and packaged executables.
+- `dbus` now covers handle-level `bus.call`, typed `replyValues` replies for `dbus.method`, and
+  `bodyValues` payloads for `dbus.emit`.
+- `gnome.notifications` exposes `NotificationSource`, `NotificationTask`, and
+  `notifications.events`.
+- `gnome.onlineAccounts` feeds `GoaMailAccount` snapshots into `imap.connect`, `imap.idle`, and
+  `imap.fetchBody`.
 
 ## Utilities
 

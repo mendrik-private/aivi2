@@ -494,3 +494,16 @@ recompiled from scratch each tick (~200 ms each, ~0.2 fps).
 - Regression test added: `recurrence_warm_ticks_are_fast_after_first_compile` in
   `crates/aivi-runtime/tests/window_key_recurrence.rs` — asserts warm ticks complete in < 50 ms
   (vs ~200 ms without caching). Full test run: 135 pass, 2 pre-existing failures unchanged.
+
+## [2026-04-21] query | weekly docs audit
+
+Audited the 2026-04-14..2026-04-21 commit slice for wiki/manual/RFC drift.
+
+- Confirmed the manual already covered the user-facing GTK, source-provider, GOA, IMAP, and
+  notification additions from the week.
+- Corrected the remaining build-artifact doc drift in `AIVI_RFC.md`, `wiki/cli.md`, and the CLI
+  help text: packaged artifacts are now described as `run-artifact.bin` embedded inside a single
+  executable, not a `run-artifact.json` bundle directory.
+- Updated `wiki/cli.md` for the new source-run cache path (`run-artifact.bin` plus manifest, keyed
+  by source fingerprints) and refreshed `wiki/gtk-bridge.md` / `wiki/stdlib.md` for the newer collection
+  widgets, strict `WebView`, secret/notification/tray/GOA surfaces, and IMAP wiring.

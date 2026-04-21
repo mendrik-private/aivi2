@@ -46,7 +46,7 @@ Key lookup functions:
 - `lookup_widget_event(schema, name)` — look up a `GtkEventDescriptor`
 - `supported_widget_schemas()` — full list of supported widgets
 
-**Widget kinds** (`GtkConcreteWidgetKind`): 67 supported GTK4 and Adwaita widgets. Includes all prior widgets plus the Tier 1 additions: CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView, TabPage, TabBar, Carousel, CarouselIndicatorDots, CarouselIndicatorLines, Grid, GridChild, FileDialog.
+**Widget kinds** (`GtkConcreteWidgetKind`): 70 supported GTK4 and Adwaita widgets. Includes all prior widgets plus the Tier 1 additions: CenterBox, AboutDialog, SplitButton, NavigationSplitView, OverlaySplitView, TabView, TabPage, TabBar, Carousel, CarouselIndicatorDots, CarouselIndicatorLines, Grid, GridChild, FileDialog, and the later `ListView`, `GridView`, and `WebView` additions.
 
 **Property setters** (`GtkPropertySetter`):
 - `GtkTextPropertySetter` — sets a string property
@@ -59,6 +59,15 @@ Key lookup functions:
 
 - Buttons now support `focusable={Bool}` in the GTK schema/host path.
 - Reversi uses `focusable={False}` on board cells so clicks do not show a transient focus-state flash before the red-stone paint lands.
+
+### 2026-04-20 widget note
+
+- `ListView` and `GridView` are factory-backed collection widgets: AIVI children are wrapped
+  through `gtk::SignalListItemFactory`, backed by `gio::ListStore`, and surfaced through
+  activation events plus the expected separator/rubberband/column properties.
+- `WebView` is intentionally strict: it renders only caller-provided HTML, uses an ephemeral
+  `NetworkSession`, disables JavaScript/storage/media/WebGL, denies permission requests, and
+  blocks navigation/new-window policy decisions by default.
 
 **Event signals** (`GtkEventSignal`): maps AIVI event names to GObject signal names.
 

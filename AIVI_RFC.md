@@ -3063,7 +3063,7 @@ aivi build src/app.aivi -o dist/users --view mainWindow
 The emitted executable contains:
 
 - the current `aivi` runtime host
-- a serialized `run-artifact.json` manifest for the selected view
+- a serialized `run-artifact.bin` payload for the selected view
 - embedded backend metadata payloads plus precompiled native-kernel sidecars
 - embedded non-source workspace companion files needed at runtime (for example `assets/`)
 
@@ -3078,10 +3078,10 @@ Exits 0 on success, 1 on validation/build errors.
 ```
 aivi run src/app.aivi
 aivi run src/app.aivi --view mainWindow
-aivi run build/app/run-artifact.json
+aivi run build/app/run-artifact.bin
 ```
 
-The path may be a source/workspace entry or a serialized `run-artifact.json` emitted by `aivi build`.
+The path may be a source/workspace entry or a serialized `run-artifact.bin`.
 
 View selection rules:
 

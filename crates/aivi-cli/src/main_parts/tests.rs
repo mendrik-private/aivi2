@@ -1272,48 +1272,6 @@ export (base, title)
 
     let artifact = prepare_run_from_workspace(&workspace, "main.aivi", None)
         .expect("workspace run preparation should include imported runtime signals");
-    eprintln!(
-        "runtime signals: {:?}",
-        artifact
-            .runtime_assembly
-            .signals()
-            .iter()
-            .map(|binding| {
-                (
-                    binding.item.as_raw(),
-                    binding.name.as_ref().to_owned(),
-                    binding.input().is_some(),
-                )
-            })
-            .collect::<Vec<_>>()
-    );
-    eprintln!(
-        "backend items: {:?}",
-        artifact
-            .backend
-            .as_program()
-            .expect("run artifact should keep backend program")
-            .items()
-            .iter()
-            .filter_map(|(item_id, item)| {
-                ["base", "title"]
-                    .contains(&item.name.as_ref())
-                    .then_some((item_id.as_raw(), item.name.as_ref().to_owned(), item.origin.as_raw()))
-            })
-            .collect::<Vec<_>>()
-    );
-    eprintln!(
-        "runtime link entries: {:?}",
-        artifact
-            .runtime_link
-            .hir_to_backend
-            .iter()
-            .filter(|(item, _)| {
-                (190..=205).contains(&item.as_raw()) || (450..=460).contains(&item.as_raw())
-            })
-            .map(|(item, backend)| (item.as_raw(), backend.as_raw()))
-            .collect::<Vec<_>>()
-    );
     let mut linked = aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
         artifact.runtime_assembly.clone(),
         artifact.backend.clone(),

@@ -42,4 +42,4 @@ See [log.md](log.md) for a chronological record of wiki activity.
 
 ---
 
-*Last updated: 2026-04-13*
+*Last updated: 2026-04-21*

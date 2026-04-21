@@ -1342,7 +1342,7 @@ USAGE:
 
 ARGS:
     [<path>]            Path to an .aivi source file, workspace entry,
-                        or serialized run artifact (.json). When omitted,
+                        or serialized run artifact (.bin). When omitted,
                         resolves via aivi.toml [[app]] or [run] entry,
                         then <workspace>/main.aivi.
 

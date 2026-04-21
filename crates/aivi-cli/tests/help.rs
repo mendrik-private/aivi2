@@ -54,8 +54,8 @@ fn help_build_explains_current_executable_path() {
         "expected executable wording, got stdout: {stdout}"
     );
     assert!(
-        stdout.contains("current runtime binary plus a serialized source-free run artifact"),
-        "expected runtime+artifact wording, got stdout: {stdout}"
+        stdout.contains("current runtime binary plus an embedded source-free app bundle"),
+        "expected embedded-bundle wording, got stdout: {stdout}"
     );
     assert!(
         stdout.contains("`aivi compile`, which emits object code only"),
