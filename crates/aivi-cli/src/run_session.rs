@@ -1565,10 +1565,9 @@ impl aivi_gtk::GtkEventSink<RunHostValue> for RunEventSink<'_> {
 mod tests {
     use super::{
         HydrationRevisionState, MainContextRequestQueue, RunFragmentExecutionUnit, RunLaunchConfig,
-        RunSessionLifecycle, RunSessionPhase, RunSessionScheduleState, RunStartupGate,
-        RunStartupStage,
-        project_run_hydration_globals, start_run_session_with_launch_config,
-        start_run_session_with_launch_config_and_reporter,
+        RunSessionHarness, RunSessionLifecycle, RunSessionPhase, RunSessionScheduleState,
+        RunStartupGate, RunStartupStage, project_run_hydration_globals,
+        start_run_session_with_launch_config, start_run_session_with_launch_config_and_reporter,
     };
     use crate::{RunHydrationStaticState, plan_run_hydration_profiled};
     use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
@@ -1744,9 +1743,7 @@ mod tests {
         )
         .expect("reversi fixture should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
 
         let opening_state = debug_signal_value_for(&harness, "state");
         let opening_move = find_sensitive_button_by_label(&harness, "◌")
@@ -1835,6 +1832,21 @@ mod tests {
             context.iteration(false);
         }
         predicate()
+    }
+
+    fn present_root_windows_and_wait_for_hydration(harness: &RunSessionHarness, timeout: Duration) {
+        let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the run-session window should start initial hydration");
+        assert!(
+            pump_until(&context, timeout, || {
+                harness
+                    .with_access(|access| access.latest_applied_hydration())
+                    .is_some()
+            }),
+            "run-session initial hydration should apply after window presentation"
+        );
     }
 
     fn required_signal_item(artifact: &crate::RunArtifact, name: &str) -> aivi_backend::ItemId {
@@ -2648,6 +2660,17 @@ export main
         )
         .expect("payload event handler fixture should start a run session");
         let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the fixture window should trigger initial hydration");
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                harness.root_windows().iter().any(|window| {
+                    find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "Beta").is_some()
+                })
+            }),
+            "fixture should render a Beta button after presentation"
+        );
         let beta = harness
             .root_windows()
             .iter()
@@ -2714,6 +2737,17 @@ export main
         )
         .expect("from-selector refresh fixture should start a run session");
         let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the fixture window should trigger initial hydration");
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                harness.root_windows().iter().any(|window| {
+                    find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "Off").is_some()
+                })
+            }),
+            "fixture should render the initial Off label after presentation"
+        );
         let button = harness
             .root_windows()
             .iter()
@@ -2741,9 +2775,7 @@ export main
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
 
         let opening_move = harness
             .root_windows()
@@ -2766,9 +2798,7 @@ export main
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
         let initial_hydration = harness.with_access(|access| access.latest_applied_hydration());
         let opening_red_count = button_label_count_for(&harness, "🔴");
         pump_context(&context, Duration::from_millis(650));
@@ -2802,9 +2832,7 @@ export main
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
 
         let opening_red_count = button_label_count_for(&harness, "🔴");
         let opening_state = debug_signal_value_for(&harness, "state");
@@ -2877,9 +2905,7 @@ export main
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
 
         let opening_red_count = button_label_count_for(&harness, "🔴");
         let opening_move = harness
@@ -2936,9 +2962,7 @@ export main
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
         let opening_red_count = button_label_count_for(&harness, "🔴");
         let opening_white_count = button_label_count_for(&harness, "⚪");
 
@@ -3021,9 +3045,7 @@ export main
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
+        present_root_windows_and_wait_for_hydration(&harness, Duration::from_secs(1));
 
         let opening_red_count = button_label_count_for(&harness, "🔴");
         let opening_move = harness

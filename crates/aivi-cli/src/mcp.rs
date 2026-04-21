@@ -188,6 +188,10 @@ impl McpHostState {
             harness,
             path: entry_path,
         });
+        if let Err(error) = self.settle_session() {
+            self.stop_session();
+            return Err(error);
+        }
         self.session_status()
     }
 

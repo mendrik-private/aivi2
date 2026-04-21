@@ -7,9 +7,11 @@ const FROZEN_RUN_IMAGE_VERSION: u32 = 2;
 const FROZEN_RUN_IMAGE_FILE_NAME: &str = "frozen-run-image.bin";
 const FROZEN_BACKEND_CATALOG_FORMAT: &str = "aivi.frozen-backend-catalog";
 const FROZEN_BACKEND_CATALOG_VERSION: u32 = 1;
+const ENCODED_BACKEND_PAYLOAD_FORMAT: &str = "aivi.encoded-backend-payload";
+const ENCODED_BACKEND_PAYLOAD_VERSION: u32 = 1;
 const SOURCE_RUN_CACHE_FORMAT: &str = "aivi.source-run-cache";
 const SOURCE_RUN_CACHE_VERSION: u32 = 3;
-const SOURCE_RUN_CACHE_NAMESPACE_REVISION: &str = "3";
+const SOURCE_RUN_CACHE_NAMESPACE_REVISION: &str = "4";
 const SOURCE_RUN_CACHE_DIR: &str = "run-cache";
 const SOURCE_RUN_CACHE_METADATA_FILE_NAME: &str = "source-run-cache.json";
 
@@ -159,6 +161,20 @@ struct EncodedFrozenBackendCatalog {
     format: Box<str>,
     version: u32,
     catalog: aivi_backend::FrozenBackendCatalog,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct EncodedBackendPayload {
+    format: Box<str>,
+    version: u32,
+    payload: EncodedBackendPayloadKind,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+enum EncodedBackendPayloadKind {
+    Program(aivi_backend::Program),
+    Meta(aivi_backend::BackendRuntimeMeta),
+    FrozenCatalog(aivi_backend::FrozenBackendCatalog),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -543,6 +559,7 @@ impl ArtifactPayloadRegistry {
                         &backend,
                         meta.as_ref(),
                         native_kernels.as_ref(),
+                        true,
                     )?
                 } else {
                     Box::default()
@@ -597,10 +614,6 @@ impl ArtifactPayloadRegistry {
 }
 
 impl FrozenPayloadRegistry {
-    fn new(include_native_kernels: bool) -> Self {
-        Self::new_with_mode(include_native_kernels, true)
-    }
-
     fn new_with_mode(include_native_kernels: bool, freeze_backends: bool) -> Self {
         Self {
             include_native_kernels,
@@ -637,7 +650,13 @@ impl FrozenPayloadRegistry {
             "frozen backend table exceeded maximum entry count".to_owned()
         })?);
         let native_kernels = if self.include_native_kernels {
-            collect_native_kernel_payloads(key, &backend, meta.as_ref(), native_kernels.as_ref())?
+            collect_native_kernel_payloads(
+                key,
+                &backend,
+                meta.as_ref(),
+                native_kernels.as_ref(),
+                self.freeze_backends,
+            )?
         } else {
             Box::default()
         };
@@ -1090,12 +1109,13 @@ fn collect_native_kernel_payloads(
     backend: &aivi_runtime::hir_adapter::BackendRuntimePayload,
     meta: &aivi_backend::BackendRuntimeMeta,
     provided: &aivi_backend::NativeKernelArtifactSet,
+    compile_missing: bool,
 ) -> Result<Box<[RegisteredNativeKernelPayload]>, String> {
     let mut native_kernels = Vec::new();
     for (kernel, kernel_meta) in meta.kernels().iter() {
         let artifact = if let Some(artifact) = provided.get_for_kernel(kernel_meta.fingerprint, kernel) {
             artifact.clone()
-        } else {
+        } else if compile_missing {
             let Some(program) = backend.as_program() else {
                 return Err(format!(
                     "missing native backend payload for kernel {} in frozen backend {key:016x}",
@@ -1115,6 +1135,8 @@ fn collect_native_kernel_payloads(
                 continue;
             };
             artifact
+        } else {
+            continue;
         };
         let artifact = aivi_backend::attach_frozen_native_kernel_abi(meta, &artifact).map_err(
             |error| {
@@ -1175,31 +1197,25 @@ fn encode_backend_payload_bytes(
     relative_path: &str,
     backend: &aivi_runtime::hir_adapter::BackendRuntimePayload,
 ) -> Result<Vec<u8>, String> {
-    match backend {
-        aivi_runtime::hir_adapter::BackendRuntimePayload::Program(program) => aivi_backend::encode_program_binary(
-            program.as_ref(),
-        )
-        .map_err(|error| {
-            format!(
-                "failed to encode backend payload {relative_path} as binary program: {error}"
-            )
-        }),
-        aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(meta) => bincode::serialize(meta.as_ref())
-            .map_err(|error| {
-                format!(
-                    "failed to encode backend payload {relative_path} as binary runtime metadata: {error}"
-                )
-            }),
-        aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(catalog) => {
-            encode_frozen_backend_catalog_bytes(relative_path, backend).or_else(|_| {
-                bincode::serialize(catalog.as_ref()).map_err(|error| {
-                    format!(
-                        "failed to encode backend payload {relative_path} as binary frozen catalog: {error}"
-                    )
-                })
-            })
+    let payload = match backend {
+        aivi_runtime::hir_adapter::BackendRuntimePayload::Program(program) => {
+            EncodedBackendPayloadKind::Program(program.as_ref().clone())
         }
-    }
+        aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(meta) => {
+            EncodedBackendPayloadKind::Meta(meta.as_ref().clone())
+        }
+        aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(catalog) => {
+            EncodedBackendPayloadKind::FrozenCatalog(catalog.as_ref().clone())
+        }
+    };
+    let encoded = EncodedBackendPayload {
+        format: ENCODED_BACKEND_PAYLOAD_FORMAT.into(),
+        version: ENCODED_BACKEND_PAYLOAD_VERSION,
+        payload,
+    };
+    bincode::serialize(&encoded).map_err(|error| {
+        format!("failed to encode backend payload {relative_path} as tagged binary: {error}")
+    })
 }
 
 fn encode_frozen_backend_catalog_bytes(
@@ -1609,8 +1625,37 @@ fn decode_backend_payload_bytes(
     bytes: &[u8],
     payload_path: &str,
 ) -> Result<aivi_runtime::hir_adapter::BackendRuntimePayload, String> {
-    if let Ok(meta) = bincode::deserialize::<aivi_backend::BackendRuntimeMeta>(bytes) {
+    if let Ok(encoded) = bincode::deserialize::<EncodedBackendPayload>(bytes) {
+        if encoded.format.as_ref() == ENCODED_BACKEND_PAYLOAD_FORMAT {
+            if encoded.version != ENCODED_BACKEND_PAYLOAD_VERSION {
+                return Err(format!(
+                    "failed to decode backend payload {payload_path}: expected version {}, got {}",
+                    ENCODED_BACKEND_PAYLOAD_VERSION,
+                    encoded.version
+                ));
+            }
+            return Ok(match encoded.payload {
+                EncodedBackendPayloadKind::Program(program) => {
+                    aivi_runtime::hir_adapter::BackendRuntimePayload::Program(Arc::new(program))
+                }
+                EncodedBackendPayloadKind::Meta(meta) => {
+                    aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(Arc::new(meta))
+                }
+                EncodedBackendPayloadKind::FrozenCatalog(catalog) => {
+                    aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(Arc::new(catalog))
+                }
+            });
+        }
+    }
+    if let Ok(meta) = bincode::deserialize::<aivi_backend::BackendRuntimeMeta>(bytes)
+        && bincode::serialize(&meta).ok().as_deref() == Some(bytes)
+    {
         return Ok(aivi_runtime::hir_adapter::BackendRuntimePayload::Meta(Arc::new(meta)));
+    }
+    if let Ok(program) = aivi_backend::decode_program_binary(bytes)
+        && aivi_backend::encode_program_binary(&program).ok().as_deref() == Some(bytes)
+    {
+        return Ok(aivi_runtime::hir_adapter::BackendRuntimePayload::Program(Arc::new(program)));
     }
     aivi_backend::decode_program_binary(bytes)
         .map(|program| aivi_runtime::hir_adapter::BackendRuntimePayload::Program(Arc::new(program)))
@@ -1630,22 +1675,18 @@ fn decode_frozen_backend_payload_bytes(
     payload_path: &str,
 ) -> Result<aivi_runtime::hir_adapter::BackendRuntimePayload, String> {
     if let Ok(encoded) = bincode::deserialize::<EncodedFrozenBackendCatalog>(bytes) {
-        if encoded.format.as_ref() != FROZEN_BACKEND_CATALOG_FORMAT {
-            return Err(format!(
-                "failed to decode frozen backend payload {payload_path}: expected format `{FROZEN_BACKEND_CATALOG_FORMAT}`, got `{}`",
-                encoded.format
+        if encoded.format.as_ref() == FROZEN_BACKEND_CATALOG_FORMAT {
+            if encoded.version != FROZEN_BACKEND_CATALOG_VERSION {
+                return Err(format!(
+                    "failed to decode frozen backend payload {payload_path}: expected version {}, got {}",
+                    FROZEN_BACKEND_CATALOG_VERSION,
+                    encoded.version
+                ));
+            }
+            return Ok(aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(
+                Arc::new(encoded.catalog),
             ));
         }
-        if encoded.version != FROZEN_BACKEND_CATALOG_VERSION {
-            return Err(format!(
-                "failed to decode frozen backend payload {payload_path}: expected version {}, got {}",
-                FROZEN_BACKEND_CATALOG_VERSION,
-                encoded.version
-            ));
-        }
-        return Ok(aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(
-            Arc::new(encoded.catalog),
-        ));
     }
     if let Ok(catalog) = bincode::deserialize::<aivi_backend::FrozenBackendCatalog>(bytes) {
         return Ok(aivi_runtime::hir_adapter::BackendRuntimePayload::FrozenCatalog(
