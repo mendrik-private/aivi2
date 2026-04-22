@@ -87,6 +87,17 @@ pub fn assemble_hir_runtime_with_items_profiled(
     module: &hir::Module,
     included_items: &HashSet<hir::ItemId>,
 ) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors> {
+    assemble_hir_runtime_with_items_profiled_and_progress(module, included_items, |_| {})
+}
+
+pub fn assemble_hir_runtime_with_items_profiled_and_progress<F>(
+    module: &hir::Module,
+    included_items: &HashSet<hir::ItemId>,
+    on_progress: F,
+) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors>
+where
+    F: FnMut(String),
+{
     let source_lifecycles = hir::elaborate_source_lifecycles(module);
     let source_decode_programs = hir::generate_source_decode_programs(module);
     let recurrences = hir::elaborate_recurrences(module);
@@ -99,7 +110,7 @@ pub fn assemble_hir_runtime_with_items_profiled(
         &gates,
         included_items,
     )
-    .build_profiled()
+    .build_profiled_with_progress(on_progress)
 }
 
 pub fn assemble_hir_runtime_with_items_and_workspace<'a>(
@@ -116,6 +127,23 @@ pub fn assemble_hir_runtime_with_items_and_workspace_profiled<'a>(
     workspace_hirs: &[(&'a str, &'a hir::Module)],
     included_items: &HashSet<hir::ItemId>,
 ) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors> {
+    assemble_hir_runtime_with_items_and_workspace_profiled_and_progress(
+        module,
+        workspace_hirs,
+        included_items,
+        |_| {},
+    )
+}
+
+pub fn assemble_hir_runtime_with_items_and_workspace_profiled_and_progress<'a, F>(
+    module: &'a hir::Module,
+    workspace_hirs: &[(&'a str, &'a hir::Module)],
+    included_items: &HashSet<hir::ItemId>,
+    on_progress: F,
+) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors>
+where
+    F: FnMut(String),
+{
     let source_lifecycles = hir::elaborate_source_lifecycles(module);
     let source_decode_programs = hir::generate_source_decode_programs(module);
     let recurrences = hir::elaborate_recurrences(module);
@@ -129,7 +157,7 @@ pub fn assemble_hir_runtime_with_items_and_workspace_profiled<'a>(
         included_items,
         workspace_hirs,
     )
-    .build_profiled()
+    .build_profiled_with_progress(on_progress)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -245,8 +273,19 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
     }
 
     pub fn build_profiled(self) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors> {
+        self.build_profiled_with_progress(|_| {})
+    }
+
+    pub fn build_profiled_with_progress<F>(
+        self,
+        mut on_progress: F,
+    ) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors>
+    where
+        F: FnMut(String),
+    {
         let mut errors = Vec::new();
         let mut stats = HirRuntimeAssemblyStats::default();
+        on_progress("index runtime reports".to_owned());
         let report_index = ReportIndex::new(
             self.source_lifecycles,
             self.source_decode_programs,
@@ -261,6 +300,12 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let workspace_modules = build_workspace_runtime_modules(self.module, self.workspace_hirs);
         let mut workspace_states = Vec::with_capacity(workspace_modules.len());
         for (module_index, workspace_module) in workspace_modules.iter().enumerate() {
+            on_progress(format!(
+                "seed workspace signals {}/{} ({})",
+                module_index + 1,
+                workspace_modules.len(),
+                workspace_module.name
+            ));
             workspace_states.push(seed_runtime_module_signals(
                 workspace_module.module,
                 workspace_module.item_origin_offset,
@@ -276,6 +321,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             ));
         }
         let entry_module_index = workspace_modules.len();
+        on_progress("seed entry signals".to_owned());
         let mut entry_state = seed_runtime_module_signals(
             self.module,
             0,
@@ -291,6 +337,10 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         );
         let mut workspace_signal_exports = BTreeMap::<String, BTreeMap<String, hir::ItemId>>::new();
         for (workspace_module, state) in workspace_modules.iter().zip(workspace_states.iter_mut()) {
+            on_progress(format!(
+                "link workspace signal imports ({})",
+                workspace_module.name
+            ));
             for (import_id, binding) in workspace_module.module.imports().iter() {
                 let hir::ImportBindingMetadata::Value {
                     ty: hir::ImportValueType::Signal(_),
@@ -320,6 +370,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             );
         }
         for (workspace_module, state) in workspace_modules.iter().zip(workspace_states.iter_mut()) {
+            on_progress(format!("seed import handles ({})", workspace_module.name));
             let import_to_module = state.import_to_module.clone();
             seed_runtime_import_signal_handles(
                 workspace_module.module,
@@ -329,6 +380,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 state,
             );
         }
+        on_progress("seed import handles (entry)".to_owned());
         let entry_import_to_module = entry_state.import_to_module.clone();
         seed_runtime_import_signal_handles(
             self.module,
@@ -355,13 +407,16 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 continue;
             };
             match &mut binding.kind {
-                HirSignalBindingKind::Input { .. } => {}
+                HirSignalBindingKind::Input { .. } => {
+                    on_progress(format!("wire input signal `{}`", signal.name.text()));
+                }
                 HirSignalBindingKind::Derived {
                     signal: derived,
                     dependencies,
                     temporal_trigger_dependencies,
                     temporal_helpers,
                 } => {
+                    on_progress(format!("wire derived signal `{}`", signal.name.text()));
                     let mut resolved = resolve_signal_dependencies(
                         module,
                         origin.local_item,
@@ -485,6 +540,11 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     let mut clause_bindings = Vec::with_capacity(signal.reactive_updates.len());
                     let mut clause_specs = Vec::with_capacity(signal.reactive_updates.len());
                     let clause_compile_started = Instant::now();
+                    on_progress(format!(
+                        "compile reactive `{}` ({} clauses)",
+                        signal.name.text(),
+                        signal.reactive_updates.len()
+                    ));
                     let reactive_parallelism =
                         bounded_fragment_parallelism(signal.reactive_updates.len());
                     let batch_size = fragment_batch_size(signal.reactive_updates.len());
@@ -628,6 +688,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             }
         }
         let mut task_wakeups = BTreeMap::new();
+        on_progress("collect task wakeups".to_owned());
         for node in self.recurrences.nodes() {
             if !self.includes_item(node.owner) {
                 continue;
@@ -658,6 +719,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             if signal.source_metadata.is_none() {
                 continue;
             }
+            on_progress(format!("plan source `{}`", signal.name.text()));
             seen_source_owners.insert(binding.item);
 
             let Some(lifecycle_node) = report_index.source_lifecycles.get(&binding.item).copied()
@@ -764,6 +826,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             if !annotation_is_task(self.module, annotation) {
                 continue;
             }
+            on_progress(format!("plan task `{}`", value.name.text()));
 
             let owner = match graph_builder.add_owner(value.name.text(), None) {
                 Ok(owner) => owner,
@@ -800,6 +863,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
 
         let mut gates = Vec::new();
         let mut gate_sites = BTreeSet::new();
+        on_progress("plan gate stages".to_owned());
         for stage in self.gates.stages() {
             if !self.includes_item(stage.owner) {
                 continue;
@@ -836,6 +900,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
 
         let mut recurrences = Vec::new();
         let mut recurrence_sites = BTreeSet::new();
+        on_progress("plan recurrences".to_owned());
         for node in self.recurrences.nodes() {
             if !self.includes_item(node.owner) {
                 continue;
@@ -864,15 +929,18 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             }
         }
 
+        on_progress("collect db.changed bindings".to_owned());
         let db_changed_bindings = collect_db_changed_bindings(self.module, self.included_items);
 
         if !errors.is_empty() {
             return Err(HirRuntimeAdapterErrors::new(errors));
         }
 
+        on_progress("build signal graph".to_owned());
         let graph = graph_builder.build().map_err(|err| {
             HirRuntimeAdapterErrors::new(vec![HirRuntimeAdapterError::GraphBuild(err)])
         })?;
+        on_progress("build reactive program".to_owned());
         let reactive_program =
             build_reactive_program(&graph, &signals, &sources, &tasks, &recurrences);
 
@@ -3295,6 +3363,8 @@ fn resolve_direct_signal_expr(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use aivi_base::SourceDatabase;
     use aivi_hir::{DecodeProgramStep, Item, lower_module};
     use aivi_syntax::parse_module;
@@ -3375,6 +3445,70 @@ signal retried : Signal Int =
         let assembly = assemble_hir_runtime(lowered.module())
             .expect("positive runtime fixture should assemble");
         (lowered, assembly)
+    }
+
+    #[test]
+    fn profiled_runtime_assembly_reports_progress_substages() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-progress.aivi",
+            r#"
+domain Duration over Int
+    suffix sec : Int = value => Duration value
+
+signal tick = 0
+signal enabled = True
+
+@source http.get "https://api.example.com/users" with {
+    activeWhen: enabled,
+    refreshOn: tick
+}
+signal users : Signal Int
+
+@recur.timer 1sec
+signal retried : Signal Int =
+    0
+     @|> (value => value)
+     <|@ (value => value)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "progress fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let included_items = lowered
+            .module()
+            .items()
+            .iter()
+            .map(|(item_id, _)| item_id)
+            .collect::<HashSet<_>>();
+        let mut progress = Vec::new();
+
+        let profiled = assemble_hir_runtime_with_items_profiled_and_progress(
+            lowered.module(),
+            &included_items,
+            |detail| progress.push(detail),
+        )
+        .expect("progress fixture should assemble");
+
+        assert!(
+            !profiled.assembly.signals().is_empty(),
+            "progress fixture should still build a runtime assembly"
+        );
+        assert!(
+            progress.iter().any(|detail| detail == "seed entry signals"),
+            "progress should report entry signal seeding: {progress:?}"
+        );
+        assert!(
+            progress
+                .iter()
+                .any(|detail| detail.starts_with("plan source `users`")),
+            "progress should report source planning: {progress:?}"
+        );
+        assert!(
+            progress.iter().any(|detail| detail == "build signal graph"),
+            "progress should report graph construction: {progress:?}"
+        );
     }
 
     #[test]

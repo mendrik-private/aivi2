@@ -255,8 +255,8 @@ fn run_markup_file_with_launch_config(
             },
             {
                 let progress_handle = progress_handle.clone();
-                move |_| {
-                    progress_handle.finish_launch();
+                move |startup_metrics| {
+                    progress_handle.finish_launch(*startup_metrics);
                     let _ = total_start;
                 }
             },
@@ -302,7 +302,7 @@ fn run_markup_file_with_launch_config(
             {
                 let progress_handle = progress_handle.clone();
                 move |startup_metrics| {
-                    progress_handle.finish_launch();
+                    progress_handle.finish_launch(*startup_metrics);
                     if timings {
                         print_run_timing_report(
                             path,
@@ -380,6 +380,10 @@ fn run_markup_file_with_launch_config(
         let progress_handle = progress_handle.clone();
         move |event: RunPreparationStageEvent| match event {
             RunPreparationStageEvent::Started(stage) => progress_handle.start_prelaunch(stage),
+            RunPreparationStageEvent::Detail(stage, detail) => {
+                let _ = stage;
+                progress_handle.update_prelaunch(detail);
+            }
             RunPreparationStageEvent::Completed(stage, duration) => {
                 progress_handle.finish_prelaunch(stage, duration);
                 if timings {
@@ -469,7 +473,7 @@ fn run_markup_file_with_launch_config(
         {
             let progress_handle = progress_handle.clone();
             move |startup_metrics| {
-                progress_handle.finish_launch();
+                progress_handle.finish_launch(*startup_metrics);
                 if timings {
                     print_run_timing_report(
                         path,

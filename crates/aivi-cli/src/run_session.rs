@@ -152,6 +152,104 @@ struct RunSessionLifecycle {
     runtime_error: Option<String>,
 }
 
+fn render_run_error_report(
+    title: &str,
+    context_lines: &[(&str, &str)],
+    details: &str,
+    footer: &str,
+) -> String {
+    render_run_error_report_with_color(
+        title,
+        context_lines,
+        details,
+        footer,
+        progress_color_enabled(),
+    )
+}
+
+fn render_run_error_report_with_color(
+    title: &str,
+    context_lines: &[(&str, &str)],
+    details: &str,
+    footer: &str,
+    color_enabled: bool,
+) -> String {
+    let mut rendered = String::new();
+    rendered.push_str(&format!(
+        "{} {} {} {}\n",
+        progress_paint_rgb(color_enabled, (255, 85, 85), "╭─"),
+        progress_paint_rgb(color_enabled, (189, 147, 249), "aivi run"),
+        progress_paint_dim(color_enabled, "•"),
+        progress_paint_rgb(color_enabled, (255, 184, 108), title),
+    ));
+    let label_width = context_lines
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(6);
+    for (label, value) in context_lines
+        .iter()
+        .copied()
+        .filter(|(_, value)| !value.is_empty())
+    {
+        rendered.push_str(&format!(
+            "{} {} {}\n",
+            progress_paint_dim(color_enabled, "│"),
+            progress_paint_rgb(
+                color_enabled,
+                (139, 233, 253),
+                &format!("{label:<label_width$}"),
+            ),
+            progress_paint_dim(color_enabled, value),
+        ));
+    }
+    rendered.push_str(&format!(
+        "{} {}\n",
+        progress_paint_dim(color_enabled, "├─"),
+        progress_paint_rgb(color_enabled, (102, 217, 239), "details"),
+    ));
+    for line in details.trim_end().lines() {
+        if line.is_empty() {
+            rendered.push_str(&format!("{}\n", progress_paint_dim(color_enabled, "│")));
+        } else {
+            rendered.push_str(&format!(
+                "{} {}\n",
+                progress_paint_dim(color_enabled, "│"),
+                line
+            ));
+        }
+    }
+    rendered.push_str(&format!(
+        "{} {}\n",
+        progress_paint_dim(color_enabled, "╰─"),
+        progress_paint_rgb(color_enabled, (80, 250, 123), footer),
+    ));
+    rendered
+}
+
+fn strip_ansi_for_run_report_detection(text: &str) -> String {
+    let mut stripped = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        stripped.push(ch);
+    }
+    stripped
+}
+
+fn is_run_error_report(text: &str) -> bool {
+    strip_ansi_for_run_report_detection(text).starts_with("╭─ aivi run • ")
+}
+
 fn render_backend_runtime_link_error(
     error: &aivi_runtime::BackendRuntimeLinkError,
     module: Option<&HirModule>,
@@ -235,6 +333,7 @@ struct RunSessionScheduleState {
 }
 
 struct RunSessionState {
+    path: PathBuf,
     view_name: Box<str>,
     kind: RunSessionKind,
     driver: GlibLinkedRuntimeDriver,
@@ -365,8 +464,21 @@ impl RunSessionHarness {
             let initial_hydration_applied = state.hydration.latest_applied().is_some();
             state
                 .startup_gate
-                .mark_roots_presented(&driver, initial_hydration_applied)?;
-            session.process_pending_work()?;
+                .mark_roots_presented(&driver, initial_hydration_applied)
+                .map_err(|error| {
+                    session.render_error_report(
+                        "startup failed",
+                        &error,
+                        "fix the presentation issue above and rerun `aivi run`.",
+                    )
+                })?;
+            session.process_pending_work().map_err(|error| {
+                session.render_error_report(
+                    "startup failed",
+                    &error,
+                    "fix the presentation issue above and rerun `aivi run`.",
+                )
+            })?;
         }
         Ok(())
     }
@@ -811,7 +923,12 @@ impl RunSessionScheduleState {
 
 impl RunSessionState {
     fn fail(&mut self, error: String) {
-        self.lifecycle.fail(error);
+        let rendered = self.render_error_report(
+            "runtime crash",
+            &error,
+            "fix the runtime issue above and rerun `aivi run`.",
+        );
+        self.lifecycle.fail(rendered);
         self.main_loop.quit();
     }
 
@@ -866,6 +983,8 @@ impl RunSessionState {
                 let failures = self.driver.drain_failures();
                 if !failures.is_empty() {
                     return Err(render_run_runtime_failures(
+                        &self.path,
+                        self.view_name.as_ref(),
                         &self.driver,
                         self.sources.as_ref(),
                         &failures,
@@ -892,6 +1011,8 @@ impl RunSessionState {
                 let failures = self.driver.drain_failures();
                 if !failures.is_empty() {
                     return Err(render_run_runtime_failures(
+                        &self.path,
+                        self.view_name.as_ref(),
                         &self.driver,
                         self.sources.as_ref(),
                         &failures,
@@ -948,9 +1069,27 @@ impl RunSessionState {
             })
             .collect()
     }
+
+    fn render_error_report(&self, title: &str, details: &str, footer: &str) -> String {
+        if is_run_error_report(details) {
+            return details.to_owned();
+        }
+        let path_display = self.path.display().to_string();
+        render_run_error_report(
+            title,
+            &[
+                ("path", path_display.as_str()),
+                ("view", self.view_name.as_ref()),
+            ],
+            details,
+            footer,
+        )
+    }
 }
 
 fn render_run_runtime_failures(
+    path: &Path,
+    view_name: &str,
     driver: &GlibLinkedRuntimeDriver,
     sources: Option<&aivi_base::SourceDatabase>,
     failures: &[GlibLinkedRuntimeFailure],
@@ -966,7 +1105,7 @@ fn render_run_runtime_failures(
         &fallback_sources
     };
     let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
-    let mut rendered = String::from("live runtime failed during `aivi run`:\n");
+    let mut rendered = String::new();
     for failure in failures {
         match failure {
             GlibLinkedRuntimeFailure::Tick(error) => {
@@ -986,7 +1125,13 @@ fn render_run_runtime_failures(
             }
         }
     }
-    rendered.trim_end().to_owned()
+    let path_display = path.display().to_string();
+    render_run_error_report(
+        "runtime crash",
+        &[("path", path_display.as_str()), ("view", view_name)],
+        rendered.trim_end(),
+        "fix the runtime issue above and rerun `aivi run`.",
+    )
 }
 
 fn run_hydration_worker_loop(
@@ -1100,9 +1245,13 @@ where
         backend_native_kernels,
         stub_signal_defaults,
     } = artifact;
+    let path_display = path.display().to_string();
+    let view_name_display = view_name.to_string();
     if let Some(diagnostic_sources) = sources.clone() {
         let diagnostic_source_map =
             aivi_runtime::RuntimeSourceMap::from_assembly(&runtime_assembly);
+        let error_path = path_display.clone();
+        let error_view = view_name_display.clone();
         launch_config
             .providers
             .set_decode_diagnostic_reporter(Arc::new(move |instance, provider, error| {
@@ -1115,14 +1264,36 @@ where
                 let renderer = aivi_base::DiagnosticRenderer::new(aivi_base::ColorMode::Auto);
                 eprintln!(
                     "{}",
-                    renderer.render_all(diagnostics.iter(), &diagnostic_sources)
+                    render_run_error_report(
+                        "source decode failed",
+                        &[
+                            ("path", error_path.as_str()),
+                            ("view", error_view.as_str()),
+                            ("source", provider.key()),
+                        ],
+                        &renderer.render_all(diagnostics.iter(), &diagnostic_sources),
+                        &format!(
+                            "update source `{}` (instance {}) and rerun `aivi run`.",
+                            provider.key(),
+                            instance.as_raw()
+                        ),
+                    )
                 );
             }));
     }
     if matches!(kind, RunArtifactKind::Gtk(_)) {
         let gtk_init_started = Instant::now();
-        gtk::init()
-            .map_err(|error| format!("failed to initialize GTK for {}: {error}", path.display()))?;
+        gtk::init().map_err(|error| {
+            render_run_error_report(
+                "startup failed",
+                &[
+                    ("path", path_display.as_str()),
+                    ("view", view_name_display.as_str()),
+                ],
+                &format!("failed to initialize GTK for {}: {error}", path.display()),
+                "ensure GTK is available, then rerun `aivi run`.",
+            )
+        })?;
         let gtk_init = gtk_init_started.elapsed();
         record_startup_stage(
             &mut startup_metrics,
@@ -1141,9 +1312,7 @@ where
             runtime_tables,
         )
         .map_err(|errors| {
-            let mut rendered = String::from(
-                "failed to instantiate frozen backend runtime for `aivi build` output:\n",
-            );
+            let mut rendered = String::new();
             for error in errors.errors() {
                 rendered.push_str("- ");
                 if let Some(program) = backend.as_program() {
@@ -1157,7 +1326,18 @@ where
                 }
                 rendered.push('\n');
             }
-            rendered
+            render_run_error_report(
+                "startup failed",
+                &[
+                    ("path", path_display.as_str()),
+                    ("view", view_name_display.as_str()),
+                ],
+                &format!(
+                    "failed to instantiate frozen backend runtime for `aivi build` output:\n{}",
+                    rendered.trim_end()
+                ),
+                "rebuild the bundle or fix the runtime mismatch, then rerun.",
+            )
         })?
     } else {
         aivi_runtime::link_backend_runtime_with_seed_and_native_kernels_from_payload(
@@ -1167,7 +1347,7 @@ where
             &runtime_link,
         )
         .map_err(|errors| {
-            let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
+            let mut rendered = String::new();
             for error in errors.errors() {
                 rendered.push_str("- ");
                 if let Some(program) = backend.as_program() {
@@ -1181,7 +1361,18 @@ where
                 }
                 rendered.push('\n');
             }
-            rendered
+            render_run_error_report(
+                "startup failed",
+                &[
+                    ("path", path_display.as_str()),
+                    ("view", view_name_display.as_str()),
+                ],
+                &format!(
+                    "failed to link backend runtime for `aivi run`:\n{}",
+                    rendered.trim_end()
+                ),
+                "fix the runtime-link errors above and rerun `aivi run`.",
+            )
         })?
     };
     let runtime_link = runtime_link_started.elapsed();
@@ -1245,10 +1436,18 @@ where
                 GtkConcreteHost::<RunHostValue>::default(),
             )
             .map_err(|error| {
-                format!(
-                    "failed to mount GTK view `{}` from {}: {error}",
-                    view_name,
-                    path.display()
+                render_run_error_report(
+                    "startup failed",
+                    &[
+                        ("path", path_display.as_str()),
+                        ("view", view_name_display.as_str()),
+                    ],
+                    &format!(
+                        "failed to mount GTK view `{}` from {}: {error}",
+                        view_name,
+                        path.display()
+                    ),
+                    "fix the GTK markup/runtime issue above and rerun `aivi run`.",
                 )
             })?;
             let startup_manual_sources = hold_startup_timer_sources(&driver)?;
@@ -1275,6 +1474,7 @@ where
     };
     let schedule_state = RunSessionScheduleState::default();
     let session = Rc::new(RefCell::new(RunSessionState {
+        path: path.to_path_buf(),
         view_name: view_name.clone(),
         kind: session_kind,
         driver,
@@ -1366,7 +1566,11 @@ where
     {
         let mut session = session.borrow_mut();
         session.process_pending_work().map_err(|error| {
-            format!("failed to start run view `{}`: {error}", session.view_name)
+            session.render_error_report(
+                "startup failed",
+                &error,
+                "fix the startup issue above and rerun `aivi run`.",
+            )
         })?;
     }
     let initial_runtime_tick = initial_runtime_tick_started.elapsed();
@@ -1389,15 +1593,22 @@ where
     {
         let mut session = session.borrow_mut();
         if let Some(error) = session.lifecycle.take_runtime_error() {
-            return Err(format!(
-                "failed to start run view `{}`: {error}",
-                session.view_name
-            ));
+            return Err(error);
         }
     }
     let root_windows = if matches!(&session.borrow().kind, RunSessionKind::Gtk(_)) {
         let root_window_collection_started = Instant::now();
-        let root_windows = session.borrow().collect_root_windows()?;
+        let root_windows = session.borrow().collect_root_windows().map_err(|error| {
+            render_run_error_report(
+                "startup failed",
+                &[
+                    ("path", path_display.as_str()),
+                    ("view", view_name_display.as_str()),
+                ],
+                &error,
+                "fix the root-window issue above and rerun `aivi run`.",
+            )
+        })?;
         let root_window_collection = root_window_collection_started.elapsed();
         record_startup_stage(
             &mut startup_metrics,
@@ -1566,8 +1777,9 @@ mod tests {
     use super::{
         HydrationRevisionState, MainContextRequestQueue, RunFragmentExecutionUnit, RunLaunchConfig,
         RunSessionHarness, RunSessionLifecycle, RunSessionPhase, RunSessionScheduleState,
-        RunStartupGate, RunStartupStage, project_run_hydration_globals,
-        start_run_session_with_launch_config, start_run_session_with_launch_config_and_reporter,
+        RunStartupGate, RunStartupStage, is_run_error_report, project_run_hydration_globals,
+        render_run_error_report_with_color, start_run_session_with_launch_config,
+        start_run_session_with_launch_config_and_reporter,
     };
     use crate::{RunHydrationStaticState, plan_run_hydration_profiled};
     use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
@@ -2232,6 +2444,39 @@ mod tests {
 
         assert_eq!(lifecycle.phase(), RunSessionPhase::Stopped);
         assert_eq!(lifecycle.take_runtime_error().as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn run_error_report_renders_boxed_tui_layout_with_color() {
+        let rendered = render_run_error_report_with_color(
+            "runtime crash",
+            &[("path", "demos/snake.aivi"), ("view", "main")],
+            "something bad happened",
+            "fix it and rerun.",
+            true,
+        );
+
+        assert!(rendered.contains("\x1b[38;2;"));
+        assert!(is_run_error_report(&rendered));
+        assert!(rendered.contains("╭─"));
+        assert!(rendered.contains("├─"));
+        assert!(rendered.contains("╰─"));
+        assert!(rendered.contains("something bad happened"));
+    }
+
+    #[test]
+    fn run_error_report_plain_mode_avoids_ansi() {
+        let rendered = render_run_error_report_with_color(
+            "startup failed",
+            &[("path", "demos/reversi.aivi"), ("view", "main")],
+            "failed to link backend runtime",
+            "fix it and rerun.",
+            false,
+        );
+
+        assert!(!rendered.contains("\x1b["));
+        assert!(rendered.starts_with("╭─ aivi run • startup failed"));
+        assert!(rendered.contains("failed to link backend runtime"));
     }
 
     #[test]

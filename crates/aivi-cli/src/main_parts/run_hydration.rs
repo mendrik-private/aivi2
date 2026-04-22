@@ -109,6 +109,18 @@ impl RunProgressHandle {
         push_recent_progress(&mut state.recent, label, duration);
     }
 
+    fn update_prelaunch(&self, label: impl Into<Box<str>>) {
+        let Some(state) = &self.state else {
+            return;
+        };
+        let mut state = state
+            .lock()
+            .expect("run progress state mutex should not be poisoned");
+        if let Some(current) = state.prelaunch_current.as_mut() {
+            current.label = label.into();
+        }
+    }
+
     fn mark_launching(&self) {
         let Some(state) = &self.state else {
             return;
@@ -137,20 +149,23 @@ impl RunProgressHandle {
         push_recent_progress(&mut state.recent, stage.label(), startup.stage_duration(stage));
     }
 
-    fn finish_launch(&self) {
+    fn finish_launch(&self, startup: run_session::RunStartupMetrics) {
         let Some(state) = &self.state else {
             return;
         };
-        {
-            let mut state = state
-                .lock()
-                .expect("run progress state mutex should not be poisoned");
-            state.prelaunch_current = None;
-            state.startup_current = None;
-        }
-        if let Some(stop) = &self.stop {
-            stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
+        let mut state = state
+            .lock()
+            .expect("run progress state mutex should not be poisoned");
+        state.prelaunch_current = None;
+        state.startup_current = Some(RunProgressStageState {
+            label: "session live".into(),
+            started_at: Instant::now(),
+        });
+        push_recent_progress(
+            &mut state.recent,
+            "first present",
+            startup.total_to_first_present(),
+        );
     }
 }
 
@@ -207,7 +222,7 @@ fn build_run_progress_lines(state: &RunProgressState) -> Vec<String> {
         &current_progress_label(state.startup_current.as_ref(), state.startup_history.is_empty()),
         24,
     );
-    vec![
+    let lines = vec![
         format!(
             "{} {} {} {}",
             progress_paint_rgb(state.color_enabled, (102, 217, 239), "╭─"),
@@ -255,7 +270,12 @@ fn build_run_progress_lines(state: &RunProgressState) -> Vec<String> {
             progress_paint_rgb(state.color_enabled, (139, 233, 253), "recent"),
             progress_paint_dim(state.color_enabled, &recent_progress_summary(&state.recent)),
         ),
-    ]
+    ];
+    let max_width = progress_terminal_width();
+    lines
+        .into_iter()
+        .map(|line| truncate_ansi_line(&line, max_width))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -451,6 +471,24 @@ fn progress_color_enabled() -> bool {
     io::stderr().is_terminal()
 }
 
+fn progress_terminal_width() -> usize {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|width| *width >= 24)
+        .or_else(|| {
+            std::process::Command::new("tput")
+                .arg("cols")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .filter(|width| *width >= 24)
+        })
+        .unwrap_or(72)
+}
+
 fn progress_paint_rgb(color_enabled: bool, color: (u8, u8, u8), text: &str) -> String {
     if !color_enabled {
         return text.to_owned();
@@ -487,6 +525,62 @@ fn lerp_progress_color(
 
 fn lerp_progress_channel(start: u8, end: u8, t: f32) -> u8 {
     ((start as f32) + ((end as f32) - (start as f32)) * t).round() as u8
+}
+
+fn visible_ansi_width(text: &str) -> usize {
+    let mut width = 0;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        width += 1;
+    }
+    width
+}
+
+fn truncate_ansi_line(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if visible_ansi_width(text) <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 1 {
+        return "…".to_owned();
+    }
+    let mut rendered = String::new();
+    let mut visible = 0;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            rendered.push(ch);
+            rendered.push(chars.next().expect("peeked ANSI introducer should exist"));
+            for next in chars.by_ref() {
+                rendered.push(next);
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        if visible >= max_width.saturating_sub(1) {
+            break;
+        }
+        rendered.push(ch);
+        visible += 1;
+    }
+    rendered.push('…');
+    if text.contains("\x1b[") {
+        rendered.push_str("\x1b[0m");
+    }
+    rendered
 }
 
 fn print_run_timing_report(

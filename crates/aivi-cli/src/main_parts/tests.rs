@@ -21,7 +21,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, Once},
+    sync::{Arc, Mutex, Once},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -2937,5 +2937,100 @@ fn progress_lines_stay_plain_when_color_disabled() {
             || lines[2].contains("⣤")
             || lines[2].contains("⣄"),
         "active startup lane should keep the braille spinner trail without color"
+    );
+}
+
+#[test]
+fn truncate_ansi_line_uses_visible_width() {
+    let line = "\x1b[38;2;255;85;85mabcdef\x1b[0m";
+
+    let truncated = super::truncate_ansi_line(line, 4);
+
+    assert_eq!(super::visible_ansi_width(&truncated), 4);
+    assert!(truncated.contains('…'));
+    assert!(truncated.ends_with("\x1b[0m"));
+}
+
+#[test]
+fn finish_launch_keeps_progress_live_after_first_present() {
+    let state = Arc::new(Mutex::new(super::RunProgressState {
+        title: "demos/snake.aivi".into(),
+        prelaunch_current: Some(super::RunProgressStageState {
+            label: "load + parse".into(),
+            started_at: Instant::now(),
+        }),
+        startup_current: Some(super::RunProgressStageState {
+            label: "launching session".into(),
+            started_at: Instant::now(),
+        }),
+        prelaunch_history: vec![Duration::from_millis(12)],
+        startup_history: vec![Duration::from_millis(48)],
+        recent: VecDeque::new(),
+        rendered_lines: 0,
+        frame_index: 0,
+        color_enabled: false,
+    }));
+    let handle = super::RunProgressHandle {
+        state: Some(state.clone()),
+        stop: None,
+    };
+
+    handle.finish_launch(super::run_session::RunStartupMetrics {
+        total_to_session_ready: Duration::from_millis(252),
+        window_presentation: Duration::from_millis(48),
+        ..Default::default()
+    });
+
+    let state = state
+        .lock()
+        .expect("progress test state mutex should not be poisoned");
+    assert_eq!(
+        state
+            .startup_current
+            .as_ref()
+            .map(|stage| stage.label.as_ref()),
+        Some("session live")
+    );
+    assert!(
+        state
+            .recent
+            .iter()
+            .any(|(label, duration)| label.as_ref() == "first present"
+                && *duration == Duration::from_millis(300))
+    );
+}
+
+#[test]
+fn update_prelaunch_replaces_current_stage_label() {
+    let state = Arc::new(Mutex::new(super::RunProgressState {
+        title: "demo.aivi".into(),
+        prelaunch_current: Some(super::RunProgressStageState {
+            label: "runtime assembly".into(),
+            started_at: Instant::now(),
+        }),
+        startup_current: None,
+        prelaunch_history: Vec::new(),
+        startup_history: Vec::new(),
+        recent: VecDeque::new(),
+        rendered_lines: 0,
+        frame_index: 0,
+        color_enabled: false,
+    }));
+    let handle = super::RunProgressHandle {
+        state: Some(state.clone()),
+        stop: None,
+    };
+
+    handle.update_prelaunch("compile reactive `users` (12 clauses)");
+
+    let state = state
+        .lock()
+        .expect("progress test state mutex should not be poisoned");
+    assert_eq!(
+        state
+            .prelaunch_current
+            .as_ref()
+            .map(|stage| stage.label.as_ref()),
+        Some("compile reactive `users` (12 clauses)")
     );
 }

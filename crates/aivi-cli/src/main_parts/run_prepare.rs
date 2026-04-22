@@ -1,5 +1,6 @@
 enum RunPreparationStageEvent {
     Started(&'static str),
+    Detail(&'static str, String),
     Completed(&'static str, Duration),
 }
 
@@ -145,9 +146,18 @@ where
     on_stage_event(RunPreparationStageEvent::Started("runtime assembly"));
     let runtime_assembly_started = Instant::now();
     let profiled_runtime_assembly = if workspace_hirs.is_empty() {
-        assemble_hir_runtime_with_items_profiled(module, &included_items)
+        assemble_hir_runtime_with_items_profiled_and_progress(module, &included_items, |detail| {
+            on_stage_event(RunPreparationStageEvent::Detail("runtime assembly", detail));
+        })
     } else {
-        assemble_hir_runtime_with_items_and_workspace_profiled(module, workspace_hirs, &included_items)
+        assemble_hir_runtime_with_items_and_workspace_profiled_and_progress(
+            module,
+            workspace_hirs,
+            &included_items,
+            |detail| {
+                on_stage_event(RunPreparationStageEvent::Detail("runtime assembly", detail));
+            },
+        )
     }
     .map_err(|errors| {
         let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
