@@ -27,6 +27,7 @@ const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const HOST_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const HYDRATION_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 const HYDRATION_SETTLE_GRACE: Duration = Duration::from_millis(100);
+const CONTEXT_PUMP_ITERATION_BUDGET: usize = 256;
 
 type HostTask = Box<dyn FnOnce(&mut McpHostState) + Send + 'static>;
 
@@ -524,7 +525,7 @@ impl McpHostState {
     }
 
     fn process_context_work(&self) {
-        while self.context.iteration(false) {}
+        let _ = drain_context_work(&self.context, CONTEXT_PUMP_ITERATION_BUDGET);
     }
 
     fn settle_session(&self) -> Result<(), String> {
@@ -717,6 +718,15 @@ impl McpHostState {
     }
 }
 
+fn drain_context_work(context: &glib::MainContext, iteration_budget: usize) -> usize {
+    let mut iterations = 0usize;
+    while iterations < iteration_budget && context.pending() {
+        context.iteration(false);
+        iterations += 1;
+    }
+    iterations
+}
+
 #[derive(Clone)]
 struct PreparedLaunch {
     entry_path: PathBuf,
@@ -745,12 +755,16 @@ fn prepare_launch_request(
         .iter()
         .map(|(name, arc)| (name.as_str(), arc.module()))
         .collect();
-    let artifact = prepare_run_artifact(
+    let artifact = prepare_run_artifact_with_metrics_and_progress(
         &snapshot.sources,
         lowered.module(),
         &workspace_hirs,
         requested_view.as_deref(),
-    )?;
+        Some(snapshot.backend_query_context()),
+        RunHydrationPreparationMode::DeferredLive,
+        |_| {},
+    )?
+    .artifact;
     Ok(PreparedLaunch {
         entry_path: entry_path.to_path_buf(),
         artifact,
