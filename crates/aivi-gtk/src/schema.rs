@@ -428,6 +428,7 @@ pub enum GtkTextPropertySetter {
     EntryPrimaryIconName,
     EntrySecondaryIconName,
     HeaderBarCenteringPolicy,
+    WindowColorScheme,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -741,6 +742,8 @@ pub enum GtkChildMountRoute {
     FlowBoxChildContent,
     ListViewChildren,
     GridViewChildren,
+    // Button
+    ButtonChild,
     // MenuButton
     MenuButtonPopover,
     // Popover
@@ -1253,6 +1256,12 @@ const WINDOW_HIDE_ON_CLOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescript
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowHideOnClose),
 };
 
+const WINDOW_COLOR_SCHEME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "colorScheme",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::WindowColorScheme),
+};
+
 const WINDOW_MAXIMIZE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     name: "onMaximize",
     payload: GtkConcreteEventPayload::Bool,
@@ -1655,6 +1664,7 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         WINDOW_FULLSCREEN_PROPERTY,
         WINDOW_DECORATED_PROPERTY,
         WINDOW_HIDE_ON_CLOSE_PROPERTY,
+        WINDOW_COLOR_SCHEME_PROPERTY,
     ],
     events: &[
         WINDOW_CLOSE_REQUEST_EVENT,
@@ -1900,6 +1910,14 @@ const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[],
 };
 
+const BUTTON_CHILD_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ButtonChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
 const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Button",
     kind: GtkConcreteWidgetKind::Button,
@@ -1940,8 +1958,8 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SWIPE_LEFT_EVENT,
         SWIPE_RIGHT_EVENT,
     ],
-    default_child_group_override: None,
-    child_groups: &[],
+    default_child_group_override: Some(&BUTTON_CHILD_CHILD_GROUP),
+    child_groups: &[BUTTON_CHILD_CHILD_GROUP],
 };
 
 const ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {

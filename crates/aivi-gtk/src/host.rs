@@ -1812,6 +1812,16 @@ where
                     })?
                     .set_title(Some(value));
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::WindowColorScheme) => {
+                let scheme = match value {
+                    "force-light" => adw::ColorScheme::ForceLight,
+                    "prefer-light" => adw::ColorScheme::PreferLight,
+                    "force-dark" => adw::ColorScheme::ForceDark,
+                    "prefer-dark" => adw::ColorScheme::PreferDark,
+                    _ => adw::ColorScheme::Default,
+                };
+                adw::StyleManager::default().set_color_scheme(scheme);
+            }
             GtkPropertySetter::Text(GtkTextPropertySetter::FrameLabel) => {
                 widget
                     .clone()
@@ -4147,6 +4157,19 @@ where
                         expected_type: "gtk::FlowBoxChild",
                     })?
                     .set_child(child);
+            }
+            GtkChildMountRoute::ButtonChild => {
+                let btn = parent_widget
+                    .clone()
+                    .downcast::<gtk::Button>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Button".into(),
+                        expected_type: "gtk::Button",
+                    })?;
+                match child {
+                    Some(c) => btn.set_child(Some(c.upcast_ref::<gtk::Widget>())),
+                    None => btn.set_child(None::<&gtk::Widget>),
+                }
             }
             GtkChildMountRoute::MenuButtonPopover => {
                 let btn = parent_widget
