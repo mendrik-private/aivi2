@@ -393,24 +393,35 @@ impl GtkClipboardQueue {
 
 struct GtkWindowSizeQueue {
     events: Mutex<VecDeque<(i32, i32)>>,
+    last_seen: Mutex<Option<(i32, i32)>>,
 }
 
 impl Default for GtkWindowSizeQueue {
     fn default() -> Self {
         Self {
             events: Mutex::new(VecDeque::new()),
+            last_seen: Mutex::new(None),
         }
     }
 }
 
 impl GtkWindowSizeQueue {
-    fn push(&self, event: (i32, i32)) {
+    fn push(&self, event: (i32, i32)) -> bool {
+        let mut last_seen = self
+            .last_seen
+            .lock()
+            .expect("GtkWindowSizeQueue last_seen mutex should not be poisoned");
+        if last_seen.is_some_and(|previous| previous == event) {
+            return false;
+        }
         let mut guard = self
             .events
             .lock()
             .expect("GtkWindowSizeQueue mutex should not be poisoned");
         guard.clear();
         guard.push_back(event);
+        *last_seen = Some(event);
+        true
     }
     fn drain(&self) -> Vec<(i32, i32)> {
         self.events
@@ -430,24 +441,35 @@ impl GtkWindowSizeQueue {
 
 struct GtkWindowFocusQueue {
     events: Mutex<VecDeque<bool>>,
+    last_seen: Mutex<Option<bool>>,
 }
 
 impl Default for GtkWindowFocusQueue {
     fn default() -> Self {
         Self {
             events: Mutex::new(VecDeque::new()),
+            last_seen: Mutex::new(None),
         }
     }
 }
 
 impl GtkWindowFocusQueue {
-    fn push(&self, event: bool) {
+    fn push(&self, event: bool) -> bool {
+        let mut last_seen = self
+            .last_seen
+            .lock()
+            .expect("GtkWindowFocusQueue last_seen mutex should not be poisoned");
+        if last_seen.is_some_and(|previous| previous == event) {
+            return false;
+        }
         let mut guard = self
             .events
             .lock()
             .expect("GtkWindowFocusQueue mutex should not be poisoned");
         guard.clear();
         guard.push_back(event);
+        *last_seen = Some(event);
+        true
     }
     fn drain(&self) -> Vec<bool> {
         self.events
@@ -462,6 +484,32 @@ impl GtkWindowFocusQueue {
             .lock()
             .expect("GtkWindowFocusQueue mutex should not be poisoned")
             .is_empty()
+    }
+}
+
+fn notify_pending_event(notifier: &Rc<RefCell<Option<Rc<dyn Fn()>>>>) {
+    if let Some(notifier) = notifier.borrow().clone() {
+        notifier();
+    }
+}
+
+fn queue_window_size_snapshot(
+    queue: &GtkWindowSizeQueue,
+    notifier: &Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    size: (i32, i32),
+) {
+    if queue.push(size) {
+        notify_pending_event(notifier);
+    }
+}
+
+fn queue_window_focus_snapshot(
+    queue: &GtkWindowFocusQueue,
+    notifier: &Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    focused: bool,
+) {
+    if queue.push(focused) {
+        notify_pending_event(notifier);
     }
 }
 
@@ -763,25 +811,10 @@ where
         self.window_size_watcher_installed = true;
         let queue = self.queued_window_size.clone();
         let notifier = self.event_notifier.clone();
-        queue.push((window.width(), window.height()));
-        if let Some(n) = self.event_notifier.borrow().clone() {
-            n();
-        }
-        {
-            let queue = queue.clone();
-            let notifier = notifier.clone();
-            window.connect_notify_local(Some("default-width"), move |w, _| {
-                queue.push((w.width(), w.height()));
-                if let Some(n) = notifier.borrow().clone() {
-                    n();
-                }
-            });
-        }
-        window.connect_notify_local(Some("default-height"), move |w, _| {
-            queue.push((w.width(), w.height()));
-            if let Some(n) = notifier.borrow().clone() {
-                n();
-            }
+        queue_window_size_snapshot(&queue, &notifier, (window.width(), window.height()));
+        window.add_tick_callback(move |w, _| {
+            queue_window_size_snapshot(&queue, &notifier, (w.width(), w.height()));
+            glib::ControlFlow::Continue
         });
     }
 
@@ -792,15 +825,9 @@ where
         self.window_focus_watcher_installed = true;
         let queue = self.queued_window_focus.clone();
         let notifier = self.event_notifier.clone();
-        queue.push(window.is_active());
-        if let Some(n) = self.event_notifier.borrow().clone() {
-            n();
-        }
+        queue_window_focus_snapshot(&queue, &notifier, window.is_active());
         window.connect_is_active_notify(move |w| {
-            queue.push(w.is_active());
-            if let Some(n) = notifier.borrow().clone() {
-                n();
-            }
+            queue_window_focus_snapshot(&queue, &notifier, w.is_active());
         });
     }
 
@@ -6070,6 +6097,86 @@ mod tests {
                 _ => None,
             }
         }
+    }
+
+    #[test]
+    fn window_size_queue_dedupes_repeated_values() {
+        let queue = GtkWindowSizeQueue::default();
+
+        assert!(queue.push((1280, 720)));
+        assert!(!queue.push((1280, 720)));
+
+        assert_eq!(queue.drain(), vec![(1280, 720)]);
+
+        assert!(!queue.push((1280, 720)));
+        assert!(queue.drain().is_empty());
+
+        assert!(queue.push((1440, 860)));
+        assert_eq!(queue.drain(), vec![(1440, 860)]);
+    }
+
+    #[test]
+    fn window_focus_queue_dedupes_repeated_values() {
+        let queue = GtkWindowFocusQueue::default();
+
+        assert!(queue.push(true));
+        assert!(!queue.push(true));
+
+        assert_eq!(queue.drain(), vec![true]);
+
+        assert!(!queue.push(true));
+        assert!(queue.drain().is_empty());
+
+        assert!(queue.push(false));
+        assert_eq!(queue.drain(), vec![false]);
+    }
+
+    #[test]
+    fn window_size_snapshot_notifier_skips_duplicate_values() {
+        let queue = GtkWindowSizeQueue::default();
+        let notify_count = Rc::new(std::cell::Cell::new(0usize));
+        let notify_count_for_closure = notify_count.clone();
+        let notifier: Rc<RefCell<Option<Rc<dyn Fn()>>>> =
+            Rc::new(RefCell::new(Some(Rc::new(move || {
+                notify_count_for_closure.set(notify_count_for_closure.get() + 1);
+            }))));
+
+        queue_window_size_snapshot(&queue, &notifier, (1280, 720));
+        queue_window_size_snapshot(&queue, &notifier, (1280, 720));
+        assert_eq!(notify_count.get(), 1);
+        assert_eq!(queue.drain(), vec![(1280, 720)]);
+
+        queue_window_size_snapshot(&queue, &notifier, (1280, 720));
+        assert_eq!(notify_count.get(), 1);
+        assert!(queue.drain().is_empty());
+
+        queue_window_size_snapshot(&queue, &notifier, (1440, 860));
+        assert_eq!(notify_count.get(), 2);
+        assert_eq!(queue.drain(), vec![(1440, 860)]);
+    }
+
+    #[test]
+    fn window_focus_snapshot_notifier_skips_duplicate_values() {
+        let queue = GtkWindowFocusQueue::default();
+        let notify_count = Rc::new(std::cell::Cell::new(0usize));
+        let notify_count_for_closure = notify_count.clone();
+        let notifier: Rc<RefCell<Option<Rc<dyn Fn()>>>> =
+            Rc::new(RefCell::new(Some(Rc::new(move || {
+                notify_count_for_closure.set(notify_count_for_closure.get() + 1);
+            }))));
+
+        queue_window_focus_snapshot(&queue, &notifier, true);
+        queue_window_focus_snapshot(&queue, &notifier, true);
+        assert_eq!(notify_count.get(), 1);
+        assert_eq!(queue.drain(), vec![true]);
+
+        queue_window_focus_snapshot(&queue, &notifier, true);
+        assert_eq!(notify_count.get(), 1);
+        assert!(queue.drain().is_empty());
+
+        queue_window_focus_snapshot(&queue, &notifier, false);
+        assert_eq!(notify_count.get(), 2);
+        assert_eq!(queue.drain(), vec![false]);
     }
 
     fn lower_text(path: &str, text: &str) -> aivi_hir::LoweringResult {

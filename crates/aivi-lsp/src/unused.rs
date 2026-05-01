@@ -147,8 +147,8 @@ fn collect_referenced_items(module: &Module) -> HashSet<ItemId> {
 fn collect_exported_items(module: &Module) -> HashSet<ItemId> {
     let mut exported = HashSet::new();
 
-    for item_id in module.root_items() {
-        if let Item::Export(export) = &module.items()[*item_id]
+    for (_, item) in module.items().iter() {
+        if let Item::Export(export) = item
             && let ResolutionState::Resolved(aivi_hir::ExportResolution::Item(id)) =
                 export.resolution
         {

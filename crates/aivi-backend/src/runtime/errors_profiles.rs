@@ -8,6 +8,7 @@ pub enum EvaluationError {
     },
     MissingItemBody {
         item: ItemId,
+        name: Box<str>,
     },
     MissingItemValue {
         item: ItemId,
@@ -171,8 +172,8 @@ impl fmt::Display for EvaluationError {
         match self {
             Self::UnknownKernel { kernel } => write!(f, "unknown backend kernel {kernel}"),
             Self::UnknownItem { item } => write!(f, "unknown backend item {item}"),
-            Self::MissingItemBody { item } => {
-                write!(f, "backend item {item} has no lowered body kernel")
+            Self::MissingItemBody { item, name } => {
+                write!(f, "backend item {item} (`{name}`) has no lowered body kernel")
             }
             Self::MissingItemValue { item } => write!(
                 f,

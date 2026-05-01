@@ -3,11 +3,11 @@ use std::collections::BTreeSet;
 use aivi_hir::{ItemId as HirItemId, SumConstructorHandle};
 
 use super::{
-    DetachedRuntimeValue, RuntimeDbCommitPlan, RuntimeDbConnection, RuntimeDbQueryPlan,
-    RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
-    RuntimeSumValue, RuntimeValue, append_validation_errors, structural_eq,
+    DetachedRuntimeValue, EvaluationError, RuntimeDbCommitPlan, RuntimeDbConnection,
+    RuntimeDbQueryPlan, RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap, RuntimeMapEntry,
+    RuntimeRecordField, RuntimeSumValue, RuntimeValue, append_validation_errors, structural_eq,
 };
-use crate::{KernelExprId, KernelId};
+use crate::{ItemId, KernelExprId, KernelId};
 
 #[test]
 fn display_formats_nested_runtime_values_without_intermediate_joining() {
@@ -92,6 +92,19 @@ fn display_formats_user_sum_constructors() {
     });
 
     assert_eq!(format!("{value}"), "<constructor Status.Ready>");
+}
+
+#[test]
+fn missing_item_body_display_includes_item_name() {
+    let error = EvaluationError::MissingItemBody {
+        item: ItemId::from_raw(7),
+        name: "renderView".into(),
+    };
+
+    assert_eq!(
+        format!("{error}"),
+        "backend item 7 (`renderView`) has no lowered body kernel"
+    );
 }
 
 #[test]

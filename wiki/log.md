@@ -520,3 +520,15 @@ Aligned the new unary declaration sugar across demos and docs.
 Updated `demos/snake.aivi`, `demos/reversi.aivi`, `manual/guide/values-and-functions.md`,
 `syntax.md`, `AIVI_RFC.md`, and the wiki syntax/demo pages so unary bodies may start directly with
 pipe operators after `=`.
+
+## [2026-05-01] ingest | GTK window source coalescing
+
+Reviewed `crates/aivi-gtk/src/host.rs`, `crates/aivi-cli/src/run_session.rs`, and
+`manual/guide/source-catalog.md` while fixing GTK window source churn.
+
+- `window.size` does not have a `GtkWindow` `notify::width/height` property path in GTK4; the
+  host now treats it as a sampled widget-size source.
+- The host coalesces `window.size` and `window.focus` values and only calls the event notifier
+  when the sampled value actually changes.
+- `RunSession` continues draining those GTK queues into runtime provider dispatch on the main
+  thread; duplicate GTK wakeups are now suppressed before that bridge point.

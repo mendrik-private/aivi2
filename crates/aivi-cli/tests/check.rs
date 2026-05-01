@@ -1318,6 +1318,58 @@ fn check_accepts_bundled_phase_one_domain_stdlib_imports() {
 }
 
 #[test]
+fn check_treats_hoisted_exports_as_used() {
+    let workspace = TempDir::new("check-hoisted-export-unused");
+    workspace.write("aivi.toml", "");
+    workspace.write(
+        "libs/types.aivi",
+        concat!(
+            "hoist\n",
+            "\n",
+            "type SharedRecord = {\n",
+            "    title: Text\n",
+            "}\n",
+            "\n",
+            "type SharedChoice =\n",
+            "  | First\n",
+            "  | Second\n",
+            "\n",
+            "export (SharedRecord, SharedChoice, First, Second)\n",
+        ),
+    );
+    let main = workspace.write(
+        "main.aivi",
+        "use libs.types (SharedRecord, SharedChoice)\n\nvalue item : SharedRecord = { title: \"Inbox\" }\nvalue choice : SharedChoice = First\n\nexport (item, choice)\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected hoisted exported types to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("syntax + HIR passed"),
+        "expected success output, got stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("unused-symbol warning"),
+        "exported hoisted types should stay warning-free, got stdout: {stdout}"
+    );
+    assert!(
+        !stderr.contains("defined but never used"),
+        "exported hoisted types should stay warning-free, got stderr: {stderr}"
+    );
+}
+
+#[test]
 fn check_accepts_bundled_stdlib_fallback() {
     let workspace = TempDir::new("check-bundled-stdlib");
     workspace.write("aivi.toml", "");

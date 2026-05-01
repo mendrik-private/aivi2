@@ -628,7 +628,10 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
             .ok_or(EvaluationError::UnknownItem { item })?;
         let kernel = item_decl
             .body
-            .ok_or(EvaluationError::MissingItemBody { item })?;
+            .ok_or_else(|| EvaluationError::MissingItemBody {
+                item,
+                name: item_decl.name.clone(),
+            })?;
         if !item_decl.parameters.is_empty() {
             return Ok(RuntimeValue::Callable(RuntimeCallable::ItemBody {
                 item,

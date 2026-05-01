@@ -142,7 +142,7 @@ Five builtin source providers are backed directly by GTK/Adwaita APIs:
 | `window.keyDown` | `Text` (key name) | `gtk::EventControllerKey` on the main window |
 | `gtk.darkMode` | `Bool` (`True` = dark) | `adw::StyleManager::connect_dark_notify` |
 | `clipboard.changed` | `Text` (clipboard text) | `gdk::Display::clipboard().connect_changed` |
-| `window.size` | `{ width: Int, height: Int }` | `GtkWindow::notify::width/height` |
+| `window.size` | `{ width: Int, height: Int }` | `gtk::Widget::add_tick_callback` sampling `GtkWindow::width()/height()` |
 | `window.focus` | `Bool` (`True` = focused) | `GtkWindow::notify::is-active` |
 
 `gtk.darkMode` pushes the current state once at startup (before the first tick) and
@@ -155,10 +155,14 @@ on every GDK clipboard change. Non-text clipboard contents (images, files) yield
 empty string. The queue is coalescing: rapid clipboard changes between scheduler ticks
 collapse to a single update. Only one watcher is installed per host instance.
 
-`window.size` fires once at startup with the current dimensions, then each time the
-root window width or height changes. The output must decode to `{ width: Int, height: Int }`.
+`window.size` fires once at startup with the current dimensions, then samples the root
+window size on each GTK frame. The host keeps only the most recent `(width, height)`
+pair and only wakes the scheduler when that sampled pair changes, so duplicate frame
+ticks do not create empty drains or notifier storms. The output must decode to
+`{ width: Int, height: Int }`.
 
 `window.focus` fires once at startup with the current focus state, then on each
-`is-active` property change. The output must decode to `Bool`.
+`is-active` property change. Like `window.size`, it keeps only the latest state and
+suppresses duplicate notifier wakeups. The output must decode to `Bool`.
 
 *See also: [runtime.md](runtime.md), [signal-model.md](signal-model.md)*
