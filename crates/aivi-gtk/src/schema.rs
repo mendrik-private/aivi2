@@ -115,6 +115,40 @@ pub enum GtkConcreteWidgetKind {
     Grid,
     GridChild,
     FileDialog,
+    // Group M: Expanded GTK widgets
+    InfoBar,
+    LevelBar,
+    LinkButton,
+    Stack,
+    StackSwitcher,
+    StackSidebar,
+    TreeExpander,
+    GLArea,
+    // Group N: Expanded libadwaita widgets
+    Breakpoint,
+    ViewSwitcher,
+    ViewSwitcherBar,
+    ViewSwitcherTitle,
+    Avatar,
+    Squeezer,
+    Flap,
+    ButtonContent,
+    WindowTitle,
+    MultiLayoutView,
+    AdwDialog,
+    // Group O: Gesture controllers
+    GestureClick,
+    GestureDrag,
+    GestureSwipe,
+    GestureLongPress,
+    GestureRotate,
+    GestureZoom,
+    // Group P: Drag and drop
+    DragSource,
+    DropTarget,
+    // Group Q: CSS and shortcuts
+    CssProvider,
+    ShortcutController,
 }
 
 impl GtkConcreteWidgetKind {
@@ -190,6 +224,35 @@ impl GtkConcreteWidgetKind {
             Self::Grid => "Grid",
             Self::GridChild => "GridChild",
             Self::FileDialog => "FileDialog",
+            Self::InfoBar => "InfoBar",
+            Self::LevelBar => "LevelBar",
+            Self::LinkButton => "LinkButton",
+            Self::Stack => "Stack",
+            Self::StackSwitcher => "StackSwitcher",
+            Self::StackSidebar => "StackSidebar",
+            Self::TreeExpander => "TreeExpander",
+            Self::GLArea => "GLArea",
+            Self::Breakpoint => "Breakpoint",
+            Self::ViewSwitcher => "ViewSwitcher",
+            Self::ViewSwitcherBar => "ViewSwitcherBar",
+            Self::ViewSwitcherTitle => "ViewSwitcherTitle",
+            Self::Avatar => "Avatar",
+            Self::Squeezer => "Squeezer",
+            Self::Flap => "Flap",
+            Self::ButtonContent => "ButtonContent",
+            Self::WindowTitle => "WindowTitle",
+            Self::MultiLayoutView => "MultiLayoutView",
+            Self::AdwDialog => "AdwDialog",
+            Self::GestureClick => "GestureClick",
+            Self::GestureDrag => "GestureDrag",
+            Self::GestureSwipe => "GestureSwipe",
+            Self::GestureLongPress => "GestureLongPress",
+            Self::GestureRotate => "GestureRotate",
+            Self::GestureZoom => "GestureZoom",
+            Self::DragSource => "DragSource",
+            Self::DropTarget => "DropTarget",
+            Self::CssProvider => "CssProvider",
+            Self::ShortcutController => "ShortcutController",
         }
     }
 }
@@ -314,6 +377,45 @@ pub enum GtkBoolPropertySetter {
     ListViewSingleClickActivate,
     GridViewEnableRubberband,
     GridViewSingleClickActivate,
+    // Group M: Expanded widgets
+    InfoBarRevealed,
+    InfoBarShowCloseButton,
+    LevelBarInverted,
+    StackSwitcherHomogeneous,
+    ViewSwitcherNarrowEllipsize,
+    SqueezerHomogeneous,
+    SqueezerAllowNone,
+    FlapRevealed,
+    FlapLocked,
+    FlapModal,
+    FlapSwipeToOpen,
+    FlapSwipeToClose,
+    FlapTransitionEnabled,
+    MultiLayoutViewFocusOnClick,
+    AdwDialogCanClose,
+    AdwDialogHideOnClose,
+    // Gesture properties
+    GestureTouchOnly,
+    GestureExclusive,
+    // Drag and drop
+    DragSourceEnabled,
+    DropTargetEnabled,
+    // Shortcuts
+    ShortcutControllerPropagationPhase,
+    // Video
+    VideoLoop,
+    VideoAutoplay,
+    // General
+    HasTooltip,
+    ReceivesDefault,
+    CanFocus,
+    CanTarget,
+    OverflowHidden,
+    // Stack
+    StackHhomogeneous,
+    StackVhomogeneous,
+    StackTransitionRunning,
+    StackInterpolateSize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -429,6 +531,44 @@ pub enum GtkTextPropertySetter {
     EntrySecondaryIconName,
     HeaderBarCenteringPolicy,
     WindowColorScheme,
+    // Group M: Expanded widgets
+    InfoBarMessage,
+    InfoBarMessageType,
+    LinkButtonUri,
+    LinkButtonLabel,
+    StackSwitcherIconName,
+    AvatarText,
+    AvatarIconName,
+    SqueezerTransitionType,
+    FlapLabel,
+    ButtonContentLabel,
+    ButtonContentIconName,
+    WindowTitleTitle,
+    WindowTitleSubtitle,
+    ViewSwitcherPolicy,
+    AdwDialogTitle,
+    // Shortcuts
+    ShortcutAction,
+    ShortcutTrigger,
+    // Video
+    VideoFile,
+    // TreeExpander
+    TreeExpanderItem,
+    // Gesture
+    GestureType,
+    // Drag and drop
+    DragSourceActions,
+    DropTargetActions,
+    // Stack
+    StackTransitionType,
+    StackVisibleChildName,
+    // LevelBar
+    LevelBarMode,
+    // GLArea
+    GLAreaProfile,
+    // General picture / media
+    MediaFile,
+    CssText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -486,6 +626,21 @@ pub enum GtkI64PropertySetter {
     CarouselSpacing,
     CarouselRevealDuration,
     TabViewSelectedPage,
+    // Group M: Expanded widgets
+    LevelBarValue,
+    LevelBarMinValue,
+    LevelBarMaxValue,
+    StackPagePosition,
+    SqueezerMaxWidth,
+    GestureNBPoints,
+    DragSourceStartButton,
+    InfoBarTimeout,
+    SpinButtonPageIncrement,
+    SpinButtonPageSize,
+    SpinButtonClimbRate,
+    ScalePageIncrement,
+    ScalePageSize,
+    ProgressBarPulseStep,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -517,6 +672,18 @@ pub enum GtkF64PropertySetter {
     OverlaySplitViewSidebarWidthFraction,
     OverlaySplitViewMinSidebarWidth,
     OverlaySplitViewMaxSidebarWidth,
+    // Group M: Expanded widgets
+    LevelBarValue,
+    AvatarSize,
+    SqueezerThreshold,
+    FlapRevealProgress,
+    CarouselPageProgress,
+    StackPosition,
+    AdwDialogWidthRequest,
+    AdwDialogHeightRequest,
+    GestureDragThreshold,
+    VideoProgress,
+    MediaStreamProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -578,6 +745,28 @@ impl GtkPropertySetter {
             ) => "text: Start or End",
             Self::Text(GtkTextPropertySetter::FileDialogMode) => {
                 "text naming a valid FileChooserAction (Open, Save, OpenMultiple, SelectFolder)"
+            }
+            Self::Text(GtkTextPropertySetter::InfoBarMessageType) => {
+                "text naming a valid MessageType (Info, Warning, Question, Error, Other)"
+            }
+            Self::Text(
+                GtkTextPropertySetter::StackTransitionType
+                | GtkTextPropertySetter::SqueezerTransitionType,
+            ) => "text naming a valid StackTransitionType value",
+            Self::Text(GtkTextPropertySetter::RevealerTransitionType) => {
+                "text naming a valid RevealerTransitionType value"
+            }
+            Self::Text(GtkTextPropertySetter::LevelBarMode) => {
+                "text naming a valid LevelBarMode (Continuous, Discrete)"
+            }
+            Self::Text(GtkTextPropertySetter::ViewSwitcherPolicy) => {
+                "text naming a valid ViewSwitcherPolicy (Narrow, Wide)"
+            }
+            Self::Text(GtkTextPropertySetter::GestureType) => {
+                "text naming a gesture type"
+            }
+            Self::Text(GtkTextPropertySetter::DragSourceActions | GtkTextPropertySetter::DropTargetActions) => {
+                "text naming a valid DragAction (Copy, Move, Link)"
             }
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
@@ -672,6 +861,31 @@ pub enum GtkEventSignal {
     CarouselPageChanged,
     FileDialogResponse,
     SplitButtonClicked,
+    // Group M: Expanded widgets
+    InfoBarResponse,
+    ViewSwitcherPageChanged,
+    ViewSwitcherBarPageChanged,
+    StackPageChanged,
+    FlapRevealedChanged,
+    AdwDialogClosed,
+    // Gesture events
+    GesturePressed,
+    GestureReleased,
+    GestureStopped,
+    GestureDragBegin,
+    GestureDragUpdate,
+    GestureDragEnd,
+    GestureSwipeFired,
+    GestureLongPressFired,
+    GestureRotationChanged,
+    GestureScaleChanged,
+    // Drag and drop events
+    DragBegin,
+    DragEnd,
+    DragDataReceived,
+    DropReceived,
+    // Shortcut events
+    ShortcutActivated,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -766,6 +980,22 @@ pub enum GtkChildMountRoute {
     GridChildContent,
     ActionRowPrefix,
     SplitButtonPopover,
+    // Group M: Expanded widgets
+    InfoBarContent,
+    StackPages,
+    StackPageContent,
+    TreeExpanderChild,
+    FlapContent,
+    FlapFlap,
+    FlapSeparator,
+    MultiLayoutViewContent,
+    AdwDialogContent,
+    AdwDialogHeader,
+    // Gesture controllers attach to target widgets
+    GestureTarget,
+    // Drag and drop
+    DragSourceContent,
+    DropTargetContent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5312,6 +5542,963 @@ const FILE_DIALOG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[],
 };
 
+// ── Group M: Expanded GTK widget property descriptors ─────────────────────
+
+const INFO_BAR_MESSAGE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "message",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::InfoBarMessage),
+};
+const INFO_BAR_MESSAGE_TYPE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "messageType",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::InfoBarMessageType),
+};
+const INFO_BAR_REVEALED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealed",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::InfoBarRevealed),
+};
+const INFO_BAR_SHOW_CLOSE_BUTTON_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showCloseButton",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::InfoBarShowCloseButton),
+};
+const LEVEL_BAR_VALUE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "value",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::LevelBarValue),
+};
+const LEVEL_BAR_MIN_VALUE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "minValue",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::LevelBarMinValue),
+};
+const LEVEL_BAR_MAX_VALUE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxValue",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::LevelBarMaxValue),
+};
+const LEVEL_BAR_INVERTED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "inverted",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::LevelBarInverted),
+};
+const LEVEL_BAR_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "mode",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LevelBarMode),
+};
+const LINK_BUTTON_URI_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "uri",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LinkButtonUri),
+};
+const LINK_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LinkButtonLabel),
+};
+const STACK_VISIBLE_CHILD_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "visibleChildName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StackVisibleChildName),
+};
+const STACK_TRANSITION_TYPE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "transitionType",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StackTransitionType),
+};
+const STACK_HHOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hhomogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::StackHhomogeneous),
+};
+const STACK_VHOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "vhomogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::StackVhomogeneous),
+};
+const STACK_INTERPOLATE_SIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "interpolateSize",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::StackInterpolateSize),
+};
+const STACK_SWITCHER_HOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "homogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::StackSwitcherHomogeneous),
+};
+const STACK_SWITCHER_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StackSwitcherIconName),
+};
+
+// ── Group N: libadwaita widget property descriptors ───────────────────────
+
+const AVATAR_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "text",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AvatarText),
+};
+const AVATAR_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AvatarIconName),
+};
+const AVATAR_SIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "size",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::AvatarSize),
+};
+const SQUEEZER_TRANSITION_TYPE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "transitionType",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SqueezerTransitionType),
+};
+const SQUEEZER_HOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "homogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::SqueezerHomogeneous),
+};
+const SQUEEZER_ALLOW_NONE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "allowNone",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::SqueezerAllowNone),
+};
+const SQUEEZER_THRESHOLD_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "threshold",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::SqueezerThreshold),
+};
+const FLAP_REVEALED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealed",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapRevealed),
+};
+const FLAP_LOCKED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "locked",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapLocked),
+};
+const FLAP_MODAL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "modal",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapModal),
+};
+const FLAP_SWIPE_TO_OPEN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "swipeToOpen",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapSwipeToOpen),
+};
+const FLAP_SWIPE_TO_CLOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "swipeToClose",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapSwipeToClose),
+};
+const FLAP_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FlapLabel),
+};
+const FLAP_REVEAL_PROGRESS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealProgress",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::FlapRevealProgress),
+};
+const FLAP_TRANSITION_ENABLED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "transitionEnabled",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::FlapTransitionEnabled),
+};
+const BUTTON_CONTENT_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ButtonContentLabel),
+};
+const BUTTON_CONTENT_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ButtonContentIconName),
+};
+const WINDOW_TITLE_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::WindowTitleTitle),
+};
+const WINDOW_TITLE_SUBTITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "subtitle",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::WindowTitleSubtitle),
+};
+const VIEW_SWITCHER_POLICY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "policy",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ViewSwitcherPolicy),
+};
+const VIEW_SWITCHER_NARROW_ELLIPSIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "narrowEllipsize",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ViewSwitcherNarrowEllipsize),
+};
+const ADW_DIALOG_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AdwDialogTitle),
+};
+const ADW_DIALOG_CAN_CLOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "canClose",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::AdwDialogCanClose),
+};
+const ADW_DIALOG_HIDE_ON_CLOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hideOnClose",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::AdwDialogHideOnClose),
+};
+const ADW_DIALOG_WIDTH_REQUEST_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "contentWidth",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::AdwDialogWidthRequest),
+};
+const ADW_DIALOG_HEIGHT_REQUEST_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "contentHeight",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::AdwDialogHeightRequest),
+};
+const MULTI_LAYOUT_VIEW_FOCUS_ON_CLICK_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "focusOnClick",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::MultiLayoutViewFocusOnClick),
+};
+
+// ── Gesture controller property descriptors ───────────────────────────────
+
+const GESTURE_TOUCH_ONLY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "touchOnly",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GestureTouchOnly),
+};
+const GESTURE_EXCLUSIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "exclusive",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::GestureExclusive),
+};
+const GESTURE_N_POINTS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "nPoints",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::GestureNBPoints),
+};
+const GESTURE_DRAG_THRESHOLD_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "dragThreshold",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::GestureDragThreshold),
+};
+
+// ── Drag and drop property descriptors ────────────────────────────────────
+
+const DRAG_SOURCE_ENABLED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "enabled",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::DragSourceEnabled),
+};
+const DRAG_SOURCE_ACTIONS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "actions",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::DragSourceActions),
+};
+const DROP_TARGET_ENABLED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "enabled",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::DropTargetEnabled),
+};
+const DROP_TARGET_ACTIONS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "actions",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::DropTargetActions),
+};
+
+// ── Shortcut controller property descriptors ──────────────────────────────
+
+const SHORTCUT_ACTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "action",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ShortcutAction),
+};
+const SHORTCUT_TRIGGER_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "trigger",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ShortcutTrigger),
+};
+const SHORTCUT_PROPAGATION_PHASE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "propagationPhase",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ShortcutControllerPropagationPhase),
+};
+
+// ── Video / Media property descriptors ────────────────────────────────────
+
+const VIDEO_FILE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "file",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::VideoFile),
+};
+const VIDEO_LOOP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "loop",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::VideoLoop),
+};
+const VIDEO_AUTOPLAY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "autoplay",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::VideoAutoplay),
+};
+
+// ── General utility properties ────────────────────────────────────────────
+
+const HAS_TOOLTIP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hasTooltip",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::HasTooltip),
+};
+const CAN_FOCUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "canFocus",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CanFocus),
+};
+const CAN_TARGET_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "canTarget",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CanTarget),
+};
+
+// ── Event descriptors for new widgets ─────────────────────────────────────
+
+const INFO_BAR_RESPONSE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onResponse",
+    payload: GtkConcreteEventPayload::Text,
+    signal: GtkEventSignal::InfoBarResponse,
+};
+const VIEW_SWITCHER_PAGE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPageChanged",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::ViewSwitcherPageChanged,
+};
+const STACK_PAGE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPageChanged",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::StackPageChanged,
+};
+const FLAP_REVEALED_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onRevealedChanged",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::FlapRevealedChanged,
+};
+const ADW_DIALOG_CLOSED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onClosed",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::AdwDialogClosed,
+};
+const GESTURE_PRESSED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPressed",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::GesturePressed,
+};
+const GESTURE_RELEASED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onReleased",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureReleased,
+};
+const GESTURE_STOPPED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onStopped",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureStopped,
+};
+const GESTURE_DRAG_BEGIN_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDragBegin",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureDragBegin,
+};
+const GESTURE_DRAG_UPDATE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDragUpdate",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureDragUpdate,
+};
+const GESTURE_DRAG_END_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDragEnd",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureDragEnd,
+};
+const GESTURE_SWIPE_FIRED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSwipe",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureSwipeFired,
+};
+const GESTURE_LONG_PRESS_FIRED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onLongPress",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::GestureLongPressFired,
+};
+const GESTURE_ROTATION_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onRotationChanged",
+    payload: GtkConcreteEventPayload::F64,
+    signal: GtkEventSignal::GestureRotationChanged,
+};
+const GESTURE_SCALE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onScaleChanged",
+    payload: GtkConcreteEventPayload::F64,
+    signal: GtkEventSignal::GestureScaleChanged,
+};
+const DRAG_BEGIN_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDragBegin",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::DragBegin,
+};
+const DRAG_END_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDragEnd",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::DragEnd,
+};
+const DROP_RECEIVED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onDrop",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::DropReceived,
+};
+const SHORTCUT_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::ShortcutActivated,
+};
+
+// ── Child group descriptors for new widgets ───────────────────────────────
+
+const INFO_BAR_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::InfoBarContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+const STACK_PAGES_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "pages",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::StackPages,
+    min_children: 0,
+    max_children: None,
+};
+const STACK_PAGE_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::StackPageContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+const TREE_EXPANDER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::TreeExpanderChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+const FLAP_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::FlapContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+const FLAP_FLAP_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "flap",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::FlapFlap,
+    min_children: 0,
+    max_children: Some(1),
+};
+const FLAP_SEPARATOR_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "separator",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::FlapSeparator,
+    min_children: 0,
+    max_children: Some(1),
+};
+const MULTI_LAYOUT_VIEW_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::MultiLayoutViewContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+const ADW_DIALOG_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::AdwDialogContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+const ADW_DIALOG_HEADER_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "header",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::AdwDialogHeader,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+// ── Group M: Expanded GTK widget schemas ──────────────────────────────────
+
+const INFO_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "InfoBar",
+    kind: GtkConcreteWidgetKind::InfoBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        INFO_BAR_MESSAGE_PROPERTY,
+        INFO_BAR_MESSAGE_TYPE_PROPERTY,
+        INFO_BAR_REVEALED_PROPERTY,
+        INFO_BAR_SHOW_CLOSE_BUTTON_PROPERTY,
+    ],
+    events: &[INFO_BAR_RESPONSE_EVENT],
+    default_child_group_override: Some(&INFO_BAR_CONTENT_GROUP),
+    child_groups: &[INFO_BAR_CONTENT_GROUP],
+};
+
+const LEVEL_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "LevelBar",
+    kind: GtkConcreteWidgetKind::LevelBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        LEVEL_BAR_VALUE_PROPERTY,
+        LEVEL_BAR_MIN_VALUE_PROPERTY,
+        LEVEL_BAR_MAX_VALUE_PROPERTY,
+        LEVEL_BAR_INVERTED_PROPERTY,
+        LEVEL_BAR_MODE_PROPERTY,
+        TOOLTIP_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const LINK_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "LinkButton",
+    kind: GtkConcreteWidgetKind::LinkButton,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        LINK_BUTTON_URI_PROPERTY,
+        LINK_BUTTON_LABEL_PROPERTY,
+        TOOLTIP_PROPERTY,
+    ],
+    events: &[BUTTON_CLICK_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const STACK_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Stack",
+    kind: GtkConcreteWidgetKind::Stack,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        STACK_VISIBLE_CHILD_NAME_PROPERTY,
+        STACK_TRANSITION_TYPE_PROPERTY,
+        STACK_HHOMOGENEOUS_PROPERTY,
+        STACK_VHOMOGENEOUS_PROPERTY,
+        STACK_INTERPOLATE_SIZE_PROPERTY,
+    ],
+    events: &[STACK_PAGE_CHANGED_EVENT],
+    default_child_group_override: Some(&STACK_PAGES_GROUP),
+    child_groups: &[STACK_PAGES_GROUP],
+};
+
+const STACK_SWITCHER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "StackSwitcher",
+    kind: GtkConcreteWidgetKind::StackSwitcher,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        STACK_SWITCHER_HOMOGENEOUS_PROPERTY,
+        STACK_SWITCHER_ICON_NAME_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const STACK_SIDEBAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "StackSidebar",
+    kind: GtkConcreteWidgetKind::StackSidebar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const TREE_EXPANDER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "TreeExpander",
+    kind: GtkConcreteWidgetKind::TreeExpander,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&TREE_EXPANDER_CHILD_GROUP),
+    child_groups: &[TREE_EXPANDER_CHILD_GROUP],
+};
+
+const GL_AREA_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GLArea",
+    kind: GtkConcreteWidgetKind::GLArea,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        CAN_FOCUS_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Group N: libadwaita widget schemas ────────────────────────────────────
+
+const BREAKPOINT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Breakpoint",
+    kind: GtkConcreteWidgetKind::Breakpoint,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        WIDTH_REQUEST_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const VIEW_SWITCHER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ViewSwitcher",
+    kind: GtkConcreteWidgetKind::ViewSwitcher,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        VIEW_SWITCHER_POLICY_PROPERTY,
+        VIEW_SWITCHER_NARROW_ELLIPSIZE_PROPERTY,
+    ],
+    events: &[VIEW_SWITCHER_PAGE_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const VIEW_SWITCHER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ViewSwitcherBar",
+    kind: GtkConcreteWidgetKind::ViewSwitcherBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        VIEW_SWITCHER_POLICY_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const VIEW_SWITCHER_TITLE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ViewSwitcherTitle",
+    kind: GtkConcreteWidgetKind::ViewSwitcherTitle,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        VIEW_SWITCHER_POLICY_PROPERTY,
+        TOOLTIP_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const AVATAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Avatar",
+    kind: GtkConcreteWidgetKind::Avatar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        AVATAR_TEXT_PROPERTY,
+        AVATAR_ICON_NAME_PROPERTY,
+        AVATAR_SIZE_PROPERTY,
+        TOOLTIP_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const SQUEEZER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Squeezer",
+    kind: GtkConcreteWidgetKind::Squeezer,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        SQUEEZER_HOMOGENEOUS_PROPERTY,
+        SQUEEZER_ALLOW_NONE_PROPERTY,
+        SQUEEZER_TRANSITION_TYPE_PROPERTY,
+        SQUEEZER_THRESHOLD_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const FLAP_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Flap",
+    kind: GtkConcreteWidgetKind::Flap,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        FLAP_REVEALED_PROPERTY,
+        FLAP_LOCKED_PROPERTY,
+        FLAP_MODAL_PROPERTY,
+        FLAP_SWIPE_TO_OPEN_PROPERTY,
+        FLAP_SWIPE_TO_CLOSE_PROPERTY,
+        FLAP_LABEL_PROPERTY,
+        FLAP_REVEAL_PROGRESS_PROPERTY,
+        FLAP_TRANSITION_ENABLED_PROPERTY,
+    ],
+    events: &[FLAP_REVEALED_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[FLAP_CONTENT_GROUP, FLAP_FLAP_GROUP, FLAP_SEPARATOR_GROUP],
+};
+
+const BUTTON_CONTENT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ButtonContent",
+    kind: GtkConcreteWidgetKind::ButtonContent,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        BUTTON_CONTENT_LABEL_PROPERTY,
+        BUTTON_CONTENT_ICON_NAME_PROPERTY,
+        TOOLTIP_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const WINDOW_TITLE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "WindowTitle",
+    kind: GtkConcreteWidgetKind::WindowTitle,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        WINDOW_TITLE_TITLE_PROPERTY,
+        WINDOW_TITLE_SUBTITLE_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const MULTI_LAYOUT_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "MultiLayoutView",
+    kind: GtkConcreteWidgetKind::MultiLayoutView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        MULTI_LAYOUT_VIEW_FOCUS_ON_CLICK_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&MULTI_LAYOUT_VIEW_CONTENT_GROUP),
+    child_groups: &[MULTI_LAYOUT_VIEW_CONTENT_GROUP],
+};
+
+const ADW_DIALOG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "AdwDialog",
+    kind: GtkConcreteWidgetKind::AdwDialog,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        ADW_DIALOG_TITLE_PROPERTY,
+        ADW_DIALOG_CAN_CLOSE_PROPERTY,
+        ADW_DIALOG_HIDE_ON_CLOSE_PROPERTY,
+        ADW_DIALOG_WIDTH_REQUEST_PROPERTY,
+        ADW_DIALOG_HEIGHT_REQUEST_PROPERTY,
+    ],
+    events: &[ADW_DIALOG_CLOSED_EVENT],
+    default_child_group_override: Some(&ADW_DIALOG_CONTENT_GROUP),
+    child_groups: &[ADW_DIALOG_CONTENT_GROUP, ADW_DIALOG_HEADER_GROUP],
+};
+
+// ── Gesture controller schemas ────────────────────────────────────────────
+
+const GESTURE_CLICK_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureClick",
+    kind: GtkConcreteWidgetKind::GestureClick,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+        GESTURE_N_POINTS_PROPERTY,
+    ],
+    events: &[GESTURE_PRESSED_EVENT, GESTURE_RELEASED_EVENT, GESTURE_STOPPED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const GESTURE_DRAG_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureDrag",
+    kind: GtkConcreteWidgetKind::GestureDrag,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+        GESTURE_N_POINTS_PROPERTY,
+        GESTURE_DRAG_THRESHOLD_PROPERTY,
+    ],
+    events: &[GESTURE_DRAG_BEGIN_EVENT, GESTURE_DRAG_UPDATE_EVENT, GESTURE_DRAG_END_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const GESTURE_SWIPE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureSwipe",
+    kind: GtkConcreteWidgetKind::GestureSwipe,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+        GESTURE_N_POINTS_PROPERTY,
+    ],
+    events: &[GESTURE_SWIPE_FIRED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const GESTURE_LONG_PRESS_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureLongPress",
+    kind: GtkConcreteWidgetKind::GestureLongPress,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+    ],
+    events: &[GESTURE_LONG_PRESS_FIRED_EVENT, GESTURE_PRESSED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const GESTURE_ROTATE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureRotate",
+    kind: GtkConcreteWidgetKind::GestureRotate,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+    ],
+    events: &[GESTURE_ROTATION_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const GESTURE_ZOOM_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "GestureZoom",
+    kind: GtkConcreteWidgetKind::GestureZoom,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        GESTURE_TOUCH_ONLY_PROPERTY,
+        GESTURE_EXCLUSIVE_PROPERTY,
+    ],
+    events: &[GESTURE_SCALE_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Drag and drop schemas ─────────────────────────────────────────────────
+
+const DRAG_SOURCE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "DragSource",
+    kind: GtkConcreteWidgetKind::DragSource,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        DRAG_SOURCE_ENABLED_PROPERTY,
+        DRAG_SOURCE_ACTIONS_PROPERTY,
+    ],
+    events: &[DRAG_BEGIN_EVENT, DRAG_END_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const DROP_TARGET_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "DropTarget",
+    kind: GtkConcreteWidgetKind::DropTarget,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        DROP_TARGET_ENABLED_PROPERTY,
+        DROP_TARGET_ACTIONS_PROPERTY,
+    ],
+    events: &[DROP_RECEIVED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── CSS provider schema ───────────────────────────────────────────────────
+
+const CSS_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "css",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::CssText),
+};
+
+const CSS_PROVIDER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "CssProvider",
+    kind: GtkConcreteWidgetKind::CssProvider,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        CSS_TEXT_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Shortcut controller schema ────────────────────────────────────────────
+
+const SHORTCUT_CONTROLLER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ShortcutController",
+    kind: GtkConcreteWidgetKind::ShortcutController,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        SHORTCUT_ACTION_PROPERTY,
+        SHORTCUT_TRIGGER_PROPERTY,
+        SHORTCUT_PROPAGATION_PHASE_PROPERTY,
+    ],
+    events: &[SHORTCUT_ACTIVATED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
     HEADER_BAR_SCHEMA,
@@ -5383,6 +6570,35 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     GRID_SCHEMA,
     GRID_CHILD_SCHEMA,
     FILE_DIALOG_SCHEMA,
+    INFO_BAR_SCHEMA,
+    LEVEL_BAR_SCHEMA,
+    LINK_BUTTON_SCHEMA,
+    STACK_SCHEMA,
+    STACK_SWITCHER_SCHEMA,
+    STACK_SIDEBAR_SCHEMA,
+    TREE_EXPANDER_SCHEMA,
+    GL_AREA_SCHEMA,
+    BREAKPOINT_SCHEMA,
+    VIEW_SWITCHER_SCHEMA,
+    VIEW_SWITCHER_BAR_SCHEMA,
+    VIEW_SWITCHER_TITLE_SCHEMA,
+    AVATAR_SCHEMA,
+    SQUEEZER_SCHEMA,
+    FLAP_SCHEMA,
+    BUTTON_CONTENT_SCHEMA,
+    WINDOW_TITLE_SCHEMA,
+    MULTI_LAYOUT_VIEW_SCHEMA,
+    ADW_DIALOG_SCHEMA,
+    GESTURE_CLICK_SCHEMA,
+    GESTURE_DRAG_SCHEMA,
+    GESTURE_SWIPE_SCHEMA,
+    GESTURE_LONG_PRESS_SCHEMA,
+    GESTURE_ROTATE_SCHEMA,
+    GESTURE_ZOOM_SCHEMA,
+    DRAG_SOURCE_SCHEMA,
+    DROP_TARGET_SCHEMA,
+    CSS_PROVIDER_SCHEMA,
+    SHORTCUT_CONTROLLER_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -5534,6 +6750,35 @@ mod tests {
                 "Grid",
                 "GridChild",
                 "FileDialog",
+                "InfoBar",
+                "LevelBar",
+                "LinkButton",
+                "Stack",
+                "StackSwitcher",
+                "StackSidebar",
+                "TreeExpander",
+                "GLArea",
+                "Breakpoint",
+                "ViewSwitcher",
+                "ViewSwitcherBar",
+                "ViewSwitcherTitle",
+                "Avatar",
+                "Squeezer",
+                "Flap",
+                "ButtonContent",
+                "WindowTitle",
+                "MultiLayoutView",
+                "AdwDialog",
+                "GestureClick",
+                "GestureDrag",
+                "GestureSwipe",
+                "GestureLongPress",
+                "GestureRotate",
+                "GestureZoom",
+                "DragSource",
+                "DropTarget",
+                "CssProvider",
+                "ShortcutController",
             ]
         );
     }
@@ -5643,7 +6888,12 @@ mod tests {
         ));
 
         let button = lookup_widget_schema_by_name("Button").expect("Button schema should exist");
-        assert_eq!(button.default_child_group(), GtkDefaultChildGroup::None);
+        assert!(matches!(
+            button.default_child_group(),
+            GtkDefaultChildGroup::One(group)
+                if group.name == "child"
+                    && group.container == GtkChildContainerKind::Single
+        ));
 
         let list_view =
             lookup_widget_schema_by_name("ListView").expect("ListView schema should exist");

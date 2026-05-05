@@ -13,6 +13,11 @@ node_modules/
 manual/.vitepress/dist/
 manual/.vitepress/cache/
 
+# Flatpak
+.flatpak-build/
+packaging/flatpak/.flatpak-build/
+packaging/flatpak/repo/
+
 # Editor
 .vscode/settings.json
 .idea/

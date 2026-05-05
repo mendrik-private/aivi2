@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.aivi.Aivi</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>AIVI</name>
+  <summary>Purely functional GTK4/libadwaita language and runtime</summary>
+
+  <description>
+    <p>
+      AIVI is a purely functional, reactive programming language designed
+      specifically for building GTK4 and libadwaita desktop applications on Linux.
+      It compiles to native code via Cranelift and provides a hot-reloadable
+      development experience.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Purely functional reactive signals model</li>
+      <li>First-class GTK4/libadwaita widget markup</li>
+      <li>Native code generation via Cranelift</li>
+      <li>Hot-reloadable development workflow</li>
+      <li>Language server with diagnostics, completions, and navigation</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">org.aivi.Aivi.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The AIVI development environment</caption>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://aivi.dev</url>
+  <url type="bugtracker">https://github.com/aivi/aivi/issues</url>
+  <url type="vcs-browser">https://github.com/aivi/aivi</url>
+
+  <developer id="org.aivi">
+    <name>AIVI Developers</name>
+  </developer>
+
+  <categories>
+    <category>Development</category>
+    <category>IDE</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-05-05">
+      <description>
+        <p>Initial public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

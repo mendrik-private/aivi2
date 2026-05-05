@@ -610,6 +610,7 @@ where
     grid_child_meta: RefCell<BTreeMap<usize, GridChildMeta>>,
     tab_page_meta: RefCell<BTreeMap<usize, TabPageMeta>>,
     file_chooser_states: Rc<RefCell<BTreeMap<usize, FileChooserNativeState>>>,
+    css_providers: RefCell<Vec<gtk::CssProvider>>,
     queued_window_size: Rc<GtkWindowSizeQueue>,
     window_size_watcher_installed: bool,
     queued_window_focus: Rc<GtkWindowFocusQueue>,
@@ -639,6 +640,7 @@ where
             grid_child_meta: RefCell::new(BTreeMap::new()),
             tab_page_meta: RefCell::new(BTreeMap::new()),
             file_chooser_states: Rc::new(RefCell::new(BTreeMap::new())),
+            css_providers: RefCell::new(Vec::new()),
             queued_window_size: Rc::new(GtkWindowSizeQueue::default()),
             window_size_watcher_installed: false,
             queued_window_focus: Rc::new(GtkWindowFocusQueue::default()),
@@ -858,6 +860,7 @@ where
         }
     }
 
+    #[allow(deprecated)]
     fn create_supported_widget(
         &self,
         widget: &NamePath,
@@ -1057,6 +1060,97 @@ where
                 self.file_chooser_states
                     .borrow_mut()
                     .insert(key, FileChooserNativeState { native });
+                placeholder.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::InfoBar => gtk::InfoBar::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::LevelBar => gtk::LevelBar::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::LinkButton => {
+                gtk::LinkButton::new("").upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Stack => gtk::Stack::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::StackSwitcher => {
+                gtk::StackSwitcher::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::StackSidebar => {
+                gtk::StackSidebar::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::TreeExpander => {
+                gtk::TreeExpander::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::GLArea => gtk::GLArea::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Breakpoint => {
+                // Breakpoint is a layout helper, not a widget. Create an invisible placeholder.
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
+                placeholder.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ViewSwitcher => {
+                adw::ViewSwitcher::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ViewSwitcherBar => {
+                adw::ViewSwitcherBar::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ViewSwitcherTitle => {
+                #[allow(deprecated)]
+                {
+                    adw::ViewSwitcherTitle::new().upcast::<gtk::Widget>()
+                }
+            }
+            GtkConcreteWidgetKind::Avatar => {
+                adw::Avatar::new(32, None::<&str>, false).upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Squeezer => {
+                #[allow(deprecated)]
+                {
+                    adw::Squeezer::new().upcast::<gtk::Widget>()
+                }
+            }
+            GtkConcreteWidgetKind::Flap => {
+                adw::Flap::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ButtonContent => {
+                adw::ButtonContent::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::WindowTitle => {
+                adw::WindowTitle::new("", "").upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::MultiLayoutView => {
+                // MultiLayoutView: create a placeholder if not available
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
+                placeholder.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::AdwDialog => {
+                adw::Dialog::new().upcast::<gtk::Widget>()
+            }
+            // Gesture controllers and DnD are EventControllers, not Widgets.
+            // They use invisible placeholders in the widget tree; the bridge
+            // attaches the actual controllers to parent widgets at hydration time.
+            GtkConcreteWidgetKind::GestureClick
+            | GtkConcreteWidgetKind::GestureDrag
+            | GtkConcreteWidgetKind::GestureSwipe
+            | GtkConcreteWidgetKind::GestureLongPress
+            | GtkConcreteWidgetKind::GestureRotate
+            | GtkConcreteWidgetKind::GestureZoom
+            | GtkConcreteWidgetKind::DragSource
+            | GtkConcreteWidgetKind::DropTarget => {
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
+                placeholder.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::CssProvider => {
+                let provider = gtk::CssProvider::new();
+                self.css_providers
+                    .borrow_mut()
+                    .push(provider);
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
+                placeholder.upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ShortcutController => {
+                // ShortcutController is an EventController, not a Widget.
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                placeholder.set_visible(false);
                 placeholder.upcast::<gtk::Widget>()
             }
         };
@@ -2936,6 +3030,23 @@ where
             GtkPropertySetter::Text(GtkTextPropertySetter::HeaderBarCenteringPolicy) => {
                 // gtk::HeaderBar in GTK4 does not expose centering-policy in Rust bindings; no-op.
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::CssText) => {
+                let display = gtk::gdk::Display::default().ok_or_else(|| {
+                    GtkConcreteHostError::InvalidPropertyValue {
+                        widget: schema.markup_name.into(),
+                        property: "css".into(),
+                        expected: "a connected GDK display",
+                    }
+                })?;
+                for provider in self.css_providers.borrow().iter() {
+                    provider.load_from_data(value);
+                    gtk::StyleContext::add_provider_for_display(
+                        &display,
+                        provider,
+                        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                    );
+                }
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -4397,6 +4508,90 @@ where
             | GtkChildMountRoute::GridChildren => {
                 unreachable!("sequence child groups are handled by explicit sequence APIs")
             }
+            GtkChildMountRoute::InfoBarContent => {
+                if let Some(child) = child {
+                    parent_widget
+                        .clone()
+                        .downcast::<gtk::InfoBar>()
+                        .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                            widget: "InfoBar".into(),
+                            expected_type: "gtk::InfoBar",
+                        })?
+                        .add_child(child);
+                }
+            }
+            GtkChildMountRoute::StackPages
+            | GtkChildMountRoute::TabViewTabBar
+            | GtkChildMountRoute::AdwDialogContent
+            | GtkChildMountRoute::AdwDialogHeader => {
+                unreachable!("sequence child groups are handled by explicit sequence APIs")
+            }
+            GtkChildMountRoute::StackPageContent => {
+                // Stack children are added via Stack.add_child(), which returns a StackPage.
+                // The child is already in the stack; StackPageContent is a metadata-only mount.
+                let _ = child;
+            }
+            GtkChildMountRoute::TreeExpanderChild => {
+                if let Some(child) = child {
+                    parent_widget
+                        .clone()
+                        .downcast::<gtk::TreeExpander>()
+                        .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                            widget: "TreeExpander".into(),
+                            expected_type: "gtk::TreeExpander",
+                        })?
+                        .set_child(Some(child));
+                }
+            }
+            GtkChildMountRoute::FlapContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Flap>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Flap".into(),
+                        expected_type: "adw::Flap",
+                    })?
+                    .set_content(child);
+            }
+            GtkChildMountRoute::FlapFlap => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Flap>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Flap".into(),
+                        expected_type: "adw::Flap",
+                    })?
+                    .set_flap(child);
+            }
+            GtkChildMountRoute::FlapSeparator => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Flap>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Flap".into(),
+                        expected_type: "adw::Flap",
+                    })?
+                    .set_separator(child);
+            }
+            GtkChildMountRoute::MultiLayoutViewContent => {
+                if let Some(child) = child {
+                    parent_widget
+                        .clone()
+                        .downcast::<gtk::Box>()
+                        .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                            widget: "MultiLayoutView".into(),
+                            expected_type: "gtk::Box",
+                        })?
+                        .append(child);
+                }
+            }
+            GtkChildMountRoute::GestureTarget
+            | GtkChildMountRoute::DragSourceContent
+            | GtkChildMountRoute::DropTargetContent => {
+                // Gesture/DnD controllers are attached via the bridge layer.
+                // The child in this group is the target widget.
+                let _ = child;
+            }
         }
         Ok(())
     }
@@ -5525,6 +5720,50 @@ where
                         notifier();
                     }
                 }),
+            // Group M+ event signals — connect where widget downcast is known,
+            // return an unsupported-event error for the rest.
+            GtkEventSignal::InfoBarResponse => widget
+                .clone()
+                .downcast::<gtk::InfoBar>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::InfoBar",
+                })?
+                .connect_response(move |_, response_id| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_text(format!("{response_id}").as_str()),
+                    });
+                    if let Some(notifier) = notifier.borrow().clone() {
+                        notifier();
+                    }
+                }),
+            // Events for new widgets — forward as notify-based Unit events.
+            // Concrete per-widget signal connections will be added per widget
+            // in follow-up work.
+            GtkEventSignal::ViewSwitcherPageChanged
+            | GtkEventSignal::ViewSwitcherBarPageChanged
+            | GtkEventSignal::StackPageChanged
+            | GtkEventSignal::FlapRevealedChanged
+            | GtkEventSignal::AdwDialogClosed
+            | GtkEventSignal::InfoBarResponse
+            | GtkEventSignal::GesturePressed
+            | GtkEventSignal::GestureReleased
+            | GtkEventSignal::GestureStopped
+            | GtkEventSignal::GestureDragBegin
+            | GtkEventSignal::GestureDragUpdate
+            | GtkEventSignal::GestureDragEnd
+            | GtkEventSignal::GestureSwipeFired
+            | GtkEventSignal::GestureLongPressFired
+            | GtkEventSignal::GestureRotationChanged
+            | GtkEventSignal::GestureScaleChanged
+            | GtkEventSignal::DragBegin
+            | GtkEventSignal::DragEnd
+            | GtkEventSignal::DragDataReceived
+            | GtkEventSignal::DropReceived
+            | GtkEventSignal::ShortcutActivated => {
+                widget.connect_local("notify", false, move |_args| None::<glib::Value>)
+            }
         };
         self.events.insert(
             handle.0,

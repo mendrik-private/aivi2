@@ -1239,6 +1239,7 @@ COMMANDS:
     lex <path>                      Dump the lossless token stream
     fmt <path|--stdin|--check>      Format AIVI source code
     openapi-gen <spec> [-o file]    Generate AIVI types from an OpenAPI spec
+    init <project-name>             Scaffold a new AIVI project
     lsp                             Start the language server (stdio)
     mcp [opts]                      Start the MCP introspection server (stdio)
     manual-snippets [opts]          Validate and format manual code blocks
@@ -1548,6 +1549,29 @@ DESCRIPTION:
     validates that they parse and type-check, formats them canonically,
     and optionally rewrites the files. Produces a TODO report of blocks
     that need manual attention.
+"
+        }
+        "init" => {
+            "\
+aivi init — scaffold a new AIVI project
+
+USAGE:
+    aivi init <project-name>
+
+ARGS:
+    <project-name>      Name of the project directory to create
+
+DESCRIPTION:
+    Creates a new AIVI project directory containing:
+
+        aivi.toml       Workspace manifest with default [run] entry
+        main.aivi       Starter GTK application window
+        .gitignore      Ignores /target and .aivi-cache
+
+    After scaffolding, start the app with:
+
+        cd <project-name>
+        aivi run
 "
         }
         _ => return None,

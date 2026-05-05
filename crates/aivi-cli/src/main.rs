@@ -78,6 +78,7 @@ include!("main_parts/check_execute.rs");
 include!("main_parts/run_prepare.rs");
 include!("main_parts/run_hydration.rs");
 include!("main_parts/build_tools.rs");
+include!("main_parts/init.rs");
 
 #[cfg(test)]
 #[path = "main_parts/tests.rs"]

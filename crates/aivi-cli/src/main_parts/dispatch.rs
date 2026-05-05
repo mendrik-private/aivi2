@@ -93,6 +93,10 @@ fn run() -> Result<ExitCode, String> {
         return run_openapi_gen(args);
     }
 
+    if first == "init" {
+        return run_init(args);
+    }
+
     // Default: treat the first argument as a path and run `check`.
     check_file(&PathBuf::from(first), false)
 }

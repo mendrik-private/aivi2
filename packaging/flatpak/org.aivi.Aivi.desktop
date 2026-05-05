@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=AIVI
+Comment=Purely functional GTK4/libadwaita language and runtime
+Exec=aivi %F
+Icon=org.aivi.Aivi
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+StartupNotify=true
+MimeType=text/x-aivi;
+Keywords=aivi;gtk4;libadwaita;language;development;

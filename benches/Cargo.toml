@@ -1,0 +1,25 @@
+[package]
+name = "aivi-benches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+aivi-base.workspace = true
+aivi-syntax.workspace = true
+aivi-hir.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "typecheck"
+harness = false
+
+[lints]
+workspace = true

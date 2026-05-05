@@ -1,0 +1,51 @@
+app-id: org.aivi.Aivi
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: aivi
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  - --share=network
+  - --socket=pulseaudio
+  - --filesystem=host
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/aivi/cargo
+    CARGO_TARGET_DIR: /run/build/aivi/target
+
+modules:
+  - name: cargo-vendor
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 cargo-vendor /app/bin/cargo-vendor
+    sources:
+      - type: script
+        commands:
+          - |
+            cargo vendor \
+              --manifest-path "$1"/Cargo.toml \
+              --output-dir "$2" \
+              --no-delete
+        dest-filename: cargo-vendor
+
+  - name: aivi
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --bin aivi
+      - install -Dm755 target/release/aivi /app/bin/aivi
+      - install -Dm644 packaging/flatpak/org.aivi.Aivi.desktop /app/share/applications/org.aivi.Aivi.desktop
+      - install -Dm644 packaging/flatpak/org.aivi.Aivi.metainfo.xml /app/share/metainfo/org.aivi.Aivi.metainfo.xml
+      - install -Dm644 packaging/flatpak/icons/scalable.svg /app/share/icons/hicolor/scalable/apps/org.aivi.Aivi.svg
+      - install -Dm644 packaging/flatpak/icons/symbolic.svg /app/share/icons/hicolor/symbolic/apps/org.aivi.Aivi-symbolic.svg
+      - install -Dm644 packaging/flatpak/org.aivi.Aivi.mime.xml /app/share/mime/packages/org.aivi.Aivi.xml
+    sources:
+      - type: dir
+        path: ../..

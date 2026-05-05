@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [dev, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libwebkitgtk-6.0-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libsecret-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (${{ matrix.profile }})
+        if: matrix.profile == 'dev'
+        run: cargo build --workspace
+
+      - name: Build release
+        if: matrix.profile == 'release'
+        run: cargo build --workspace --release
+
+      - name: Run tests
+        run: cargo test --workspace
+        env:
+          GTK_A11Y: none
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libwebkitgtk-6.0-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libsecret-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  fuzz:
+    name: Fuzz corpus check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build fuzz targets
+        run: |
+          cd fuzz
+          cargo +nightly build --fuzz-targets
