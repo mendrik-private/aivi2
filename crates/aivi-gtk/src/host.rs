@@ -3040,7 +3040,7 @@ where
                 })?;
                 for provider in self.css_providers.borrow().iter() {
                     provider.load_from_data(value);
-                    gtk::StyleContext::add_provider_for_display(
+                    gtk::style_context_add_provider_for_display(
                         &display,
                         provider,
                         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
@@ -4105,6 +4105,7 @@ where
         }
     }
 
+    #[allow(deprecated)]
     fn set_single_child(
         &self,
         parent_widget: &gtk::Widget,
@@ -4521,7 +4522,6 @@ where
                 }
             }
             GtkChildMountRoute::StackPages
-            | GtkChildMountRoute::TabViewTabBar
             | GtkChildMountRoute::AdwDialogContent
             | GtkChildMountRoute::AdwDialogHeader => {
                 unreachable!("sequence child groups are handled by explicit sequence APIs")
@@ -5746,7 +5746,6 @@ where
             | GtkEventSignal::StackPageChanged
             | GtkEventSignal::FlapRevealedChanged
             | GtkEventSignal::AdwDialogClosed
-            | GtkEventSignal::InfoBarResponse
             | GtkEventSignal::GesturePressed
             | GtkEventSignal::GestureReleased
             | GtkEventSignal::GestureStopped

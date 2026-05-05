@@ -5839,17 +5839,17 @@ const SHORTCUT_PROPAGATION_PHASE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDe
 
 // ── Video / Media property descriptors ────────────────────────────────────
 
-const VIDEO_FILE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+const _VIDEO_FILE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "file",
     value_shape: GtkPropertyValueShape::Text,
     setter: GtkPropertySetter::Text(GtkTextPropertySetter::VideoFile),
 };
-const VIDEO_LOOP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+const _VIDEO_LOOP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "loop",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::VideoLoop),
 };
-const VIDEO_AUTOPLAY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+const _VIDEO_AUTOPLAY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "autoplay",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::VideoAutoplay),
@@ -5857,7 +5857,7 @@ const VIDEO_AUTOPLAY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
 
 // ── General utility properties ────────────────────────────────────────────
 
-const HAS_TOOLTIP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+const _HAS_TOOLTIP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "hasTooltip",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::HasTooltip),
@@ -5867,7 +5867,7 @@ const CAN_FOCUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CanFocus),
 };
-const CAN_TARGET_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+const _CAN_TARGET_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "canTarget",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CanTarget),
@@ -5987,7 +5987,7 @@ const STACK_PAGES_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     min_children: 0,
     max_children: None,
 };
-const STACK_PAGE_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+const _STACK_PAGE_CONTENT_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     name: "content",
     container: GtkChildContainerKind::Single,
     mount: GtkChildMountRoute::StackPageContent,

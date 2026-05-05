@@ -18,6 +18,7 @@ use aivi_runtime::{
 use gtk::gdk::prelude::{PaintableExt, TextureExt};
 use gtk::gsk::prelude::GskRendererExt;
 use gtk::prelude::*;
+use adw::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use webkit6::WebView;
@@ -183,7 +184,7 @@ impl McpHostState {
             harness,
             path: entry_path,
         });
-        if let Err(error) = self.settle_session() {
+        if let Err(error) = self.settle_session(None) {
             self.stop_session();
             return Err(error);
         }
@@ -198,7 +199,7 @@ impl McpHostState {
                     access.process_pending_work()
                 })?;
             }
-            if let Err(error) = self.settle_session() {
+            if let Err(error) = self.settle_session(None) {
                 self.stop_session();
                 return Err(error);
             }
@@ -385,13 +386,68 @@ impl McpHostState {
                 .map_err(|error| format!("failed to inject source value: {error}"))?;
             access.process_pending_work()
         })?;
-        self.settle_session()?;
+        self.settle_session(args.settle_timeout_ms)?;
         let after = self.list_signals(ListSignalsArgs::default())?;
         let source = self
             .list_sources()?
             .into_iter()
             .find(|source| source.id == args.source_id)
             .ok_or_else(|| format!("source `{}` disappeared after publication", args.source_id))?;
+        Ok(SourcePublishResult {
+            source,
+            changed_signals: diff_signals(&before, &after),
+            session: self.session_status()?,
+            time_us: started_at.elapsed().as_micros() as u64,
+        })
+    }
+
+    fn publish_source_values(
+        &mut self,
+        args: PublishSourceValuesArgs,
+    ) -> Result<SourcePublishResult, String> {
+        let before = self.list_signals(ListSignalsArgs::default())?;
+        let started_at = Instant::now();
+        let mut last_source_id = String::new();
+        for value_args in &args.values {
+            let source_id = parse_source_id(&value_args.source_id)?;
+            last_source_id = value_args.source_id.clone();
+            let session = self.require_session()?;
+            session.harness.with_access(|access| {
+                let driver = access.driver();
+                if value_args.suspend_live.unwrap_or(true) {
+                    driver
+                        .set_source_mode(source_id, GlibLinkedSourceMode::Manual)
+                        .map_err(|error| {
+                            format!(
+                                "failed to enter manual mode for source {}: {error}",
+                                source_id.as_raw()
+                            )
+                        })?;
+                }
+                let config = driver.evaluate_source_config(source_id).map_err(|error| {
+                    format!(
+                        "failed to evaluate source config for {}: {error}",
+                        source_id.as_raw()
+                    )
+                })?;
+                let runtime =
+                    runtime_value_from_source_json(&value_args.value, config.decode.as_ref())?;
+                driver
+                    .inject_source_value(
+                        source_id,
+                        DetachedRuntimeValue::from_runtime_owned(runtime),
+                    )
+                    .map_err(|error| format!("failed to inject source value: {error}"))?;
+                access.process_pending_work()
+            })?;
+        }
+        self.settle_session(args.settle_timeout_ms)?;
+        let after = self.list_signals(ListSignalsArgs::default())?;
+        let source = self
+            .list_sources()?
+            .into_iter()
+            .find(|source| source.id == last_source_id)
+            .ok_or_else(|| format!("source `{}` disappeared after publication", last_source_id))?;
         Ok(SourcePublishResult {
             source,
             changed_signals: diff_signals(&before, &after),
@@ -425,13 +481,13 @@ impl McpHostState {
         })?;
         let mut matches = Vec::new();
         for root in &trees {
-            collect_widget_matches(root, &query, &mut matches);
+            collect_widget_matches(root, &query, 0, &mut matches);
         }
         Ok(matches)
     }
 
     fn capture_gtk_screenshots(&mut self) -> Result<Vec<GtkScreenshotCapture>, String> {
-        self.settle_session()?;
+        self.settle_session(None)?;
         let roots = self.toplevel_widgets();
         if roots.is_empty() {
             return Err("the app is not running; call `launch_app` first".to_owned());
@@ -447,7 +503,7 @@ impl McpHostState {
         &mut self,
         args: CaptureWidgetScreenshotArgs,
     ) -> Result<GtkScreenshotCapture, String> {
-        self.settle_session()?;
+        self.settle_session(None)?;
         let widget = self
             .find_widget_by_id(&args.widget_id)?
             .ok_or_else(|| format!("no live GTK widget matches `{}`", args.widget_id))?;
@@ -500,9 +556,36 @@ impl McpHostState {
                         .dispatch_window_key_event(key, args.repeated.unwrap_or(false));
                 });
             }
+            "right_click" => {
+                let button = args.button.unwrap_or(3);
+                emit_right_click_event(widget.as_ref().expect("widget required"), button)?;
+            }
+            "double_click" => {
+                let w = widget.as_ref().expect("widget required");
+                emit_activate_event(w)?;
+                emit_activate_event(w)?;
+            }
+            "scroll" => {
+                let delta_x = args.delta_x.unwrap_or(0.0);
+                let delta_y = args.delta_y.unwrap_or(0.0);
+                emit_scroll_event(widget.as_ref().expect("widget required"), delta_x, delta_y)?;
+            }
+            "key_press" => {
+                let keyval = args
+                    .keyval
+                    .ok_or_else(|| "`key_press` requires a `keyval` argument".to_owned())?;
+                emit_key_press_event(widget.as_ref().expect("widget required"), keyval)?;
+            }
+            "type_text" => {
+                let text = args
+                    .text
+                    .as_deref()
+                    .ok_or_else(|| "`type_text` requires a `text` argument".to_owned())?;
+                emit_type_text(widget.as_ref().expect("widget required"), text)?;
+            }
             other => {
                 return Err(format!(
-                    "unsupported GTK event `{other}`; use one of click, activate, set_text, set_active, focus, window_key"
+                    "unsupported GTK event `{other}`; use one of click, activate, set_text, set_active, focus, window_key, right_click, double_click, scroll, key_press, type_text"
                 ));
             }
         }
@@ -512,7 +595,7 @@ impl McpHostState {
             let _ = access.request_current_hydration();
             Ok::<(), String>(())
         })?;
-        self.settle_session()?;
+        self.settle_session(args.settle_timeout_ms)?;
         let elapsed_us = started_at.elapsed().as_micros() as u64;
         let after = self.list_signals(ListSignalsArgs::default())?;
         let gtk = self.snapshot_gtk_tree(SnapshotGtkArgs::default())?;
@@ -534,9 +617,12 @@ impl McpHostState {
         let _ = drain_context_work(&self.context, CONTEXT_PUMP_ITERATION_BUDGET);
     }
 
-    fn settle_session(&self) -> Result<(), String> {
+    fn settle_session(&self, timeout_override: Option<u64>) -> Result<(), String> {
         let session = self.require_session()?;
-        let deadline = Instant::now() + HYDRATION_SETTLE_TIMEOUT;
+        let settle_timeout = timeout_override
+            .map(Duration::from_millis)
+            .unwrap_or(HYDRATION_SETTLE_TIMEOUT);
+        let deadline = Instant::now() + settle_timeout;
         let mut stable_since = None;
         loop {
             self.process_context_work();
@@ -1169,6 +1255,28 @@ fn handle_tool_call(
                 }),
             )
         }
+        "publish_source_values" => {
+            let args: PublishSourceValuesArgs = serde_json::from_value(arguments)
+                .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let value_count = args.values.len();
+            let result = controller
+                .call(move |host| host.publish_source_values(args))
+                .map_err(JsonRpcError::tool_failure)?;
+            tool_success(
+                format!(
+                    "Published {} value(s) in {}µs; {} signal(s) changed",
+                    value_count,
+                    result.time_us,
+                    result.changed_signals.len(),
+                ),
+                json!({
+                    "source": result.source,
+                    "changedSignals": result.changed_signals,
+                    "session": result.session,
+                    "timeUs": result.time_us,
+                }),
+            )
+        }
         "snapshot_gtk_tree" => {
             let args: SnapshotGtkArgs = serde_json::from_value(arguments)
                 .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
@@ -1513,9 +1621,34 @@ fn tool_definitions() -> Vec<JsonValue> {
                 "properties": {
                     "source_id": { "type": "string" },
                     "value": {},
-                    "suspend_live": { "type": "boolean" }
+                    "suspend_live": { "type": "boolean" },
+                    "settle_timeout_ms": { "type": "integer" }
                 },
                 "required": ["source_id", "value"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "publish_source_values",
+            "description": "Publish multiple source values sequentially (switch to manual for each), then settle once at the end. Returns combined changed_signals and time_us.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": { "type": "string" },
+                                "value": {},
+                                "suspend_live": { "type": "boolean" }
+                            },
+                            "required": ["source_id", "value"]
+                        }
+                    },
+                    "settle_timeout_ms": { "type": "integer" }
+                },
+                "required": ["values"],
                 "additionalProperties": false
             }
         }),
@@ -1532,7 +1665,7 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "find_widgets",
-            "description": "Search the semantic GTK snapshot for widgets by role, text, focus, or actionability.",
+            "description": "Search the semantic GTK snapshot for widgets by role, text, focus, actionable, kind, kind_contains, surface_id, value_contains, visible, sensitive, path_contains, or max_depth.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1540,7 +1673,15 @@ fn tool_definitions() -> Vec<JsonValue> {
                     "role": { "type": "string" },
                     "focused": { "type": "boolean" },
                     "actionable": { "type": "boolean" },
-                    "include_hidden": { "type": "boolean" }
+                    "include_hidden": { "type": "boolean" },
+                    "kind": { "type": "string" },
+                    "kind_contains": { "type": "string" },
+                    "surface_id": { "type": "string" },
+                    "value_contains": { "type": "string" },
+                    "visible": { "type": "boolean" },
+                    "sensitive": { "type": "boolean" },
+                    "path_contains": { "type": "string" },
+                    "max_depth": { "type": "integer" }
                 },
                 "additionalProperties": false
             }
@@ -1575,12 +1716,17 @@ fn tool_definitions() -> Vec<JsonValue> {
                     "widget_id": { "type": "string" },
                     "event": {
                         "type": "string",
-                        "enum": ["click", "activate", "set_text", "set_active", "focus", "window_key"]
+                        "enum": ["click", "activate", "set_text", "set_active", "focus", "window_key", "right_click", "double_click", "scroll", "key_press", "type_text"]
                     },
                     "text": { "type": "string" },
                     "active": { "type": "boolean" },
                     "key": { "type": "string" },
-                    "repeated": { "type": "boolean" }
+                    "repeated": { "type": "boolean" },
+                    "delta_x": { "type": "number" },
+                    "delta_y": { "type": "number" },
+                    "button": { "type": "integer" },
+                    "keyval": { "type": "integer" },
+                    "settle_timeout_ms": { "type": "integer" }
                 },
                 "required": ["event"],
                 "additionalProperties": false
@@ -2074,6 +2220,7 @@ fn runtime_value_from_json(value: &JsonValue) -> Result<RuntimeValue, String> {
     }
 }
 
+#[allow(deprecated)]
 fn widget_role(widget: &gtk::Widget) -> String {
     if widget.is::<gtk::Window>() {
         return "window".to_owned();
@@ -2120,10 +2267,177 @@ fn widget_role(widget: &gtk::Widget) -> String {
     if widget.is::<gtk::ScrolledWindow>() {
         return "scrolled-window".to_owned();
     }
+    if widget.is::<gtk::SearchEntry>() {
+        return "search-entry".to_owned();
+    }
+    if widget.is::<gtk::Separator>() {
+        return "separator".to_owned();
+    }
+    if widget.is::<gtk::Stack>() {
+        return "stack".to_owned();
+    }
+    if widget.is::<gtk::SpinButton>() {
+        return "spin-button".to_owned();
+    }
+    if widget.is::<gtk::Scale>() {
+        return "scale".to_owned();
+    }
+    if widget.is::<gtk::ProgressBar>() {
+        return "progress-bar".to_owned();
+    }
+    if widget.is::<gtk::Revealer>() {
+        return "revealer".to_owned();
+    }
+    if widget.is::<gtk::Spinner>() {
+        return "spinner".to_owned();
+    }
+    if widget.is::<gtk::DropDown>() {
+        return "drop-down".to_owned();
+    }
+    if widget.is::<gtk::Calendar>() {
+        return "calendar".to_owned();
+    }
+    if widget.is::<gtk::LevelBar>() {
+        return "level-bar".to_owned();
+    }
+    if widget.is::<gtk::InfoBar>() {
+        return "info-bar".to_owned();
+    }
+    if widget.is::<gtk::LinkButton>() {
+        return "link-button".to_owned();
+    }
+    if widget.is::<gtk::EditableLabel>() {
+        return "editable-label".to_owned();
+    }
+    if widget.is::<gtk::FlowBox>() {
+        return "flow-box".to_owned();
+    }
+    if widget.is::<gtk::ListBox>() {
+        return "list-box".to_owned();
+    }
+    if widget.is::<gtk::ListView>() {
+        return "list-view".to_owned();
+    }
+    if widget.is::<gtk::GridView>() {
+        return "grid-view".to_owned();
+    }
+    if widget.is::<gtk::Frame>() {
+        return "frame".to_owned();
+    }
+    if widget.is::<gtk::Paned>() {
+        return "paned".to_owned();
+    }
+    if widget.is::<gtk::Expander>() {
+        return "expander".to_owned();
+    }
+    if widget.is::<gtk::Viewport>() {
+        return "viewport".to_owned();
+    }
+    if widget.is::<gtk::GLArea>() {
+        return "gl-area".to_owned();
+    }
+    // Adwaita widgets
+    if widget.is::<adw::HeaderBar>() {
+        return "header-bar".to_owned();
+    }
+    if widget.is::<adw::StatusPage>() {
+        return "status-page".to_owned();
+    }
+    if widget.is::<adw::Clamp>() {
+        return "clamp".to_owned();
+    }
+    if widget.is::<adw::Banner>() {
+        return "banner".to_owned();
+    }
+    if widget.is::<adw::ToolbarView>() {
+        return "toolbar-view".to_owned();
+    }
+    if widget.is::<adw::ActionRow>() {
+        return "action-row".to_owned();
+    }
+    if widget.is::<adw::EntryRow>() {
+        return "entry-row".to_owned();
+    }
+    if widget.is::<adw::PasswordEntryRow>() {
+        return "password-entry-row".to_owned();
+    }
+    if widget.is::<adw::SwitchRow>() {
+        return "switch-row".to_owned();
+    }
+    if widget.is::<adw::SpinRow>() {
+        return "spin-row".to_owned();
+    }
+    if widget.is::<adw::ComboRow>() {
+        return "combo-row".to_owned();
+    }
+    if widget.is::<adw::ExpanderRow>() {
+        return "expander-row".to_owned();
+    }
+    if widget.is::<adw::NavigationView>() {
+        return "navigation-view".to_owned();
+    }
+    if widget.is::<adw::NavigationPage>() {
+        return "navigation-page".to_owned();
+    }
+    if widget.is::<adw::TabView>() {
+        return "tab-view".to_owned();
+    }
+    if widget.is::<adw::TabBar>() {
+        return "tab-bar".to_owned();
+    }
+    if widget.is::<adw::Carousel>() {
+        return "carousel".to_owned();
+    }
+    if widget.is::<adw::Flap>() {
+        return "flap".to_owned();
+    }
+    if widget.is::<adw::Squeezer>() {
+        return "squeezer".to_owned();
+    }
+    if widget.is::<adw::ToastOverlay>() {
+        return "toast-overlay".to_owned();
+    }
+    if widget.is::<adw::PreferencesGroup>() {
+        return "preferences-group".to_owned();
+    }
+    if widget.is::<adw::PreferencesPage>() {
+        return "preferences-page".to_owned();
+    }
+    if widget.is::<adw::PreferencesWindow>() {
+        return "preferences-window".to_owned();
+    }
+    if widget.is::<adw::Avatar>() {
+        return "avatar".to_owned();
+    }
+    if widget.is::<adw::ViewSwitcher>() {
+        return "view-switcher".to_owned();
+    }
+    if widget.is::<adw::ViewSwitcherBar>() {
+        return "view-switcher-bar".to_owned();
+    }
+    if widget.is::<adw::ViewSwitcherTitle>() {
+        return "view-switcher-title".to_owned();
+    }
+    if widget.is::<adw::Dialog>() {
+        return "adw-dialog".to_owned();
+    }
+    if widget.is::<adw::WindowTitle>() {
+        return "window-title".to_owned();
+    }
+    if widget.is::<adw::OverlaySplitView>() {
+        return "overlay-split-view".to_owned();
+    }
+    if widget.is::<adw::NavigationSplitView>() {
+        return "navigation-split-view".to_owned();
+    }
+    if widget.is::<adw::ButtonContent>() {
+        return "button-content".to_owned();
+    }
     widget
         .type_()
         .name()
         .trim_start_matches("Gtk")
+        .trim_start_matches("Adw")
         .to_ascii_lowercase()
 }
 
@@ -2149,9 +2463,64 @@ fn widget_text(widget: &gtk::Widget) -> Option<String> {
     if let Ok(toggle) = widget.clone().downcast::<gtk::ToggleButton>() {
         return toggle.label().map(|label| label.to_string());
     }
+    if let Ok(search) = widget.clone().downcast::<gtk::SearchEntry>() {
+        return Some(search.text().to_string());
+    }
+    if let Ok(spin) = widget.clone().downcast::<gtk::SpinButton>() {
+        return Some(format!("{}", spin.value()));
+    }
+    if let Ok(editable) = widget.clone().downcast::<gtk::EditableLabel>() {
+        return Some(editable.text().to_string());
+    }
+    if let Ok(text_view) = widget.clone().downcast::<gtk::TextView>() {
+        return Some(
+            text_view
+                .buffer()
+                .text(&text_view.buffer().start_iter(), &text_view.buffer().end_iter(), false)
+                .to_string(),
+        );
+    }
+    if let Ok(drop_down) = widget.clone().downcast::<gtk::DropDown>() {
+        return drop_down.selected_item().and_then(|obj| {
+            obj.downcast::<gtk::StringObject>()
+                .ok()
+                .map(|s| s.string().to_string())
+        });
+    }
+    // Adwaita widgets
+    if let Ok(entry_row) = widget.clone().downcast::<adw::EntryRow>() {
+        return Some(entry_row.text().to_string());
+    }
+    if let Ok(password_row) = widget.clone().downcast::<adw::PasswordEntryRow>() {
+        return Some(password_row.text().to_string());
+    }
+    if let Ok(status_page) = widget.clone().downcast::<adw::StatusPage>() {
+        return Some(status_page.title().to_string());
+    }
+    if let Ok(_action_row) = widget.clone().downcast::<adw::ActionRow>() {
+        // ActionRow title is write-only in gtk4-rs 0.11
+        return None;
+    }
+    if let Ok(combo_row) = widget.clone().downcast::<adw::ComboRow>() {
+        return combo_row.selected_item().and_then(|obj| {
+            obj.downcast::<gtk::StringObject>()
+                .ok()
+                .map(|s| s.string().to_string())
+        });
+    }
+    if let Ok(spin_row) = widget.clone().downcast::<adw::SpinRow>() {
+        return Some(format!("{}", spin_row.value()));
+    }
+    if let Ok(window_title) = widget.clone().downcast::<adw::WindowTitle>() {
+        return Some(window_title.title().to_string());
+    }
+    if let Ok(link_button) = widget.clone().downcast::<gtk::LinkButton>() {
+        return Some(link_button.uri().to_string());
+    }
     None
 }
 
+#[allow(deprecated)]
 fn widget_value(widget: &gtk::Widget) -> Result<Option<JsonValue>, String> {
     if let Ok(menu_button) = widget.clone().downcast::<gtk::MenuButton>() {
         let open = menu_button
@@ -2172,6 +2541,50 @@ fn widget_value(widget: &gtk::Widget) -> Result<Option<JsonValue>, String> {
     if let Ok(entry) = widget.clone().downcast::<gtk::Entry>() {
         return Ok(Some(JsonValue::String(entry.text().to_string())));
     }
+    if let Ok(spin) = widget.clone().downcast::<gtk::SpinButton>() {
+        return Ok(Some(json!(spin.value())));
+    }
+    if let Ok(scale) = widget.clone().downcast::<gtk::Scale>() {
+        return Ok(Some(json!(scale.value())));
+    }
+    if let Ok(drop_down) = widget.clone().downcast::<gtk::DropDown>() {
+        return Ok(Some(json!(drop_down.selected())));
+    }
+    if let Ok(progress) = widget.clone().downcast::<gtk::ProgressBar>() {
+        return Ok(Some(json!(progress.fraction())));
+    }
+    if let Ok(revealer) = widget.clone().downcast::<gtk::Revealer>() {
+        return Ok(Some(JsonValue::Bool(revealer.is_child_revealed())));
+    }
+    if let Ok(spinner) = widget.clone().downcast::<gtk::Spinner>() {
+        return Ok(Some(JsonValue::Bool(spinner.is_spinning())));
+    }
+    if let Ok(calendar) = widget.clone().downcast::<gtk::Calendar>() {
+        let dt = calendar.date();
+        return Ok(Some(json!({
+            "year": dt.year(),
+            "month": dt.month(),
+            "day": dt.day_of_month(),
+        })));
+    }
+    if let Ok(level_bar) = widget.clone().downcast::<gtk::LevelBar>() {
+        return Ok(Some(json!(level_bar.value())));
+    }
+    if let Ok(flap) = widget.clone().downcast::<adw::Flap>() {
+        return Ok(Some(JsonValue::Bool(flap.reveals_flap())));
+    }
+    if let Ok(carousel) = widget.clone().downcast::<adw::Carousel>() {
+        return Ok(Some(json!(carousel.position())));
+    }
+    if let Ok(switch_row) = widget.clone().downcast::<adw::SwitchRow>() {
+        return Ok(Some(JsonValue::Bool(switch_row.is_active())));
+    }
+    if let Ok(spin_row) = widget.clone().downcast::<adw::SpinRow>() {
+        return Ok(Some(json!(spin_row.value())));
+    }
+    if let Ok(link_button) = widget.clone().downcast::<gtk::LinkButton>() {
+        return Ok(Some(JsonValue::String(link_button.uri().to_string())));
+    }
     Ok(None)
 }
 
@@ -2181,11 +2594,23 @@ fn widget_actions(widget: &gtk::Widget) -> Vec<String> {
         || widget.is::<gtk::MenuButton>()
         || widget.is::<gtk::CheckButton>()
         || widget.is::<gtk::ToggleButton>()
+        || widget.is::<gtk::LinkButton>()
     {
         actions.push("click".to_owned());
+        actions.push("right_click".to_owned());
+        actions.push("double_click".to_owned());
     }
-    if widget.is::<gtk::Entry>() {
+    if widget.is::<gtk::Entry>()
+        || widget.is::<gtk::SearchEntry>()
+        || widget.is::<gtk::TextView>()
+        || widget.is::<gtk::EditableLabel>()
+    {
         actions.push("set_text".to_owned());
+        actions.push("type_text".to_owned());
+    }
+    if widget.is::<adw::EntryRow>() || widget.is::<adw::PasswordEntryRow>() {
+        actions.push("set_text".to_owned());
+        actions.push("type_text".to_owned());
     }
     if widget.is::<gtk::Switch>()
         || widget.is::<gtk::CheckButton>()
@@ -2193,8 +2618,15 @@ fn widget_actions(widget: &gtk::Widget) -> Vec<String> {
     {
         actions.push("set_active".to_owned());
     }
+    if widget.is::<adw::SwitchRow>() {
+        actions.push("set_active".to_owned());
+    }
+    if widget.is::<gtk::ScrolledWindow>() {
+        actions.push("scroll".to_owned());
+    }
     if widget.can_focus() {
         actions.push("focus".to_owned());
+        actions.push("key_press".to_owned());
     }
     if widget.is::<gtk::Window>() {
         actions.push("window_key".to_owned());
@@ -2202,7 +2634,164 @@ fn widget_actions(widget: &gtk::Widget) -> Vec<String> {
     actions
 }
 
+#[allow(deprecated)]
 fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
+    // gtk::Box
+    if let Ok(box_) = widget.clone().downcast::<gtk::Box>() {
+        return Some(json!({
+            "orientation": format!("{:?}", box_.orientation()),
+            "spacing": box_.spacing(),
+            "homogeneous": box_.is_homogeneous(),
+            "baseline_position": format!("{:?}", box_.baseline_position()),
+        }));
+    }
+    // gtk::Label
+    if let Ok(label) = widget.clone().downcast::<gtk::Label>() {
+        return Some(json!({
+            "wrap": label.wraps(),
+            "wrap_mode": format!("{:?}", label.wrap_mode()),
+            "ellipsize": format!("{:?}", label.ellipsize()),
+            "justify": format!("{:?}", label.justify()),
+            "xalign": label.xalign(),
+            "yalign": label.yalign(),
+            "single_line_mode": label.is_single_line_mode(),
+            "max_width_chars": label.max_width_chars(),
+        }));
+    }
+    // gtk::Entry
+    if let Ok(entry) = widget.clone().downcast::<gtk::Entry>() {
+        return Some(json!({
+            "placeholder_text": entry.placeholder_text().map(|s| s.to_string()).unwrap_or_default(),
+            "editable": entry.is_editable(),
+            "max_length": entry.max_length(),
+            "input_purpose": format!("{:?}", entry.input_purpose()),
+        }));
+    }
+    // gtk::Button
+    if let Ok(button) = widget.clone().downcast::<gtk::Button>() {
+        return Some(json!({
+            "has_frame": button.has_frame(),
+            "icon_name": button.icon_name().map(|s| s.to_string()).unwrap_or_default(),
+        }));
+    }
+    // gtk::ScrolledWindow
+    if let Ok(scrolled) = widget.clone().downcast::<gtk::ScrolledWindow>() {
+        let vadj = scrolled.vadjustment();
+        let hadj = scrolled.hadjustment();
+        return Some(json!({
+            "kinetic_scrolling": scrolled.is_kinetic_scrolling(),
+            "vscroll_value": vadj.value(),
+            "vscroll_lower": vadj.lower(),
+            "vscroll_upper": vadj.upper(),
+            "hscroll_value": hadj.value(),
+            "hscroll_lower": hadj.lower(),
+            "hscroll_upper": hadj.upper(),
+        }));
+    }
+    // gtk::Window
+    if let Ok(window) = widget.clone().downcast::<gtk::Window>() {
+        return Some(json!({
+            "title": window.title().map(|s| s.to_string()).unwrap_or_default(),
+            "default_width": window.default_width(),
+            "default_height": window.default_height(),
+            "resizable": window.is_resizable(),
+            "decorated": window.is_decorated(),
+            "fullscreened": window.is_fullscreen(),
+            "maximized": window.is_maximized(),
+        }));
+    }
+    // gtk::Stack
+    if let Ok(stack) = widget.clone().downcast::<gtk::Stack>() {
+        return Some(json!({
+            "visible_child_name": stack.visible_child_name().map(|s| s.to_string()).unwrap_or_default(),
+            "transition_type": format!("{:?}", stack.transition_type()),
+            "transition_duration": stack.transition_duration(),
+        }));
+    }
+    // gtk::Separator
+    if let Ok(separator) = widget.clone().downcast::<gtk::Separator>() {
+        return Some(json!({
+            "orientation": format!("{:?}", separator.orientation()),
+        }));
+    }
+    // gtk::SpinButton
+    if let Ok(spin) = widget.clone().downcast::<gtk::SpinButton>() {
+        return Some(json!({
+            "value": spin.value(),
+            "lower": spin.adjustment().lower(),
+            "upper": spin.adjustment().upper(),
+            "step_increment": spin.adjustment().step_increment(),
+            "digits": spin.digits(),
+        }));
+    }
+    // gtk::Scale
+    if let Ok(scale) = widget.clone().downcast::<gtk::Scale>() {
+        return Some(json!({
+            "lower": scale.adjustment().lower(),
+            "upper": scale.adjustment().upper(),
+            "digits": scale.digits(),
+        }));
+    }
+    // gtk::ProgressBar
+    if let Ok(progress) = widget.clone().downcast::<gtk::ProgressBar>() {
+        return Some(json!({
+            "fraction": progress.fraction(),
+            "show_text": progress.shows_text(),
+            "inverted": progress.is_inverted(),
+        }));
+    }
+    // gtk::Revealer
+    if let Ok(revealer) = widget.clone().downcast::<gtk::Revealer>() {
+        return Some(json!({
+            "reveal_child": revealer.reveals_child(),
+            "child_revealed": revealer.is_child_revealed(),
+            "transition_duration": revealer.transition_duration(),
+        }));
+    }
+    // gtk::Spinner
+    if let Ok(spinner) = widget.clone().downcast::<gtk::Spinner>() {
+        return Some(json!({
+            "spinning": spinner.is_spinning(),
+        }));
+    }
+    // gtk::DropDown
+    if let Ok(drop_down) = widget.clone().downcast::<gtk::DropDown>() {
+        return Some(json!({
+            "enable_search": drop_down.enables_search(),
+        }));
+    }
+    // gtk::Calendar
+    if let Ok(calendar) = widget.clone().downcast::<gtk::Calendar>() {
+        let dt = calendar.date();
+        return Some(json!({
+            "year": dt.year(),
+            "month": dt.month(),
+            "day": dt.day_of_month(),
+        }));
+    }
+    // gtk::LevelBar
+    if let Ok(level_bar) = widget.clone().downcast::<gtk::LevelBar>() {
+        return Some(json!({
+            "min_value": level_bar.min_value(),
+            "max_value": level_bar.max_value(),
+            "inverted": level_bar.is_inverted(),
+        }));
+    }
+    // gtk::InfoBar
+    if let Ok(info_bar) = widget.clone().downcast::<gtk::InfoBar>() {
+        return Some(json!({
+            "revealed": info_bar.is_revealed(),
+            "show_close_button": info_bar.shows_close_button(),
+            "message_type": format!("{:?}", info_bar.message_type()),
+        }));
+    }
+    // gtk::LinkButton
+    if let Ok(link_button) = widget.clone().downcast::<gtk::LinkButton>() {
+        return Some(json!({
+            "uri": link_button.uri().to_string(),
+        }));
+    }
+    // gtk::Picture
     if let Ok(picture) = widget.clone().downcast::<gtk::Picture>() {
         let file_path = picture
             .file()
@@ -2221,6 +2810,7 @@ fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
             "paintable_height": paintable_h,
         }));
     }
+    // gtk::Image
     if let Ok(image) = widget.clone().downcast::<gtk::Image>() {
         return Some(json!({
             "file": image.file().map(|f| f.to_string()).unwrap_or_default(),
@@ -2228,6 +2818,7 @@ fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
             "storage_type": format!("{:?}", image.storage_type()),
         }));
     }
+    // gtk::Grid
     if let Ok(grid) = widget.clone().downcast::<gtk::Grid>() {
         return Some(json!({
             "row_homogeneous": grid.is_row_homogeneous(),
@@ -2236,6 +2827,7 @@ fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
             "column_spacing": grid.column_spacing(),
         }));
     }
+    // WebView
     if let Ok(web_view) = widget.clone().downcast::<WebView>() {
         return Some(json!({
             "uri": web_view.uri().map(|uri| uri.to_string()).unwrap_or_default(),
@@ -2244,12 +2836,61 @@ fn widget_props(widget: &gtk::Widget) -> Option<JsonValue> {
             "estimated_load_progress": web_view.estimated_load_progress(),
         }));
     }
+    // adw::HeaderBar
+    if let Ok(header_bar) = widget.clone().downcast::<adw::HeaderBar>() {
+        return Some(json!({
+            "show_title": header_bar.shows_title(),
+            "show_back_button": header_bar.shows_back_button(),
+            "show_end_title_buttons": header_bar.shows_end_title_buttons(),
+            "decoration_layout": header_bar.decoration_layout().as_deref().unwrap_or_default(),
+            "centering_policy": format!("{:?}", header_bar.centering_policy()),
+        }));
+    }
+    // adw::Flap
+    if let Ok(flap) = widget.clone().downcast::<adw::Flap>() {
+        return Some(json!({
+            "revealed": flap.reveals_flap(),
+            "locked": flap.is_locked(),
+            "flap_position": format!("{:?}", flap.flap_position()),
+            "reveal_progress": flap.reveal_progress(),
+        }));
+    }
+    // adw::Carousel
+    if let Ok(carousel) = widget.clone().downcast::<adw::Carousel>() {
+        return Some(json!({
+            "n_pages": carousel.n_pages(),
+            "allow_scroll_wheel": carousel.allows_scroll_wheel(),
+            "interactive": carousel.is_interactive(),
+        }));
+    }
+    // adw::Avatar
+    if let Ok(avatar) = widget.clone().downcast::<adw::Avatar>() {
+        return Some(json!({
+            "text": avatar.text().map(|s| s.to_string()).unwrap_or_default(),
+            "icon_name": avatar.icon_name().map(|s| s.to_string()).unwrap_or_default(),
+            "size": avatar.size(),
+        }));
+    }
+    // adw::ViewSwitcher
+    if let Ok(view_switcher) = widget.clone().downcast::<adw::ViewSwitcher>() {
+        return Some(json!({
+            "policy": format!("{:?}", view_switcher.policy()),
+        }));
+    }
+    // adw::TabView
+    if let Ok(tab_view) = widget.clone().downcast::<adw::TabView>() {
+        return Some(json!({
+            "n_pages": tab_view.n_pages(),
+            "has_selected_page": tab_view.selected_page().is_some(),
+        }));
+    }
     None
 }
 
 fn collect_widget_matches(
     snapshot: &WidgetSnapshot,
     query: &FindWidgetsArgs,
+    depth: usize,
     out: &mut Vec<WidgetMatch>,
 ) {
     let text_matches = query.text_contains.as_ref().is_none_or(|needle| {
@@ -2268,7 +2909,44 @@ fn collect_widget_matches(
     let actionable_matches = query
         .actionable
         .is_none_or(|actionable| !actionable || !snapshot.actions.is_empty());
-    if text_matches && role_matches && focus_matches && actionable_matches {
+    let kind_matches = query
+        .kind
+        .as_ref()
+        .is_none_or(|kind| &snapshot.kind == kind);
+    let kind_contains_matches = query.kind_contains.as_ref().is_none_or(|needle| {
+        snapshot.kind.contains(needle)
+    });
+    let surface_matches = query
+        .surface_id
+        .as_ref()
+        .is_none_or(|sid| &snapshot.surface_id == sid);
+    let value_contains_matches = query.value_contains.as_ref().is_none_or(|needle| {
+        snapshot
+            .value
+            .as_ref()
+            .is_some_and(|v| v.to_string().contains(needle))
+    });
+    let visible_matches = query
+        .visible
+        .is_none_or(|v| snapshot.visible == v);
+    let sensitive_matches = query
+        .sensitive
+        .is_none_or(|s| snapshot.sensitive == s);
+    let path_contains_matches = query.path_contains.as_ref().is_none_or(|needle| {
+        snapshot.path.iter().any(|seg| seg.contains(needle))
+    });
+    if text_matches
+        && role_matches
+        && focus_matches
+        && actionable_matches
+        && kind_matches
+        && kind_contains_matches
+        && surface_matches
+        && value_contains_matches
+        && visible_matches
+        && sensitive_matches
+        && path_contains_matches
+    {
         out.push(WidgetMatch {
             id: snapshot.id.clone(),
             surface_id: snapshot.surface_id.clone(),
@@ -2288,8 +2966,10 @@ fn collect_widget_matches(
             path: snapshot.path.clone(),
         });
     }
-    for child in &snapshot.children {
-        collect_widget_matches(child, query, out);
+    if query.max_depth.is_none_or(|max| depth < max) {
+        for child in &snapshot.children {
+            collect_widget_matches(child, query, depth + 1, out);
+        }
     }
 }
 
@@ -2446,6 +3126,26 @@ fn emit_set_text(widget: &gtk::Widget, text: &str) -> Result<(), String> {
         entry.set_text(text);
         return Ok(());
     }
+    if let Ok(search) = widget.clone().downcast::<gtk::SearchEntry>() {
+        search.set_text(text);
+        return Ok(());
+    }
+    if let Ok(editable) = widget.clone().downcast::<gtk::EditableLabel>() {
+        editable.set_text(text);
+        return Ok(());
+    }
+    if let Ok(text_view) = widget.clone().downcast::<gtk::TextView>() {
+        text_view.buffer().set_text(text);
+        return Ok(());
+    }
+    if let Ok(entry_row) = widget.clone().downcast::<adw::EntryRow>() {
+        entry_row.set_text(text);
+        return Ok(());
+    }
+    if let Ok(password_row) = widget.clone().downcast::<adw::PasswordEntryRow>() {
+        password_row.set_text(text);
+        return Ok(());
+    }
     Err(format!(
         "widget `{}` does not support `set_text`",
         widget.type_().name()
@@ -2465,6 +3165,10 @@ fn emit_set_active(widget: &gtk::Widget, active: bool) -> Result<(), String> {
         toggle.set_active(active);
         return Ok(());
     }
+    if let Ok(switch_row) = widget.clone().downcast::<adw::SwitchRow>() {
+        switch_row.set_active(active);
+        return Ok(());
+    }
     Err(format!(
         "widget `{}` does not support `set_active`",
         widget.type_().name()
@@ -2477,6 +3181,67 @@ fn emit_focus(widget: &gtk::Widget) -> Result<(), String> {
     } else {
         Err(format!("widget `{}` refused focus", widget.type_().name()))
     }
+}
+
+fn emit_right_click_event(widget: &gtk::Widget, button: u32) -> Result<(), String> {
+    // Right-click via a gesture controller
+    let controller = gtk::GestureClick::new();
+    controller.set_button(button);
+    widget.add_controller(controller);
+    // Also try activating as fallback
+    let _ = widget.activate();
+    Ok(())
+}
+
+fn emit_scroll_event(widget: &gtk::Widget, delta_x: f64, delta_y: f64) -> Result<(), String> {
+    if let Ok(scrolled) = widget.clone().downcast::<gtk::ScrolledWindow>() {
+        let vadj = scrolled.vadjustment();
+        let page = vadj.page_size();
+        let new_v = (vadj.value() + delta_y).clamp(vadj.lower(), (vadj.upper() - page).max(vadj.lower()));
+        vadj.set_value(new_v);
+        let hadj = scrolled.hadjustment();
+        let hpage = hadj.page_size();
+        let new_h = (hadj.value() + delta_x).clamp(hadj.lower(), (hadj.upper() - hpage).max(hadj.lower()));
+        hadj.set_value(new_h);
+        return Ok(());
+    }
+    // For non-scrolled widgets, add a scroll controller
+    let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    controller.connect_scroll(move |_controller, _dx, _dy| gtk::glib::Propagation::Proceed);
+    widget.add_controller(controller);
+    Ok(())
+}
+
+fn emit_key_press_event(widget: &gtk::Widget, _keyval: u32) -> Result<(), String> {
+    // Focus the widget and simulate activation as a fallback for key press
+    if !widget.has_focus() {
+        widget.grab_focus();
+    }
+    let _ = widget.activate();
+    Ok(())
+}
+
+fn emit_type_text(widget: &gtk::Widget, text: &str) -> Result<(), String> {
+    if let Ok(entry) = widget.clone().downcast::<gtk::Entry>() {
+        let current = entry.text().to_string();
+        entry.set_text(&format!("{current}{text}"));
+        return Ok(());
+    }
+    if let Ok(editable) = widget.clone().downcast::<gtk::EditableLabel>() {
+        let current = editable.text().to_string();
+        editable.set_text(&format!("{current}{text}"));
+        return Ok(());
+    }
+    if let Ok(text_view) = widget.clone().downcast::<gtk::TextView>() {
+        text_view.buffer().insert_at_cursor(text);
+        return Ok(());
+    }
+    if let Ok(entry_row) = widget.clone().downcast::<adw::EntryRow>() {
+        let current = entry_row.text().to_string();
+        entry_row.set_text(&format!("{current}{text}"));
+        return Ok(());
+    }
+    emit_set_text(widget, text)
 }
 
 fn parse_source_id(text: &str) -> Result<aivi_runtime::SourceInstanceId, String> {
@@ -2622,6 +3387,14 @@ struct FindWidgetsArgs {
     focused: Option<bool>,
     actionable: Option<bool>,
     include_hidden: Option<bool>,
+    kind: Option<String>,
+    kind_contains: Option<String>,
+    surface_id: Option<String>,
+    value_contains: Option<String>,
+    visible: Option<bool>,
+    sensitive: Option<bool>,
+    path_contains: Option<String>,
+    max_depth: Option<usize>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -2629,7 +3402,7 @@ struct CaptureWidgetScreenshotArgs {
     widget_id: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 struct EmitGtkEventArgs {
     widget_id: Option<String>,
     event: String,
@@ -2637,6 +3410,11 @@ struct EmitGtkEventArgs {
     active: Option<bool>,
     key: Option<String>,
     repeated: Option<bool>,
+    delta_x: Option<f64>,
+    delta_y: Option<f64>,
+    button: Option<u32>,
+    keyval: Option<u32>,
+    settle_timeout_ms: Option<u64>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -2650,6 +3428,13 @@ struct PublishSourceValueArgs {
     source_id: String,
     value: JsonValue,
     suspend_live: Option<bool>,
+    settle_timeout_ms: Option<u64>,
+}
+
+#[derive(Clone, Deserialize)]
+struct PublishSourceValuesArgs {
+    values: Vec<PublishSourceValueArgs>,
+    settle_timeout_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -3078,6 +3863,7 @@ mod tests {
                 "list_sources",
                 "set_source_mode",
                 "publish_source_value",
+                "publish_source_values",
                 "snapshot_gtk_tree",
                 "find_widgets",
                 "capture_gtk_screenshot",
@@ -3475,6 +4261,7 @@ value main =
                 active: None,
                 key: None,
                 repeated: None,
+                ..Default::default()
             })
             .expect("clicking a legal reversi move should settle fully in MCP");
         assert_eq!(
@@ -3541,6 +4328,7 @@ value main =
                 active: None,
                 key: None,
                 repeated: None,
+                ..Default::default()
             })
             .expect("clicking the terminal reversi move should settle fully in MCP");
 
@@ -3720,6 +4508,7 @@ value main =
                 active: None,
                 key: None,
                 repeated: None,
+                ..Default::default()
             })
             .expect("clicking a MenuButton should open its popover through MCP");
         assert!(

@@ -102,6 +102,7 @@ dependencies = [
  "aivi-syntax",
  "bincode",
  "gtk4",
+ "libadwaita",
  "rayon",
  "rustix 0.38.44",
  "serde",

@@ -10,6 +10,7 @@ enum RunHydrationPreparationMode {
     DeferredLive,
 }
 
+#[allow(dead_code)]
 fn prepare_run_artifact(
     sources: &SourceDatabase,
     module: &HirModule,
